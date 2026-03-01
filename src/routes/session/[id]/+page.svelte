@@ -186,6 +186,8 @@
 					break;
 				case 'message_start':
 					if (event.message?.role === 'assistant') {
+						// Reload to pick up previously completed messages
+						reloadMessages();
 						currentAssistantText = '';
 						currentThinkingText = '';
 					}
@@ -201,11 +203,6 @@
 					break;
 				}
 				case 'message_end':
-					// A message just finished — add it to local state so it persists
-					if (event.entry) {
-						currentMessages = [...currentMessages, event.entry];
-						scrollToBottom();
-					}
 					break;
 				case 'tool_execution_start':
 				case 'tool_execution_update':
@@ -463,7 +460,7 @@
 			{/each}
 
 			<!-- Streaming assistant text -->
-			{#if streaming && currentAssistantText}
+			{#if streaming}
 				<div class="chat chat-start mb-2">
 					<div class="chat-bubble max-w-[85vw] md:max-w-xl">
 						{#if currentThinkingText}
