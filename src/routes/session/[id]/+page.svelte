@@ -161,6 +161,13 @@
 			const event = JSON.parse(e.data);
 
 			switch (event.type) {
+				case 'stream_sync':
+					// Late-join catch-up: server sends accumulated state when we subscribe mid-stream
+					streaming = event.isStreaming;
+					currentAssistantText = event.assistantText ?? '';
+					currentThinkingText = event.thinkingText ?? '';
+					scrollToBottom();
+					break;
 				case 'agent_start':
 					streaming = true;
 					currentAssistantText = '';
@@ -238,6 +245,8 @@
 			eventSource?.close();
 			eventSource = null;
 			if (sessionActive) {
+				// Reload messages to pick up any events missed during the disconnect gap
+				reloadMessages();
 				setTimeout(() => connectSSE(sessionId), 2000);
 			}
 		};
@@ -406,11 +415,18 @@
 		<div class="navbar-end gap-1">
 			{#if statusList.length > 0}
 				{#each statusList as [, text]}
-					<span class="badge badge-xs badge-info">{text}</span>
+					<span class="badge badge-xs badge-info max-w-[100px] md:max-w-[200px] truncate" title={text}>{text}</span>
 				{/each}
 			{/if}
 			{#if sessionActive}
-				<span class="badge badge-success badge-xs">live</span>
+				{#if streaming}
+					<span class="badge badge-warning badge-xs gap-1">
+						<span class="loading loading-dots loading-xs"></span>
+						working
+					</span>
+				{:else}
+					<span class="badge badge-success badge-xs">live</span>
+				{/if}
 				<button class="btn btn-ghost btn-xs text-error" onclick={handleAbort}>Abort</button>
 				<button class="btn btn-ghost btn-xs" onclick={handleStop}>Stop</button>
 			{:else}

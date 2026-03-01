@@ -51,6 +51,11 @@ export function getDb(): Database {
 			cwd TEXT PRIMARY KEY
 		)`);
 
+		db.run(`CREATE TABLE IF NOT EXISTS project_settings (
+			cwd         TEXT PRIMARY KEY,
+			dev_command TEXT
+		)`);
+
 		db.run('CREATE INDEX IF NOT EXISTS idx_meta_mtime ON session_meta(mtime_ms)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_meta_last_modified ON session_meta(last_modified)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_active_status ON active_sessions(status)');
@@ -70,6 +75,25 @@ export function addFavoriteProject(cwd: string) {
 
 export function removeFavoriteProject(cwd: string) {
 	getDb().run('DELETE FROM favorite_projects WHERE cwd = ?', [cwd]);
+}
+
+// Project settings (dev command, etc.)
+export function getDevCommand(cwd: string): string | null {
+	const row = getDb().query('SELECT dev_command FROM project_settings WHERE cwd = ?').get(cwd) as { dev_command: string | null } | null;
+	return row?.dev_command ?? null;
+}
+
+export function setDevCommand(cwd: string, command: string | null) {
+	if (command) {
+		getDb().run('INSERT OR REPLACE INTO project_settings (cwd, dev_command) VALUES (?, ?)', [cwd, command]);
+	} else {
+		getDb().run('DELETE FROM project_settings WHERE cwd = ?', [cwd]);
+	}
+}
+
+export function getAllDevCommands(): Map<string, string> {
+	const rows = getDb().query('SELECT cwd, dev_command FROM project_settings WHERE dev_command IS NOT NULL').all() as { cwd: string; dev_command: string }[];
+	return new Map(rows.map(r => [r.cwd, r.dev_command]));
 }
 
 // Prepared statements — initialized lazily after getDb()

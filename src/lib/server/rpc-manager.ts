@@ -11,6 +11,8 @@ interface ManagedSession {
 	process: ReturnType<typeof Bun.spawn>;
 	subscribers: Set<(event: any) => void>;
 	isStreaming: boolean;
+	streamingAssistantText: string;
+	streamingThinkingText: string;
 	buffer: string;
 	pendingCommands: Map<string, { resolve: (data: any) => void; reject: (err: Error) => void }>;
 	shutdownRequested: boolean;
@@ -113,8 +115,28 @@ function readProcessOutput(managed: ManagedSession) {
 
 					updateEventThrottled(managed.sessionId);
 
-					if (parsed.type === 'agent_start') managed.isStreaming = true;
-					if (parsed.type === 'agent_end') managed.isStreaming = false;
+					if (parsed.type === 'agent_start') {
+						managed.isStreaming = true;
+						managed.streamingAssistantText = '';
+						managed.streamingThinkingText = '';
+					}
+					if (parsed.type === 'agent_end') {
+						managed.isStreaming = false;
+						managed.streamingAssistantText = '';
+						managed.streamingThinkingText = '';
+					}
+					if (parsed.type === 'message_update') {
+						const ame = parsed.assistantMessageEvent;
+						if (ame?.type === 'text_delta') {
+							managed.streamingAssistantText += ame.delta;
+						} else if (ame?.type === 'thinking_delta') {
+							managed.streamingThinkingText += ame.delta;
+						}
+					}
+					if (parsed.type === 'message_start' && parsed.message?.role === 'assistant') {
+						managed.streamingAssistantText = '';
+						managed.streamingThinkingText = '';
+					}
 
 					for (const cb of managed.subscribers) cb(parsed);
 				} catch {
@@ -170,6 +192,8 @@ export async function resumeSession(
 		process: proc,
 		subscribers: new Set(),
 		isStreaming: false,
+		streamingAssistantText: '',
+		streamingThinkingText: '',
 		buffer: '',
 		pendingCommands: new Map(),
 		shutdownRequested: false
@@ -199,6 +223,8 @@ export async function createSession(cwd: string, model?: string): Promise<string
 		process: proc,
 		subscribers: new Set(),
 		isStreaming: false,
+		streamingAssistantText: '',
+		streamingThinkingText: '',
 		buffer: '',
 		pendingCommands: new Map(),
 		shutdownRequested: false
@@ -286,6 +312,17 @@ export function subscribe(sessionId: string, callback: (event: any) => void): ()
 		return () => {};
 	}
 	managed.subscribers.add(callback);
+
+	// Send sync event so late subscribers can catch up with current streaming state
+	if (managed.isStreaming) {
+		callback({
+			type: 'stream_sync',
+			isStreaming: true,
+			assistantText: managed.streamingAssistantText,
+			thinkingText: managed.streamingThinkingText
+		});
+	}
+
 	return () => managed.subscribers.delete(callback);
 }
 
