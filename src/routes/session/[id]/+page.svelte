@@ -3,8 +3,10 @@
 	import BranchIndicator from '$lib/components/BranchIndicator.svelte';
 	import MessageInput from '$lib/components/MessageInput.svelte';
 	import ExtensionUIModal from '$lib/components/ExtensionUIModal.svelte';
+	import SessionTabs from '$lib/components/SessionTabs.svelte';
 	import { timeAgo } from '$lib/utils';
 	import { getPathToNode, isAncestorOf, findLeafFrom, getBranchPoints } from '$lib/session-tree';
+	import { browser } from '$app/environment';
 	import type { AgentMessage, SessionTree, BranchPoint, ExtensionUIRequest } from '$lib/types';
 
 	let { data } = $props();
@@ -138,6 +140,13 @@
 		loadTail();
 	});
 
+	// Remember this project as expanded for dashboard navigation
+	$effect(() => {
+		if (browser && data.meta.cwd) {
+			localStorage.setItem('pi-expanded-project', data.meta.cwd);
+		}
+	});
+
 	// iOS keyboard handling
 	$effect(() => {
 		const vv = window.visualViewport;
@@ -200,6 +209,8 @@
 					currentAssistantText = '';
 					currentThinkingText = '';
 					reloadMessages();
+					// Auto-stop session so it can be resumed for a new conversation
+					autoStopSession();
 					break;
 				case 'session_ended':
 					streaming = false;
@@ -381,6 +392,15 @@
 		sessionActiveOverride = false;
 	}
 
+	async function autoStopSession() {
+		// Wait briefly to allow any follow-up messages to be sent
+		await new Promise((r) => setTimeout(r, 1500));
+		// Check if still not streaming (user may have sent another message)
+		if (streaming || !sessionActive) return;
+		await fetch(`/api/sessions/${data.sessionId}/stop`, { method: 'POST' });
+		sessionActiveOverride = false;
+	}
+
 	async function handleAbort() {
 		await fetch(`/api/sessions/${data.sessionId}/abort`, { method: 'POST' });
 	}
@@ -424,8 +444,25 @@
 		<div class="navbar-start">
 			<a href="/" class="btn btn-ghost btn-sm">←</a>
 		</div>
-		<div class="navbar-center flex flex-col">
-			<span class="text-sm font-semibold truncate max-w-[200px]">
+		<div class="navbar-center flex flex-col items-center">
+			<span class="text-sm font-semibold truncate max-w-[200px] flex items-center gap-1.5">
+				{#if sessionActive}
+					{#if streaming}
+						<span class="relative flex h-2.5 w-2.5 flex-shrink-0">
+							<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
+							<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
+						</span>
+					{:else if !sseConnected}
+						<span class="relative flex h-2.5 w-2.5 flex-shrink-0">
+							<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
+							<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
+						</span>
+					{:else}
+						<span class="h-2.5 w-2.5 rounded-full bg-success flex-shrink-0"></span>
+					{/if}
+				{:else}
+					<span class="h-2.5 w-2.5 rounded-full bg-base-content/20 flex-shrink-0"></span>
+				{/if}
 				{data.meta.name || data.meta.firstMessage}
 			</span>
 			<span class="text-xs text-base-content/50 truncate max-w-[200px]">
@@ -439,21 +476,20 @@
 				{/each}
 			{/if}
 			{#if sessionActive}
-				{#if streaming}
-					<span class="badge badge-warning badge-xs gap-1">
-						<span class="loading loading-dots loading-xs"></span>
-						working
-					</span>
-				{:else if !sseConnected}
-					<span class="badge badge-warning badge-xs gap-1">
-						<span class="loading loading-spinner loading-xs"></span>
-						reconnecting…
-					</span>
-				{:else}
-					<span class="badge badge-success badge-xs">live</span>
-				{/if}
-				<button class="btn btn-ghost btn-xs text-error" onclick={handleAbort}>Abort</button>
-				<button class="btn btn-ghost btn-xs" onclick={handleStop}>Stop</button>
+				<!-- Desktop: inline buttons -->
+				<button class="btn btn-ghost btn-xs text-error hidden md:inline-flex" onclick={handleAbort}>Abort</button>
+				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleStop}>Stop</button>
+				<!-- Mobile: dropdown menu -->
+				<div class="dropdown dropdown-end md:hidden">
+					<div tabindex="0" role="button" class="btn btn-ghost btn-xs">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" /></svg>
+					</div>
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-40 p-2 shadow-lg border border-base-300">
+						<li><button class="text-error" onclick={handleAbort}>Abort</button></li>
+						<li><button onclick={handleStop}>Stop</button></li>
+					</ul>
+				</div>
 			{:else}
 				<span class="text-xs text-base-content/40">
 					{timeAgo(data.meta.lastModified)}
@@ -576,6 +612,9 @@
 			</div>
 		{/each}
 	{/if}
+
+	<!-- Active session tabs -->
+	<SessionTabs currentSessionId={data.sessionId} />
 
 	<!-- Bottom bar — always visible -->
 	<div class="shrink-0">

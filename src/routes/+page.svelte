@@ -2,14 +2,36 @@
 	import { invalidateAll } from '$app/navigation';
 	import { timeAgo } from '$lib/utils';
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
+	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
+	import { getContext } from 'svelte';
+	import { browser } from '$app/environment';
 
 	let { data } = $props();
 
+	const { theme, toggleTheme } = getContext<{ theme: 'dark' | 'light'; toggleTheme: () => void }>('theme');
+
 	let search = $state('');
 	let showNewSession = $state(false);
-	let expandedProjects = $state<Set<string>>(new Set());
+	let expandedProject = $state<string | null>(
+		browser ? localStorage.getItem('pi-expanded-project') : null
+	);
 	let editingDevCommand = $state<string | null>(null);
 	let devCommandInput = $state('');
+	let creatingForProject = $state<string | null>(null);
+
+	// Persist expanded project to localStorage
+	$effect(() => {
+		if (browser) {
+			if (expandedProject) {
+				localStorage.setItem('pi-expanded-project', expandedProject);
+			} else {
+				localStorage.removeItem('pi-expanded-project');
+			}
+		}
+	});
+
+	// Compat shim: expandedProjects as a derived Set from single expandedProject
+	const expandedProjects = $derived(new Set(expandedProject ? [expandedProject] : []));
 
 	const recentCwds = $derived(
 		[...new Set(data.sessions.map((s) => s.cwd))].slice(0, 10)
@@ -82,10 +104,7 @@
 	});
 
 	function toggleCollapse(cwd: string) {
-		const next = new Set(expandedProjects);
-		if (next.has(cwd)) next.delete(cwd);
-		else next.add(cwd);
-		expandedProjects = next;
+		expandedProject = expandedProject === cwd ? null : cwd;
 	}
 
 	async function toggleFavorite(cwd: string) {
@@ -99,6 +118,8 @@
 	}
 
 	async function createSessionForProject(cwd: string) {
+		if (creatingForProject) return;
+		creatingForProject = cwd;
 		try {
 			const res = await fetch('/api/sessions/new', {
 				method: 'POST',
@@ -107,10 +128,15 @@
 			});
 			if (res.ok) {
 				const { sessionId } = await res.json();
+				// Store this project as expanded so when returning to dashboard it's open
+				if (browser) localStorage.setItem('pi-expanded-project', cwd);
 				window.location.href = `/session/${sessionId}`;
+			} else {
+				creatingForProject = null;
 			}
 		} catch (e) {
 			console.error('Failed to create session:', e);
+			creatingForProject = null;
 		}
 	}
 
@@ -190,10 +216,12 @@
 		invalidateAll();
 	}
 
-	async function deleteSession(sessionId: string, e: MouseEvent) {
-		e.preventDefault();
-		e.stopPropagation();
-		if (!confirm('Delete this session? This cannot be undone.')) return;
+	async function deleteSession(sessionId: string, e?: MouseEvent) {
+		if (e) {
+			e.preventDefault();
+			e.stopPropagation();
+		}
+		if (e && !confirm('Delete this session? This cannot be undone.')) return;
 		try {
 			await fetch(`/api/sessions/${sessionId}/delete`, { method: 'POST' });
 			invalidateAll();
@@ -228,6 +256,9 @@
 			{/if}
 			<button class="btn btn-sm btn-primary" onclick={() => (showNewSession = true)}>+ New</button>
 			<button class="btn btn-sm btn-ghost" onclick={() => invalidateAll()}>↻</button>
+			<button class="btn btn-sm btn-ghost btn-circle" onclick={toggleTheme} title="Toggle theme">
+				{#if theme === 'dark'}☀️{:else}🌙{/if}
+			</button>
 		</div>
 	</div>
 
@@ -297,8 +328,13 @@
 							class="btn btn-ghost btn-xs"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); createSessionForProject(group.cwd); }}
 							title="New session in {group.shortName}"
+							disabled={creatingForProject === group.cwd}
 						>
-							<span class="opacity-50">+</span>
+							{#if creatingForProject === group.cwd}
+								<span class="loading loading-spinner loading-xs"></span>
+							{:else}
+								<span class="opacity-50">+</span>
+							{/if}
 						</button>
 						<button
 							class="btn btn-ghost btn-xs"
@@ -347,35 +383,40 @@
 					{#if expandedProjects.has(group.cwd)}
 						<div class="border-t border-base-300">
 							{#each group.sessions as session, i (session.id)}
-								<a
-									href="/session/{session.id}"
-									class="group flex items-start gap-3 px-4 py-3 hover:bg-base-300/50 transition-colors {i > 0 ? 'border-t border-base-300/50' : ''}"
+								<SwipeToDelete
+									ondelete={() => deleteSession(session.id)}
+									disabled={activeSet.has(session.id)}
 								>
-									<div
-										class="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full {activeSet.has(session.id)
-											? 'bg-success'
-											: 'bg-base-content/20'}"
-									></div>
-									<div class="min-w-0 flex-1">
-										<div class="truncate text-sm font-medium">
-											{session.name || session.firstMessage || 'Empty session'}
-										</div>
-										<div class="mt-0.5 flex items-center gap-2 text-xs text-base-content/40">
-											<span>{timeAgo(session.lastModified)}</span>
-											<span>· {session.messageCount} msgs</span>
-											{#if session.model}
-												<span class="badge badge-xs badge-ghost">{session.model}</span>
-											{/if}
-										</div>
-									</div>
-									<button
-										class="hidden lg:flex btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity self-center flex-shrink-0 text-error/60 hover:text-error"
-										onclick={(e: MouseEvent) => deleteSession(session.id, e)}
-										title="Delete session"
+									<a
+										href="/session/{session.id}"
+										class="group flex items-start gap-3 px-4 py-3 hover:bg-base-300/50 transition-colors {i > 0 ? 'border-t border-base-300/50' : ''}"
 									>
-										✕
-									</button>
-								</a>
+										<div
+											class="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full {activeSet.has(session.id)
+												? 'bg-success'
+												: 'bg-base-content/20'}"
+										></div>
+										<div class="min-w-0 flex-1">
+											<div class="truncate text-sm font-medium">
+												{session.name || session.firstMessage || 'Empty session'}
+											</div>
+											<div class="mt-0.5 flex items-center gap-2 text-xs text-base-content/40">
+												<span>{timeAgo(session.lastModified)}</span>
+												<span>· {session.messageCount} msgs</span>
+												{#if session.model}
+													<span class="badge badge-xs badge-ghost">{session.model}</span>
+												{/if}
+											</div>
+										</div>
+										<button
+											class="hidden lg:flex btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity self-center flex-shrink-0 text-error/60 hover:text-error"
+											onclick={(e: MouseEvent) => deleteSession(session.id, e)}
+											title="Delete session"
+										>
+											✕
+										</button>
+									</a>
+								</SwipeToDelete>
 							{/each}
 						</div>
 					{/if}

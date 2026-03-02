@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { browser } from '$app/environment';
+	import { setContext } from 'svelte';
 
 	let { children } = $props();
 
@@ -12,6 +13,8 @@
 		theme = theme === 'dark' ? 'light' : 'dark';
 		if (browser) localStorage.setItem('pi-theme', theme);
 	}
+
+	setContext('theme', { get theme() { return theme; }, toggleTheme });
 </script>
 
 <svelte:head>
@@ -20,10 +23,5 @@
 </svelte:head>
 
 <div data-theme={theme} class="fixed inset-0 bg-base-100 text-base-content overflow-hidden">
-	<div class="fixed top-2 right-2 z-50">
-		<button class="btn btn-ghost btn-xs btn-circle" onclick={toggleTheme} title="Toggle theme">
-			{#if theme === 'dark'}☀️{:else}🌙{/if}
-		</button>
-	</div>
 	{@render children()}
 </div>
