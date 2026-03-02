@@ -44,8 +44,12 @@ export function getDb(): Database {
 			started_at    TEXT NOT NULL,
 			last_event_at TEXT,
 			model         TEXT,
-			status        TEXT NOT NULL DEFAULT 'starting'
+			status        TEXT NOT NULL DEFAULT 'starting',
+			socket_path   TEXT
 		)`);
+
+		// Migration: add socket_path column if missing (from older schema)
+		try { db.run('ALTER TABLE active_sessions ADD COLUMN socket_path TEXT'); } catch {}
 
 		db.run(`CREATE TABLE IF NOT EXISTS favorite_projects (
 			cwd TEXT PRIMARY KEY
