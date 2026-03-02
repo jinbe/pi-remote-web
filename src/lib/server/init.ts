@@ -11,7 +11,7 @@ export async function ensureInit() {
 	if (initialized) return;
 	initialized = true;
 
-	pruneCache();
+	await pruneCache();
 	registerCacheInvalidation();
 
 	await recoverActiveSessions();

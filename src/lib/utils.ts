@@ -15,16 +15,6 @@ export function timeAgo(dateStr: string): string {
 
 export function truncatePath(path: string, maxLen = 30): string {
 	if (!path) return '';
-	const home = '~';
-	let display = path;
-	// Try to shorten home directory
-	if (typeof window === 'undefined') {
-		// server - don't shorten
-	} else {
-		// client — can't know home, just truncate
-	}
-	if (display.length > maxLen) {
-		display = '…' + display.slice(display.length - maxLen + 1);
-	}
-	return display;
+	if (path.length <= maxLen) return path;
+	return '…' + path.slice(path.length - maxLen + 1);
 }

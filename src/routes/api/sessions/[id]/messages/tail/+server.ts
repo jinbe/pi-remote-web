@@ -4,7 +4,7 @@ import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, url }) => {
 	const filePath = decodeSessionId(params.id);
-	const count = parseInt(url.searchParams.get('count') || '20');
+	const count = Math.max(1, Math.min(200, parseInt(url.searchParams.get('count') || '20') || 20));
 	try {
 		const result = await getTailMessages(filePath, count);
 		return json(result);

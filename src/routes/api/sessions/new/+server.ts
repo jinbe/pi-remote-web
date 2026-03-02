@@ -1,13 +1,16 @@
 import { createSession } from '$lib/server/rpc-manager';
 import { json, error } from '@sveltejs/kit';
+import { existsSync } from 'fs';
+import { resolve } from 'path';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request }) => {
 	try {
 		const body = await request.json();
-		const { cwd, model } = body as { cwd: string; model?: string };
+		const { model } = body as { cwd: string; model?: string };
+		const cwd = resolve(body.cwd || '');
 
-		if (!cwd) throw error(400, 'cwd is required');
+		if (!cwd || !existsSync(cwd)) throw error(400, 'Invalid or non-existent working directory');
 
 		const sessionId = await createSession(cwd, model);
 		return json({ ok: true, sessionId });

@@ -1,5 +1,7 @@
 import { getFavoriteProjects, addFavoriteProject, removeFavoriteProject } from '$lib/server/cache';
-import { json } from '@sveltejs/kit';
+import { json, error } from '@sveltejs/kit';
+import { existsSync } from 'fs';
+import { resolve } from 'path';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = () => {
@@ -7,8 +9,14 @@ export const GET: RequestHandler = () => {
 };
 
 export const POST: RequestHandler = async ({ request }) => {
-	const { cwd, action } = (await request.json()) as { cwd: string; action: 'add' | 'remove' };
-	if (action === 'add') {
+	const body = (await request.json()) as { cwd: string; action: 'add' | 'remove' };
+	const cwd = resolve(body.cwd || '');
+
+	if (!cwd || !existsSync(cwd)) {
+		throw error(400, 'Invalid or non-existent working directory');
+	}
+
+	if (body.action === 'add') {
 		addFavoriteProject(cwd);
 	} else {
 		removeFavoriteProject(cwd);

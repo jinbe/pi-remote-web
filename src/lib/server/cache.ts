@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync } from 'fs';
+import { access } from 'fs/promises';
 import { onFileChanged } from './session-watcher';
 
 const DB_PATH = join(homedir(), '.pi', 'dashboard-cache.sqlite');
@@ -145,11 +145,12 @@ export function registerCacheInvalidation() {
 	});
 }
 
-export function pruneCache() {
+export async function pruneCache() {
 	const d = getDb();
 	const cached = d.query('SELECT file_path FROM session_meta').all() as { file_path: string }[];
 	for (const row of cached) {
-		if (!existsSync(row.file_path)) {
+		const exists = await access(row.file_path).then(() => true, () => false);
+		if (!exists) {
 			d.run('DELETE FROM session_meta WHERE file_path = ?', [row.file_path]);
 			d.run('DELETE FROM session_messages WHERE file_path = ?', [row.file_path]);
 		}

@@ -1,5 +1,5 @@
 import { readdir, stat } from 'fs/promises';
-import { join, basename } from 'path';
+import { join, basename, resolve } from 'path';
 import { homedir } from 'os';
 import type { SessionMeta, ParsedSessionMeta, AgentMessage, SessionTree } from '$lib/types';
 import { getMetaStmt, upsertMetaStmt } from './cache';
@@ -15,7 +15,12 @@ export function encodeSessionId(filePath: string): string {
 }
 
 export function decodeSessionId(id: string): string {
-	return Buffer.from(id, 'base64url').toString();
+	const filePath = Buffer.from(id, 'base64url').toString();
+	const resolved = resolve(filePath);
+	if (!resolved.startsWith(SESSIONS_DIR)) {
+		throw new Error('Invalid session ID: path outside sessions directory');
+	}
+	return resolved;
 }
 
 // --- File scanning ---

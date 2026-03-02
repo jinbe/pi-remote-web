@@ -1,12 +1,16 @@
 <script lang="ts">
 	import '../app.css';
+	import { browser } from '$app/environment';
 
 	let { children } = $props();
 
-	let theme = $state<'dark' | 'light'>('dark');
+	let theme = $state<'dark' | 'light'>(
+		browser ? (localStorage.getItem('pi-theme') as 'dark' | 'light') || 'dark' : 'dark'
+	);
 
 	function toggleTheme() {
 		theme = theme === 'dark' ? 'light' : 'dark';
+		if (browser) localStorage.setItem('pi-theme', theme);
 	}
 </script>
 

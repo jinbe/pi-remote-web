@@ -15,8 +15,7 @@ export function startDevServer(cwd: string, command: string): void {
 		throw new Error(`Dev server already running for ${cwd}`);
 	}
 
-	const [cmd, ...args] = command.split(/\s+/);
-	const proc = Bun.spawn([cmd, ...args], {
+	const proc = Bun.spawn(['sh', '-c', command], {
 		cwd,
 		stdin: 'ignore',
 		stdout: 'pipe',
@@ -48,8 +47,10 @@ export function startDevServer(cwd: string, command: string): void {
 				for (const line of lines) {
 					if (line.trim()) {
 						managed.output.push(line);
-						// Keep last 200 lines
-						if (managed.output.length > 200) managed.output.shift();
+						// Keep last 200 lines — batch trim to avoid O(n) shift per line
+						if (managed.output.length > 300) {
+							managed.output = managed.output.slice(-200);
+						}
 					}
 				}
 			}

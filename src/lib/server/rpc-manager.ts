@@ -145,7 +145,7 @@ function readProcessOutput(managed: ManagedSession) {
 			}
 		}
 	}
-	pump();
+	pump().catch(err => console.error(`Stream read error for ${managed.sessionId}:`, err));
 }
 
 // --- Wire process exit handler ---
@@ -153,6 +153,7 @@ function readProcessOutput(managed: ManagedSession) {
 function wireExitHandler(managed: ManagedSession) {
 	managed.process.exited.then(() => {
 		activeSessions.delete(managed.sessionId);
+		lastEventUpdate.delete(managed.sessionId);
 		if (!managed.shutdownRequested) {
 			deleteActiveStmt.run(managed.sessionId);
 		}
@@ -231,6 +232,7 @@ export async function createSession(cwd: string, model?: string): Promise<string
 	};
 
 	readProcessOutput(managed);
+	wireExitHandler(managed);
 
 	const state = await sendCommand(managed, { type: 'get_state' });
 	const filePath = state.sessionFile;
@@ -250,8 +252,6 @@ export async function createSession(cwd: string, model?: string): Promise<string
 		state.model?.id ?? null,
 		'running'
 	);
-
-	wireExitHandler(managed);
 
 	return sessionId;
 }
@@ -328,6 +328,11 @@ export function isActive(sessionId: string): boolean {
 	return activeSessions.has(sessionId);
 }
 
+export function isStreaming(sessionId: string): boolean {
+	const managed = activeSessions.get(sessionId);
+	return managed?.isStreaming ?? false;
+}
+
 export function getActiveSessionIds(): Set<string> {
 	return new Set(activeSessions.keys());
 }
@@ -349,6 +354,7 @@ export async function getSessionStats(sessionId: string): Promise<any> {
 export async function recoverActiveSessions() {
 	const rows = getAllActiveStmt.all() as ActiveSessionRow[];
 
+	let recovered = 0;
 	for (const row of rows) {
 		const isAlive = row.pid ? isProcessAlive(row.pid) : false;
 
@@ -358,7 +364,16 @@ export async function recoverActiveSessions() {
 			} catch {
 				/* ignore */
 			}
-			await Bun.sleep(100);
+			// Wait for process to exit before re-spawning
+			const deadline = Date.now() + 3000;
+			while (isProcessAlive(row.pid!) && Date.now() < deadline) {
+				await Bun.sleep(100);
+			}
+			if (isProcessAlive(row.pid!)) {
+				console.warn(`Process ${row.pid} did not exit in time, skipping recovery of ${row.session_id}`);
+				deleteActiveStmt.run(row.session_id);
+				continue;
+			}
 		}
 
 		if (!existsSync(row.file_path)) {
@@ -369,6 +384,7 @@ export async function recoverActiveSessions() {
 		console.log(`Recovering session: ${row.session_id} (${row.cwd})`);
 		try {
 			await resumeSession(row.session_id, row.file_path, row.cwd);
+			recovered++;
 		} catch (err) {
 			console.error(`Failed to recover ${row.session_id}:`, err);
 			deleteActiveStmt.run(row.session_id);
@@ -376,7 +392,7 @@ export async function recoverActiveSessions() {
 	}
 
 	if (rows.length > 0) {
-		console.log(`Recovered ${rows.length} active sessions`);
+		console.log(`Recovered ${recovered}/${rows.length} active sessions`);
 	}
 }
 
@@ -391,14 +407,15 @@ function isProcessAlive(pid: number): boolean {
 
 // --- Graceful shutdown ---
 
-function handleShutdown() {
+async function handleShutdown() {
 	console.log('Shutting down — killing RPC processes...');
 	for (const [, managed] of activeSessions) {
 		managed.shutdownRequested = true;
 		managed.process.kill();
 	}
+	await Promise.allSettled([...activeSessions.values()].map(m => m.process.exited));
 	process.exit(0);
 }
 
-process.on('SIGTERM', handleShutdown);
-process.on('SIGINT', handleShutdown);
+process.on('SIGTERM', () => { handleShutdown(); });
+process.on('SIGINT', () => { handleShutdown(); });

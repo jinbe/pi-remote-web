@@ -4,6 +4,7 @@
 	import MessageInput from '$lib/components/MessageInput.svelte';
 	import ExtensionUIModal from '$lib/components/ExtensionUIModal.svelte';
 	import { timeAgo } from '$lib/utils';
+	import { getPathToNode, isAncestorOf, findLeafFrom, getBranchPoints } from '$lib/session-tree';
 	import type { AgentMessage, SessionTree, BranchPoint, ExtensionUIRequest } from '$lib/types';
 
 	let { data } = $props();
@@ -124,7 +125,7 @@
 
 	// Load on mount and when session changes
 	$effect(() => {
-		void data.sessionId; // track dependency
+		data.sessionId;
 		loadTail();
 	});
 
@@ -344,79 +345,13 @@
 	}
 
 	// Branch navigation
-	function computeBranchPoints(t: SessionTree): Map<string, BranchPoint> {
-		const map = new Map<string, BranchPoint>();
-		for (const [parentId, childIds] of Object.entries(t.children)) {
-			if (childIds.length <= 1) continue;
-			const node = t.nodes[parentId];
-			if (!node) continue;
-
-			let message = '';
-			if (node.type === 'message' && node.message?.content) {
-				const tc = node.message.content.find((c: any) => c.type === 'text');
-				message = tc?.text?.slice(0, 100) || '';
-			}
-
-			const branches = childIds.map((childId) => {
-				const child = t.nodes[childId];
-				let preview = '';
-				if (child?.type === 'message' && child.message?.content) {
-					const tc = child.message.content.find((c: any) => c.type === 'text');
-					preview = tc?.text?.slice(0, 80) || '';
-				}
-
-				let count = 0;
-				let cur: string | null = childId;
-				while (cur && t.nodes[cur]) {
-					count++;
-					const kids: string[] | undefined = t.children[cur];
-					cur = kids && kids.length > 0 ? kids[0] : null;
-				}
-
-				const isCurrentPath = isAncestor(childId, currentLeaf);
-				return { childId, preview, messageCount: count, isCurrentPath };
-			});
-
-			map.set(parentId, { nodeId: parentId, message, branches });
-		}
-		return map;
-	}
-
-	function isAncestor(ancestorId: string, descendantId: string): boolean {
-		let cur: string | null | undefined = descendantId;
-		while (cur) {
-			if (cur === ancestorId) return true;
-			cur = tree.nodes[cur]?.parentId;
-		}
-		return false;
-	}
-
-	function getPathToNode(nodeId: string): AgentMessage[] {
-		const path: AgentMessage[] = [];
-		let cur: string | null | undefined = nodeId;
-		while (cur && tree.nodes[cur]) {
-			path.unshift(tree.nodes[cur]);
-			cur = tree.nodes[cur].parentId;
-		}
-		return path;
-	}
-
-	function findLeaf(startId: string): string {
-		let cur = startId;
-		while (true) {
-			const kids = tree.children[cur];
-			if (!kids || kids.length === 0) return cur;
-			cur = kids[0];
-		}
-	}
-
 	function switchBranch(childId: string) {
-		const leafId = findLeaf(childId);
+		const leafId = findLeafFrom(tree, childId);
 		currentLeaf = leafId;
-		currentMessages = getPathToNode(leafId);
+		currentMessages = getPathToNode(tree, leafId);
 	}
 
-	const branchPoints = $derived(computeBranchPoints(tree));
+	const branchPoints = $derived(getBranchPoints(tree));
 	const statusList = $derived(Object.entries(statusEntries));
 	const widgetList = $derived(Object.entries(widgetEntries));
 </script>
