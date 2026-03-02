@@ -314,14 +314,12 @@ export function subscribe(sessionId: string, callback: (event: any) => void): ()
 	managed.subscribers.add(callback);
 
 	// Send sync event so late subscribers can catch up with current streaming state
-	if (managed.isStreaming) {
-		callback({
-			type: 'stream_sync',
-			isStreaming: true,
-			assistantText: managed.streamingAssistantText,
-			thinkingText: managed.streamingThinkingText
-		});
-	}
+	callback({
+		type: 'stream_sync',
+		isStreaming: managed.isStreaming,
+		assistantText: managed.isStreaming ? managed.streamingAssistantText : '',
+		thinkingText: managed.isStreaming ? managed.streamingThinkingText : ''
+	});
 
 	return () => managed.subscribers.delete(callback);
 }
