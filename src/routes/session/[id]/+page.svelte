@@ -28,6 +28,13 @@
 	let compacting = $state(false);
 	let retryInfo = $state<{ attempt: number; maxAttempts: number; delayMs: number } | null>(null);
 
+	// Optimistic message state (Issue 1)
+	let pendingUserMessage = $state<string | null>(null);
+	let waitingForAgent = $state(false);
+
+	// SSE connection state (Issue 3)
+	let sseConnected = $state(false);
+
 	// Extension UI
 	let extensionUIRequest = $state<ExtensionUIRequest | null>(null);
 
@@ -117,6 +124,8 @@
 				const wasAtBottom = isNearBottom();
 				currentMessages = result.messages;
 				if (wasAtBottom) scrollToBottom(true);
+				// Clear optimistic message when real messages arrive
+				pendingUserMessage = null;
 			}
 		} catch (e) {
 			console.error('Failed to reload messages:', e);
@@ -164,6 +173,7 @@
 		eventSource.onmessage = (e) => {
 			// Reset backoff on successful message
 			sseRetryDelay = 2000;
+			sseConnected = true; // Mark as connected on first message
 			let event: any;
 			try {
 				event = JSON.parse(e.data);
@@ -183,6 +193,7 @@
 					streaming = true;
 					currentAssistantText = '';
 					currentThinkingText = '';
+					waitingForAgent = false; // Agent has started, clear waiting state
 					break;
 				case 'agent_end':
 					streaming = false;
@@ -203,6 +214,9 @@
 						reloadMessages();
 						currentAssistantText = '';
 						currentThinkingText = '';
+					} else if (event.message?.role === 'user') {
+						// Clear optimistic message when real user message appears
+						pendingUserMessage = null;
 					}
 					break;
 				case 'message_update': {
@@ -254,6 +268,7 @@
 		eventSource.onerror = () => {
 			eventSource?.close();
 			eventSource = null;
+			sseConnected = false; // Mark as disconnected on error
 			if (sessionActive) {
 				// Reload messages to pick up any events missed during the disconnect gap
 				reloadMessages();
@@ -377,6 +392,27 @@
 		currentMessages = getPathToNode(tree, leafId);
 	}
 
+	// Handle message sent callback (Issue 1)
+	function handleMessageSent(text: string) {
+		pendingUserMessage = text;
+		waitingForAgent = true;
+		scrollToBottom(true);
+	}
+
+	// Check for new session URL param (Issue 2)
+	$effect(() => {
+		if (typeof window !== 'undefined') {
+			const params = new URLSearchParams(window.location.search);
+			if (params.get('new') === '1') {
+				addToast('Session created!', 'success');
+				// Clear the URL param
+				const url = new URL(window.location.href);
+				url.searchParams.delete('new');
+				window.history.replaceState({}, '', url);
+			}
+		}
+	});
+
 	const branchPoints = $derived(getBranchPoints(tree));
 	const statusList = $derived(Object.entries(statusEntries));
 	const widgetList = $derived(Object.entries(widgetEntries));
@@ -407,6 +443,11 @@
 					<span class="badge badge-warning badge-xs gap-1">
 						<span class="loading loading-dots loading-xs"></span>
 						working
+					</span>
+				{:else if !sseConnected}
+					<span class="badge badge-warning badge-xs gap-1">
+						<span class="loading loading-spinner loading-xs"></span>
+						reconnecting…
 					</span>
 				{:else}
 					<span class="badge badge-success badge-xs">live</span>
@@ -446,6 +487,27 @@
 				<ChatBubble {entry} />
 			{/each}
 
+			<!-- Optimistic pending user message (Issue 1) -->
+			{#if pendingUserMessage}
+				<div class="chat chat-end mb-2">
+					<div class="chat-bubble chat-bubble-primary max-w-[85vw] md:max-w-xl opacity-70 animate-pulse">
+						<div class="whitespace-pre-wrap break-words text-sm">
+							{pendingUserMessage}
+						</div>
+					</div>
+				</div>
+			{/if}
+
+			<!-- Waiting for agent indicator (Issue 1) -->
+			{#if waitingForAgent && !streaming}
+				<div class="chat chat-start mb-2">
+					<div class="chat-bubble max-w-[85vw] md:max-w-xl opacity-50">
+						<span class="loading loading-dots loading-xs"></span>
+						<span class="text-xs ml-1">sending to agent…</span>
+					</div>
+				</div>
+			{/if}
+
 			<!-- Streaming assistant text -->
 			{#if streaming}
 				<div class="chat chat-start mb-2">
@@ -479,9 +541,17 @@
 				</div>
 			{/if}
 
-			{#if currentMessages.length === 0 && !streaming}
+			{#if currentMessages.length === 0 && !streaming && !pendingUserMessage}
 				<div class="py-12 text-center text-base-content/50">
-					<p>Empty session</p>
+					{#if sessionActive}
+						<p class="text-lg mb-2">Session ready</p>
+						<p class="text-sm flex items-center justify-center gap-2">
+							<span class="animate-bounce">↓</span>
+							Type a message to get started
+						</p>
+					{:else}
+						<p>Empty session</p>
+					{/if}
 				</div>
 			{/if}
 		{/if}
@@ -510,7 +580,7 @@
 	<!-- Bottom bar — always visible -->
 	<div class="shrink-0">
 		{#if sessionActive}
-			<MessageInput sessionId={data.sessionId} />
+			<MessageInput sessionId={data.sessionId} onsent={handleMessageSent} />
 		{:else}
 			<div class="border-t border-base-300 bg-base-200 p-4 text-center">
 				<button class="btn btn-primary btn-sm" onclick={handleResume} disabled={resuming}>

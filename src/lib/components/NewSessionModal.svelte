@@ -41,7 +41,7 @@
 
 			const data = await res.json();
 			onclose();
-			goto(`/session/${data.sessionId}`);
+			goto(`/session/${data.sessionId}?new=1`);
 		} catch (e: any) {
 			errorMsg = e.message || 'Failed to create session';
 		} finally {

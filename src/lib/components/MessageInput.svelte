@@ -7,10 +7,12 @@
 
 	let {
 		sessionId,
-		disabled = false
+		disabled = false,
+		onsent
 	}: {
 		sessionId: string;
 		disabled?: boolean;
+		onsent?: (text: string) => void;
 	} = $props();
 
 	let message = $state('');
@@ -64,17 +66,20 @@
 		if (!message.trim() || sending) return;
 		sending = true;
 
+		const sentText = message.trim();
+
 		try {
 			const res = await fetch(`/api/sessions/${sessionId}/prompt`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					message: message.trim(),
+					message: sentText,
 					behavior: behavior === 'send' ? undefined : behavior
 				})
 			});
 
 			if (res.ok) {
+				onsent?.(sentText);
 				message = '';
 				showAutocomplete = false;
 			}
