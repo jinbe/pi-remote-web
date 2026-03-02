@@ -203,6 +203,16 @@ export async function resumeSession(
 
 	readProcessOutput(managed);
 	wireExitHandler(managed);
+
+	// Sync initial streaming state from pi in case the agent is already running
+	try {
+		const state = await sendCommand(managed, { type: 'get_state' });
+		if (state.isStreaming) {
+			managed.isStreaming = true;
+		}
+	} catch {
+		/* ignore — process may not be ready yet */
+	}
 }
 
 export async function createSession(cwd: string, model?: string): Promise<string> {
@@ -331,6 +341,15 @@ export function isActive(sessionId: string): boolean {
 export function isStreaming(sessionId: string): boolean {
 	const managed = activeSessions.get(sessionId);
 	return managed?.isStreaming ?? false;
+}
+
+export function resetStreaming(sessionId: string): void {
+	const managed = activeSessions.get(sessionId);
+	if (managed) {
+		managed.isStreaming = false;
+		managed.streamingAssistantText = '';
+		managed.streamingThinkingText = '';
+	}
 }
 
 export function getActiveSessionIds(): Set<string> {
