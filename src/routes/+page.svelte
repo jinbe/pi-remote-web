@@ -190,6 +190,18 @@
 		invalidateAll();
 	}
 
+	async function deleteSession(sessionId: string, e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!confirm('Delete this session? This cannot be undone.')) return;
+		try {
+			await fetch(`/api/sessions/${sessionId}/delete`, { method: 'POST' });
+			invalidateAll();
+		} catch (err) {
+			console.error('Failed to delete session:', err);
+		}
+	}
+
 	// Auto-refresh via SSE
 	$effect(() => {
 		const es = new EventSource('/api/sessions/watch');
@@ -337,7 +349,7 @@
 							{#each group.sessions as session, i (session.id)}
 								<a
 									href="/session/{session.id}"
-									class="flex items-start gap-3 px-4 py-3 hover:bg-base-300/50 transition-colors {i > 0 ? 'border-t border-base-300/50' : ''}"
+									class="group flex items-start gap-3 px-4 py-3 hover:bg-base-300/50 transition-colors {i > 0 ? 'border-t border-base-300/50' : ''}"
 								>
 									<div
 										class="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full {activeSet.has(session.id)
@@ -356,6 +368,13 @@
 											{/if}
 										</div>
 									</div>
+									<button
+										class="hidden lg:flex btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity self-center flex-shrink-0 text-error/60 hover:text-error"
+										onclick={(e: MouseEvent) => deleteSession(session.id, e)}
+										title="Delete session"
+									>
+										✕
+									</button>
 								</a>
 							{/each}
 						</div>
