@@ -7,7 +7,9 @@ export const GET: RequestHandler = async ({ params }) => {
 		return json({ commands: [] });
 	}
 	try {
-		const commands = await getCommands(params.id);
+		const result = await getCommands(params.id);
+		// RPC may return { commands: [...] } or [...] directly
+		const commands = Array.isArray(result) ? result : (result?.commands ?? []);
 		return json({ commands });
 	} catch (e: any) {
 		throw error(500, `Failed to get commands: ${e.message || e}`);

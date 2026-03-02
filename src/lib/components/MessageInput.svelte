@@ -37,7 +37,7 @@
 			const res = await fetch(`/api/sessions/${sessionId}/commands`);
 			if (res.ok) {
 				const data = await res.json();
-				commands = data.commands ?? [];
+				commands = Array.isArray(data.commands) ? data.commands : [];
 			}
 		} catch {
 			/* ignore */
