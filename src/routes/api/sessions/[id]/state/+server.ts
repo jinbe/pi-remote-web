@@ -1,4 +1,4 @@
-import { getState, isActive, isStreaming, resetStreaming } from '$lib/server/rpc-manager';
+import { getState, isActive, getStreamingState } from '$lib/server/rpc-manager';
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
@@ -8,16 +8,17 @@ export const GET: RequestHandler = async ({ params }) => {
 	}
 	try {
 		const state = await getState(params.id);
-		const serverStreaming = isStreaming(params.id);
-		const rpcStreaming = state.isStreaming ?? false;
-		// Server tracks agent_start→agent_end for the full agent turn.
-		// RPC get_state.isStreaming reflects the actual pi agent state.
-		// If our server thinks we're streaming but pi says it's not,
-		// the agent_end event was missed — reset our tracking.
-		if (serverStreaming && !rpcStreaming && state.pendingMessageCount === 0) {
-			resetStreaming(params.id);
-		}
-		const effectiveStreaming = serverStreaming && rpcStreaming;
+		const local = getStreamingState(params.id);
+
+		// Cross-check: if our server thinks we're streaming but pi's RPC
+		// says it's not streaming AND there are no pending messages,
+		// trust pi — the agent_end event was likely missed.
+		// We don't mutate server state here (GET should be side-effect free);
+		// the client uses this to decide whether to show streaming UI.
+		const effectiveStreaming = local.isStreaming
+			? (state.isStreaming || (state.pendingMessageCount ?? 0) > 0)
+			: false;
+
 		return json({ active: true, ...state, isStreaming: effectiveStreaming });
 	} catch (e) {
 		throw error(500, `Failed to get state: ${e}`);

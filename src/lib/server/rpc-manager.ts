@@ -16,6 +16,7 @@ interface ManagedSession {
 	buffer: string;
 	pendingCommands: Map<string, { resolve: (data: any) => void; reject: (err: Error) => void }>;
 	shutdownRequested: boolean;
+	lastAgentStartTime: number | null;
 }
 
 interface ActiveSessionRow {
@@ -29,9 +30,15 @@ interface ActiveSessionRow {
 	status: string;
 }
 
+// --- Constants ---
+
+const MAX_STREAMING_TEXT = 100 * 1024; // 100KB cap for accumulated streaming text
+const COMMAND_TIMEOUT_MS = 30_000;
+
 // --- State ---
 
 const activeSessions = new Map<string, ManagedSession>();
+const resumingSessionIds = new Set<string>();
 
 // --- SQLite persistence ---
 
@@ -64,19 +71,36 @@ function updateEventThrottled(sessionId: string) {
 
 // --- Command/Response correlation ---
 
+function writeToStdin(managed: ManagedSession, line: string): void {
+	try {
+		const stdin = managed.process.stdin as import('bun').FileSink;
+		stdin.write(line);
+	} catch (err) {
+		throw new Error(`Failed to write to stdin: ${err}`);
+	}
+}
+
 function sendCommand(managed: ManagedSession, cmd: Record<string, any>): Promise<any> {
 	const id = crypto.randomUUID();
+	const line = JSON.stringify({ ...cmd, id }) + '\n';
+
+	// Write first — if it fails, don't create a pending command
+	try {
+		writeToStdin(managed, line);
+	} catch (err) {
+		return Promise.reject(err);
+	}
+
 	const promise = new Promise<any>((resolve, reject) => {
 		managed.pendingCommands.set(id, { resolve, reject });
 		setTimeout(() => {
 			if (managed.pendingCommands.delete(id)) {
+				console.warn(`RPC command timed out: ${cmd.type} (session: ${managed.sessionId})`);
 				reject(new Error(`RPC command timed out: ${cmd.type}`));
 			}
-		}, 30000);
+		}, COMMAND_TIMEOUT_MS);
 	});
-	const line = JSON.stringify({ ...cmd, id }) + '\n';
-	const stdin = managed.process.stdin as import('bun').FileSink;
-	stdin.write(line);
+
 	return promise;
 }
 
@@ -117,11 +141,13 @@ function readProcessOutput(managed: ManagedSession) {
 
 					if (parsed.type === 'agent_start') {
 						managed.isStreaming = true;
+						managed.lastAgentStartTime = Date.now();
 						managed.streamingAssistantText = '';
 						managed.streamingThinkingText = '';
 					}
 					if (parsed.type === 'agent_end') {
 						managed.isStreaming = false;
+						managed.lastAgentStartTime = null;
 						managed.streamingAssistantText = '';
 						managed.streamingThinkingText = '';
 					}
@@ -129,8 +155,15 @@ function readProcessOutput(managed: ManagedSession) {
 						const ame = parsed.assistantMessageEvent;
 						if (ame?.type === 'text_delta') {
 							managed.streamingAssistantText += ame.delta;
+							// Cap accumulated text to prevent unbounded growth
+							if (managed.streamingAssistantText.length > MAX_STREAMING_TEXT) {
+								managed.streamingAssistantText = managed.streamingAssistantText.slice(-MAX_STREAMING_TEXT);
+							}
 						} else if (ame?.type === 'thinking_delta') {
 							managed.streamingThinkingText += ame.delta;
+							if (managed.streamingThinkingText.length > MAX_STREAMING_TEXT) {
+								managed.streamingThinkingText = managed.streamingThinkingText.slice(-MAX_STREAMING_TEXT);
+							}
 						}
 					}
 					if (parsed.type === 'message_start' && parsed.message?.role === 'assistant') {
@@ -138,7 +171,8 @@ function readProcessOutput(managed: ManagedSession) {
 						managed.streamingThinkingText = '';
 					}
 
-					for (const cb of managed.subscribers) cb(parsed);
+					// Copy subscriber set to avoid issues if a callback modifies subscribers
+					for (const cb of [...managed.subscribers]) cb(parsed);
 				} catch {
 					/* skip malformed lines */
 				}
@@ -148,12 +182,25 @@ function readProcessOutput(managed: ManagedSession) {
 	pump().catch(err => console.error(`Stream read error for ${managed.sessionId}:`, err));
 }
 
+// --- Stderr consumption (prevent pipe buffer deadlock) ---
+
+function consumeStderr(managed: ManagedSession) {
+	const stderr = managed.process.stderr;
+	if (!stderr) return;
+	new Response(stderr as ReadableStream).text().then(text => {
+		if (text.trim()) {
+			console.error(`[${managed.sessionId}] stderr: ${text.slice(0, 2000)}`);
+		}
+	}).catch(() => { /* process exited */ });
+}
+
 // --- Wire process exit handler ---
 
 function wireExitHandler(managed: ManagedSession) {
 	managed.process.exited.then(() => {
 		activeSessions.delete(managed.sessionId);
 		lastEventUpdate.delete(managed.sessionId);
+		resumingSessionIds.delete(managed.sessionId);
 		if (!managed.shutdownRequested) {
 			deleteActiveStmt.run(managed.sessionId);
 		}
@@ -161,7 +208,8 @@ function wireExitHandler(managed: ManagedSession) {
 			pending.reject(new Error('RPC process exited'));
 		}
 		managed.pendingCommands.clear();
-		for (const cb of managed.subscribers) {
+		// Copy subscriber set — callbacks may call unsubscribe
+		for (const cb of [...managed.subscribers]) {
 			cb({ type: 'session_ended' });
 		}
 	});
@@ -174,6 +222,12 @@ export async function resumeSession(
 	filePath: string,
 	cwd: string
 ): Promise<void> {
+	// Guard against concurrent resume of the same session
+	if (activeSessions.has(sessionId) || resumingSessionIds.has(sessionId)) {
+		return;
+	}
+	resumingSessionIds.add(sessionId);
+
 	insertActiveStmt.run(sessionId, filePath, cwd, null, new Date().toISOString(), null, null, 'starting');
 
 	const piBin = process.env.PI_BIN || 'pi';
@@ -197,11 +251,13 @@ export async function resumeSession(
 		streamingThinkingText: '',
 		buffer: '',
 		pendingCommands: new Map(),
-		shutdownRequested: false
+		shutdownRequested: false,
+		lastAgentStartTime: null
 	};
 	activeSessions.set(sessionId, managed);
 
 	readProcessOutput(managed);
+	consumeStderr(managed);
 	wireExitHandler(managed);
 
 	// Sync initial streaming state from pi in case the agent is already running
@@ -209,9 +265,12 @@ export async function resumeSession(
 		const state = await sendCommand(managed, { type: 'get_state' });
 		if (state.isStreaming) {
 			managed.isStreaming = true;
+			managed.lastAgentStartTime = Date.now();
 		}
 	} catch {
 		/* ignore — process may not be ready yet */
+	} finally {
+		resumingSessionIds.delete(sessionId);
 	}
 }
 
@@ -238,13 +297,23 @@ export async function createSession(cwd: string, model?: string): Promise<string
 		streamingThinkingText: '',
 		buffer: '',
 		pendingCommands: new Map(),
-		shutdownRequested: false
+		shutdownRequested: false,
+		lastAgentStartTime: null
 	};
 
 	readProcessOutput(managed);
+	consumeStderr(managed);
 	wireExitHandler(managed);
 
-	const state = await sendCommand(managed, { type: 'get_state' });
+	let state: any;
+	try {
+		state = await sendCommand(managed, { type: 'get_state' });
+	} catch (err) {
+		// Kill orphaned process on startup failure
+		managed.process.kill();
+		throw err;
+	}
+
 	const filePath = state.sessionFile;
 	const sessionId = encodeSessionId(filePath);
 
@@ -279,6 +348,11 @@ export async function sendMessage(
 	} else if (behavior === 'followUp') {
 		return sendCommand(managed, { type: 'follow_up', message });
 	} else {
+		// When agent is streaming and no explicit behavior, auto-queue as follow-up
+		// to avoid the RPC error for prompt-during-streaming
+		if (managed.isStreaming) {
+			return sendCommand(managed, { type: 'follow_up', message });
+		}
 		return sendCommand(managed, { type: 'prompt', message });
 	}
 }
@@ -312,8 +386,7 @@ export async function sendExtensionUIResponse(
 	const managed = activeSessions.get(sessionId);
 	if (!managed) throw new Error('Session not active');
 	const line = JSON.stringify(response) + '\n';
-	const stdin = managed.process.stdin as import('bun').FileSink;
-	stdin.write(line);
+	writeToStdin(managed, line);
 }
 
 export function subscribe(sessionId: string, callback: (event: any) => void): () => void {
@@ -343,10 +416,22 @@ export function isStreaming(sessionId: string): boolean {
 	return managed?.isStreaming ?? false;
 }
 
+export function getStreamingState(sessionId: string): {
+	isStreaming: boolean;
+	lastAgentStartTime: number | null;
+} {
+	const managed = activeSessions.get(sessionId);
+	return {
+		isStreaming: managed?.isStreaming ?? false,
+		lastAgentStartTime: managed?.lastAgentStartTime ?? null
+	};
+}
+
 export function resetStreaming(sessionId: string): void {
 	const managed = activeSessions.get(sessionId);
 	if (managed) {
 		managed.isStreaming = false;
+		managed.lastAgentStartTime = null;
 		managed.streamingAssistantText = '';
 		managed.streamingThinkingText = '';
 	}

@@ -150,7 +150,10 @@
 		};
 	});
 
-	// SSE connection
+	// SSE connection with exponential backoff
+	let sseRetryDelay = 2000;
+	const SSE_MAX_RETRY_DELAY = 30000;
+
 	function connectSSE(sessionId: string) {
 		if (eventSource) {
 			eventSource.close();
@@ -159,6 +162,8 @@
 		eventSource = new EventSource(`/api/sessions/${sessionId}/events`);
 
 		eventSource.onmessage = (e) => {
+			// Reset backoff on successful message
+			sseRetryDelay = 2000;
 			let event: any;
 			try {
 				event = JSON.parse(e.data);
@@ -252,7 +257,10 @@
 			if (sessionActive) {
 				// Reload messages to pick up any events missed during the disconnect gap
 				reloadMessages();
-				setTimeout(() => connectSSE(sessionId), 2000);
+				// Sync streaming state in case agent_end was missed during disconnect
+				syncStreamingState();
+				setTimeout(() => connectSSE(sessionId), sseRetryDelay);
+				sseRetryDelay = Math.min(sseRetryDelay * 2, SSE_MAX_RETRY_DELAY);
 			}
 		};
 	}
@@ -290,6 +298,24 @@
 		setTimeout(() => {
 			toasts = toasts.filter((t) => t.id !== id);
 		}, 4000);
+	}
+
+	// Sync streaming state from server (used after SSE reconnect or missed events)
+	async function syncStreamingState() {
+		try {
+			const res = await fetch(`/api/sessions/${data.sessionId}/state`);
+			if (!res.ok) return;
+			const state = await res.json();
+			if (!state.active) {
+				sessionActiveOverride = false;
+				streaming = false;
+			} else if (!state.isStreaming) {
+				streaming = false;
+				currentAssistantText = '';
+				currentThinkingText = '';
+				reloadMessages();
+			}
+		} catch { /* ignore */ }
 	}
 
 	// Connect SSE when session becomes active

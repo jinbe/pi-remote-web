@@ -4,12 +4,21 @@ export function createSSEStream(sessionId: string, request: Request): Response {
 	const stream = new ReadableStream({
 		start(controller) {
 			const encoder = new TextEncoder();
+			let cleaned = false;
+
+			function cleanup() {
+				if (cleaned) return;
+				cleaned = true;
+				unsubscribe();
+				clearInterval(heartbeat);
+				try { controller.close(); } catch { /* already closed */ }
+			}
 
 			const unsubscribe = subscribe(sessionId, (event) => {
 				try {
 					controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
 				} catch {
-					/* stream closed */
+					cleanup();
 				}
 			});
 
@@ -17,19 +26,11 @@ export function createSSEStream(sessionId: string, request: Request): Response {
 				try {
 					controller.enqueue(encoder.encode(`: heartbeat\n\n`));
 				} catch {
-					/* stream closed */
+					cleanup();
 				}
-			}, 30000);
+			}, 15000);
 
-			request.signal.addEventListener('abort', () => {
-				unsubscribe();
-				clearInterval(heartbeat);
-				try {
-					controller.close();
-				} catch {
-					/* already closed */
-				}
-			});
+			request.signal.addEventListener('abort', cleanup);
 		}
 	});
 
