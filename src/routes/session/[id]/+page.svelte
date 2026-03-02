@@ -209,8 +209,6 @@
 					currentAssistantText = '';
 					currentThinkingText = '';
 					reloadMessages();
-					// Auto-stop session so it can be resumed for a new conversation
-					autoStopSession();
 					break;
 				case 'session_ended':
 					streaming = false;
@@ -392,17 +390,39 @@
 		sessionActiveOverride = false;
 	}
 
-	async function autoStopSession() {
-		// Wait briefly to allow any follow-up messages to be sent
-		await new Promise((r) => setTimeout(r, 1500));
-		// Check if still not streaming (user may have sent another message)
-		if (streaming || !sessionActive) return;
-		await fetch(`/api/sessions/${data.sessionId}/stop`, { method: 'POST' });
-		sessionActiveOverride = false;
-	}
-
 	async function handleAbort() {
 		await fetch(`/api/sessions/${data.sessionId}/abort`, { method: 'POST' });
+	}
+
+	let restarting = $state(false);
+
+	async function handleRestart() {
+		restarting = true;
+		try {
+			await fetch(`/api/sessions/${data.sessionId}/stop`, { method: 'POST' });
+			sessionActiveOverride = false;
+
+			// Poll until the session is fully stopped before resuming
+			const deadline = Date.now() + 10_000;
+			while (Date.now() < deadline) {
+				await new Promise((r) => setTimeout(r, 300));
+				try {
+					const res = await fetch(`/api/sessions/${data.sessionId}/state`);
+					if (!res.ok) break;
+					const state = await res.json();
+					if (!state.active) break;
+				} catch {
+					break;
+				}
+			}
+
+			const res = await fetch(`/api/sessions/${data.sessionId}/resume`, { method: 'POST' });
+			if (res.ok) {
+				sessionActiveOverride = true;
+			}
+		} finally {
+			restarting = false;
+		}
 	}
 
 	// Branch navigation
@@ -434,7 +454,6 @@
 	});
 
 	const branchPoints = $derived(getBranchPoints(tree));
-	const statusList = $derived(Object.entries(statusEntries));
 	const widgetList = $derived(Object.entries(widgetEntries));
 </script>
 
@@ -446,7 +465,9 @@
 		</div>
 		<div class="navbar-center flex flex-col items-center">
 			<span class="text-sm font-semibold truncate max-w-[200px] flex items-center gap-1.5">
-				{#if sessionActive}
+				{#if restarting}
+					<span class="loading loading-spinner loading-xs flex-shrink-0"></span>
+				{:else if sessionActive}
 					{#if streaming}
 						<span class="relative flex h-2.5 w-2.5 flex-shrink-0">
 							<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
@@ -470,14 +491,12 @@
 			</span>
 		</div>
 		<div class="navbar-end gap-1">
-			{#if statusList.length > 0}
-				{#each statusList as [, text]}
-					<span class="badge badge-xs badge-info max-w-[100px] md:max-w-[200px] truncate" title={text}>{text}</span>
-				{/each}
-			{/if}
-			{#if sessionActive}
+			{#if restarting}
+				<span class="text-xs text-base-content/50">Restarting…</span>
+			{:else if sessionActive}
 				<!-- Desktop: inline buttons -->
 				<button class="btn btn-ghost btn-xs text-error hidden md:inline-flex" onclick={handleAbort}>Abort</button>
+				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleRestart}>Restart</button>
 				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleStop}>Stop</button>
 				<!-- Mobile: dropdown menu -->
 				<div class="dropdown dropdown-end md:hidden">
@@ -487,6 +506,7 @@
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 					<ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-40 p-2 shadow-lg border border-base-300">
 						<li><button class="text-error" onclick={handleAbort}>Abort</button></li>
+						<li><button onclick={handleRestart}>Restart</button></li>
 						<li><button onclick={handleStop}>Stop</button></li>
 					</ul>
 				</div>
@@ -618,7 +638,12 @@
 
 	<!-- Bottom bar — always visible -->
 	<div class="shrink-0">
-		{#if sessionActive}
+		{#if restarting}
+			<div class="border-t border-base-300 bg-base-200 p-4 text-center">
+				<span class="loading loading-spinner loading-sm"></span>
+				<span class="text-sm text-base-content/50 ml-2">Restarting session…</span>
+			</div>
+		{:else if sessionActive}
 			<MessageInput sessionId={data.sessionId} onsent={handleMessageSent} />
 		{:else}
 			<div class="border-t border-base-300 bg-base-200 p-4 text-center">

@@ -133,6 +133,31 @@
 		});
 	}
 
+	// Quick commands
+	const quickCommands = [
+		{ label: 'Continue', message: 'continue' },
+		{ label: 'Ship', message: 'ship' },
+		{ label: 'Commit no push', message: 'commit no push' },
+		{ label: 'Create PR', message: 'create pr' }
+	];
+
+	async function sendQuickCommand(text: string) {
+		if (sending || disabled) return;
+		sending = true;
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/prompt`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ message: text })
+			});
+			if (res.ok) {
+				onsent?.(text);
+			}
+		} finally {
+			sending = false;
+		}
+	}
+
 	// Source badge color
 	function sourceBadge(source: string) {
 		switch (source) {
@@ -170,6 +195,19 @@
 			</ul>
 		</div>
 	{/if}
+
+	<!-- Quick commands -->
+	<div class="flex gap-1.5 mb-2 overflow-x-auto">
+		{#each quickCommands as cmd (cmd.label)}
+			<button
+				class="btn btn-xs btn-outline btn-ghost rounded-full whitespace-nowrap"
+				onclick={() => sendQuickCommand(cmd.message)}
+				disabled={disabled || sending}
+			>
+				{cmd.label}
+			</button>
+		{/each}
+	</div>
 
 	<div class="flex gap-2">
 		<textarea
