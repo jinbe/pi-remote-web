@@ -158,7 +158,12 @@
 		eventSource = new EventSource(`/api/sessions/${sessionId}/events`);
 
 		eventSource.onmessage = (e) => {
-			const event = JSON.parse(e.data);
+			let event: any;
+			try {
+				event = JSON.parse(e.data);
+			} catch {
+				return;
+			}
 
 			switch (event.type) {
 				case 'stream_sync':
@@ -175,6 +180,8 @@
 					break;
 				case 'agent_end':
 					streaming = false;
+					currentAssistantText = '';
+					currentThinkingText = '';
 					reloadMessages();
 					break;
 				case 'session_ended':
@@ -293,6 +300,25 @@
 			eventSource?.close();
 			eventSource = null;
 		};
+	});
+
+	// Fallback: poll session state to catch missed agent_end events
+	$effect(() => {
+		if (!streaming) return;
+		const interval = setInterval(async () => {
+			try {
+				const res = await fetch(`/api/sessions/${data.sessionId}/state`);
+				if (!res.ok) return;
+				const state = await res.json();
+				if (!state.active || !state.isStreaming) {
+					streaming = false;
+					currentAssistantText = '';
+					currentThinkingText = '';
+					reloadMessages();
+				}
+			} catch { /* ignore */ }
+		}, 5000);
+		return () => clearInterval(interval);
 	});
 
 	// Session control
