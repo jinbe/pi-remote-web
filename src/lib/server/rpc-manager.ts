@@ -349,6 +349,12 @@ export async function getSessionStats(sessionId: string): Promise<any> {
 	return sendCommand(managed, { type: 'get_session_stats' });
 }
 
+export async function getCommands(sessionId: string): Promise<any> {
+	const managed = activeSessions.get(sessionId);
+	if (!managed) throw new Error('Session not active');
+	return sendCommand(managed, { type: 'get_commands' });
+}
+
 // --- Crash recovery ---
 
 export async function recoverActiveSessions() {

@@ -311,7 +311,7 @@
 
 					<!-- Dev command editor (inline) -->
 					{#if editingDevCommand === group.cwd}
-						<div class="px-4 pb-3 flex items-center gap-2" onclick={(e: MouseEvent) => e.stopPropagation()}>
+						<div class="px-4 pb-3 flex items-center gap-2" role="toolbar" tabindex="-1" onclick={(e: MouseEvent) => e.stopPropagation()} onkeydown={(e: KeyboardEvent) => e.stopPropagation()}>
 							<input
 								type="text"
 								class="input input-xs input-bordered flex-1"
