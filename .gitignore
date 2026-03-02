@@ -32,3 +32,8 @@ vite.config.ts.timestamp-*
 # Cache
 *.db
 *.sqlite
+
+# Test artifacts
+test-results/
+playwright-report/
+blob-report/
