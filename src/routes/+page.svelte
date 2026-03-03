@@ -5,6 +5,7 @@
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
 	import { getContext } from 'svelte';
 	import { browser } from '$app/environment';
+	import logoSvg from '$lib/assets/logo.svg';
 
 	let { data } = $props();
 
@@ -240,7 +241,7 @@
 
 <div class="mx-auto max-w-3xl px-4 py-6 h-full overflow-y-auto">
 	<div class="mb-6 flex items-center justify-between">
-		<h1 class="text-2xl font-bold">Pi Sessions</h1>
+		<img src={logoSvg} alt="Pi" class="h-8 w-8 rounded-lg" />
 		<div class="flex gap-2">
 			{#if hasAnythingRunning}
 				<button

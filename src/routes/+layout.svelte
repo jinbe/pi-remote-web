@@ -9,6 +9,8 @@
 		browser ? (localStorage.getItem('pi-theme') as 'dark' | 'light') || 'dark' : 'dark'
 	);
 
+	const daisyTheme = $derived(theme === 'dark' ? 'pi-dark' : 'pi-light');
+
 	function toggleTheme() {
 		theme = theme === 'dark' ? 'light' : 'dark';
 		if (browser) localStorage.setItem('pi-theme', theme);
@@ -22,6 +24,6 @@
 	<title>Pi Dashboard</title>
 </svelte:head>
 
-<div data-theme={theme} class="fixed inset-0 bg-base-100 text-base-content overflow-hidden">
+<div data-theme={daisyTheme} class="fixed inset-0 bg-base-100 text-base-content overflow-hidden">
 	{@render children()}
 </div>

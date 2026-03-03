@@ -3,3 +3,114 @@
 	themes: dark --default, light;
 }
 @plugin "@tailwindcss/typography";
+
+/*
+ * Pi Dark — Tokyo Night-inspired, optimised for code readability
+ * Deep blue-grey background, warm off-white text, vibrant semantic accents
+ */
+[data-theme="pi-dark"] {
+	color-scheme: dark;
+	--color-base-100: oklch(22% 0.02 264);
+	--color-base-200: oklch(19% 0.018 264);
+	--color-base-300: oklch(27% 0.022 264);
+	--color-base-content: oklch(88% 0.02 250);
+
+	--color-primary: oklch(72% 0.14 250);
+	--color-primary-content: oklch(18% 0.02 264);
+	--color-secondary: oklch(68% 0.16 300);
+	--color-secondary-content: oklch(18% 0.02 264);
+	--color-accent: oklch(76% 0.12 210);
+	--color-accent-content: oklch(18% 0.02 264);
+	--color-neutral: oklch(30% 0.02 264);
+	--color-neutral-content: oklch(88% 0.02 250);
+
+	--color-info: oklch(76% 0.12 210);
+	--color-info-content: oklch(18% 0.02 264);
+	--color-success: oklch(78% 0.14 145);
+	--color-success-content: oklch(18% 0.02 264);
+	--color-warning: oklch(82% 0.14 80);
+	--color-warning-content: oklch(18% 0.02 264);
+	--color-error: oklch(72% 0.18 15);
+	--color-error-content: oklch(18% 0.02 264);
+
+	--radius-selector: 0.5rem;
+	--radius-field: 0.25rem;
+	--radius-box: 0.5rem;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+	--depth: 1;
+	--noise: 0;
+}
+
+/*
+ * Pi Light — Soft paper-white, optimised for daylight code readability
+ * Warm off-white background, deep slate text, muted saturated accents
+ */
+[data-theme="pi-light"] {
+	color-scheme: light;
+	--color-base-100: oklch(97% 0.005 80);
+	--color-base-200: oklch(94% 0.008 80);
+	--color-base-300: oklch(89% 0.012 260);
+	--color-base-content: oklch(28% 0.025 260);
+
+	--color-primary: oklch(48% 0.18 260);
+	--color-primary-content: oklch(97% 0.005 80);
+	--color-secondary: oklch(48% 0.16 310);
+	--color-secondary-content: oklch(97% 0.005 80);
+	--color-accent: oklch(45% 0.1 200);
+	--color-accent-content: oklch(97% 0.005 80);
+	--color-neutral: oklch(68% 0.01 260);
+	--color-neutral-content: oklch(28% 0.025 260);
+
+	--color-info: oklch(45% 0.1 200);
+	--color-info-content: oklch(97% 0.005 80);
+	--color-success: oklch(45% 0.1 155);
+	--color-success-content: oklch(97% 0.005 80);
+	--color-warning: oklch(55% 0.14 65);
+	--color-warning-content: oklch(97% 0.005 80);
+	--color-error: oklch(55% 0.18 20);
+	--color-error-content: oklch(97% 0.005 80);
+
+	--radius-selector: 0.5rem;
+	--radius-field: 0.25rem;
+	--radius-box: 0.5rem;
+	--size-selector: 0.25rem;
+	--size-field: 0.25rem;
+	--border: 1px;
+	--depth: 1;
+	--noise: 0;
+}
+
+/* ── Typography — JetBrains Mono everywhere ───────────────────────── */
+
+html {
+	font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono',
+		Menlo, Consolas, 'Liberation Mono', monospace;
+	font-feature-settings: 'liga' 1, 'calt' 1;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+pre, code, .font-mono, kbd, samp {
+	font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono',
+		Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+/* Code readability: comfortable line-height & tab size */
+pre {
+	tab-size: 2;
+	line-height: 1.65;
+}
+
+/* ── Scrollbar styling ────────────────────────────────────────────── */
+
+[data-theme="pi-dark"] ::-webkit-scrollbar { width: 6px; height: 6px; }
+[data-theme="pi-dark"] ::-webkit-scrollbar-track { background: transparent; }
+[data-theme="pi-dark"] ::-webkit-scrollbar-thumb { background: oklch(30% 0.02 264); border-radius: 3px; }
+[data-theme="pi-dark"] ::-webkit-scrollbar-thumb:hover { background: oklch(38% 0.02 264); }
+
+[data-theme="pi-light"] ::-webkit-scrollbar { width: 6px; height: 6px; }
+[data-theme="pi-light"] ::-webkit-scrollbar-track { background: transparent; }
+[data-theme="pi-light"] ::-webkit-scrollbar-thumb { background: oklch(80% 0.01 260); border-radius: 3px; }
+[data-theme="pi-light"] ::-webkit-scrollbar-thumb:hover { background: oklch(68% 0.01 260); }

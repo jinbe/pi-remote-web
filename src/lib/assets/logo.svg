@@ -5,8 +5,13 @@
       <stop offset="100%" stop-color="#9d7cd8"/>
     </linearGradient>
   </defs>
+  <!-- Rounded square -->
   <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#g)"/>
+  <!-- Pi symbol — geometric, monospace-inspired -->
+  <!-- Horizontal bar -->
   <rect x="26" y="34" width="76" height="9" rx="4.5" fill="#1a1b26"/>
+  <!-- Left leg -->
   <rect x="40" y="34" width="9" height="60" rx="4.5" fill="#1a1b26"/>
+  <!-- Right leg with foot kick -->
   <path d="M79 34 L79 78 Q79 90 91 90" stroke="#1a1b26" stroke-width="9" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
