@@ -42,6 +42,7 @@
 	);
 
 	const activeSet = $derived(new Set(data.activeSessionIds));
+	const streamingSet = $derived(new Set(data.streamingSessionIds));
 	const favSet = $derived(new Set(data.favoriteProjects));
 	const devCommandsMap = $derived(data.devCommands as Record<string, string>);
 	const runningDevSet = $derived(new Set(data.runningDevServers as string[]));
@@ -65,6 +66,7 @@
 		shortName: string;
 		isFavorite: boolean;
 		hasActive: boolean;
+		hasStreaming: boolean;
 		devCommand: string | null;
 		devServerRunning: boolean;
 		latestModified: string;
@@ -82,11 +84,13 @@
 		const result: ProjectGroup[] = [];
 		for (const [cwd, sessions] of groups) {
 			const hasActive = sessions.some((s) => activeSet.has(s.id));
+			const hasStreaming = sessions.some((s) => streamingSet.has(s.id));
 			result.push({
 				cwd,
 				shortName: cwd.split('/').filter(Boolean).slice(-2).join('/'),
 				isFavorite: favSet.has(cwd),
 				hasActive,
+				hasStreaming,
 				devCommand: devCommandsMap[cwd] ?? null,
 				devServerRunning: runningDevSet.has(cwd),
 				latestModified: sessions[0]?.lastModified ?? '',
@@ -298,8 +302,14 @@
 					>
 						<span class="text-sm opacity-50 transition-transform {expandedProjects.has(group.cwd) ? 'rotate-90' : ''}">▶</span>
 						<span class="font-semibold flex-1 truncate">{group.shortName}</span>
-						{#if group.hasActive}
-							<span class="hidden sm:inline badge badge-success badge-xs">active</span>
+						{#if group.hasStreaming}
+							<span class="hidden sm:inline badge badge-warning badge-xs">streaming</span>
+							<span class="sm:hidden relative flex h-2.5 w-2.5 flex-shrink-0">
+								<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
+								<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
+							</span>
+						{:else if group.hasActive}
+							<span class="hidden sm:inline badge badge-success badge-xs">idle</span>
 							<span class="sm:hidden h-2.5 w-2.5 rounded-full bg-success flex-shrink-0"></span>
 						{/if}
 						{#if group.devServerRunning}
@@ -395,11 +405,18 @@
 										href="/session/{session.id}"
 										class="group flex items-start gap-3 px-4 py-3 hover:bg-base-300/50 transition-colors {i > 0 ? 'border-t border-base-300/50' : ''}"
 									>
-										<div
-											class="mt-1.5 h-2.5 w-2.5 flex-shrink-0 rounded-full {activeSet.has(session.id)
-												? 'bg-success'
-												: 'bg-base-content/20'}"
-										></div>
+										{#if streamingSet.has(session.id)}
+											<div class="mt-1.5 relative flex h-2.5 w-2.5 flex-shrink-0">
+												<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
+												<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
+											</div>
+										{:else}
+											<div
+												class="mt-1.5 h-2.5 w-2.5 flex-shrink-0 rounded-full {activeSet.has(session.id)
+													? 'bg-success'
+													: 'bg-base-content/20'}"
+											></div>
+										{/if}
 										<div class="min-w-0 flex-1">
 											<div class="truncate text-sm font-medium">
 												{session.name || session.firstMessage || 'Empty session'}
