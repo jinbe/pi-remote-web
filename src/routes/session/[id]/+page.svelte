@@ -419,9 +419,15 @@
 	});
 
 	// Fallback: poll session state to catch missed agent_end events
+	// Uses exponential backoff: 1.5s, 3s, 6s, ... up to 30s
 	$effect(() => {
 		if (!streaming) return;
-		const interval = setInterval(async () => {
+		let delay = 1500;
+		let timer: ReturnType<typeof setTimeout>;
+		let cancelled = false;
+
+		async function poll() {
+			if (cancelled) return;
 			try {
 				const res = await fetch(`/api/sessions/${data.sessionId}/state`);
 				if (!res.ok) return;
@@ -433,10 +439,20 @@
 					currentAssistantText = '';
 					currentThinkingText = '';
 					reloadMessages();
+					return;
 				}
 			} catch { /* ignore */ }
-		}, 1500);
-		return () => clearInterval(interval);
+			if (!cancelled) {
+				delay = Math.min(delay * 2, 30_000);
+				timer = setTimeout(poll, delay);
+			}
+		}
+
+		timer = setTimeout(poll, delay);
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+		};
 	});
 
 	// Session control

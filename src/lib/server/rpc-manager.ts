@@ -122,8 +122,6 @@ function sendCommand(managed: ManagedSession, cmd: Record<string, any>): Promise
 		return Promise.reject(err);
 	}
 
-	
-
 	const promise = new Promise<any>((resolve, reject) => {
 		managed.pendingCommands.set(id, { resolve, reject });
 		setTimeout(() => {
@@ -469,7 +467,6 @@ export async function sendMessage(
 ): Promise<any> {
 	const managed = activeSessions.get(sessionId);
 	if (!managed) {
-		
 		throw new Error('Session not active');
 	}
 
@@ -491,8 +488,6 @@ export async function sendMessage(
 			// If get_state fails, fall back to local state
 		}
 	}
-
-	
 
 	if (behavior === 'steer') {
 		return sendCommand(managed, { type: 'steer', message });
@@ -521,7 +516,6 @@ export async function abortSession(sessionId: string): Promise<void> {
 export async function stopSession(sessionId: string): Promise<void> {
 	const managed = activeSessions.get(sessionId);
 	if (managed) {
-		
 		// Record event before stopping
 		insertSessionEvent(sessionId, 'session_stopped');
 		// Send SIGUSR1 to relay — it will kill pi, notify us via session_ended, then exit
