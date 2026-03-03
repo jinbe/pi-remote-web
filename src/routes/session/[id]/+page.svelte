@@ -596,7 +596,6 @@
 				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={() => showEvents = !showEvents}>
 					Activity
 				</button>
-				<button class="btn btn-ghost btn-xs text-error hidden md:inline-flex" onclick={handleAbort}>Abort</button>
 				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleRestart}>Restart</button>
 				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleStop}>Stop</button>
 				<!-- Mobile: dropdown menu -->
@@ -606,7 +605,6 @@
 					</div>
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 					<ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-40 p-2 shadow-lg border border-base-300">
-						<li><button class="text-error" onclick={handleAbort}>Abort</button></li>
 						<li><button onclick={handleRestart}>Restart</button></li>
 						<li><button onclick={handleStop}>Stop</button></li>
 					</ul>
@@ -682,7 +680,16 @@
 							<div class="whitespace-pre-wrap break-words text-sm">
 								{currentAssistantText}
 							</div>
-							<span class="loading loading-dots loading-xs ml-1"></span>
+							<div class="flex items-center gap-1 mt-1">
+								<span class="loading loading-dots loading-xs"></span>
+								<button
+									class="btn btn-ghost btn-circle btn-xs text-error/60 hover:text-error hover:bg-error/10"
+									aria-label="Abort"
+									onclick={handleAbort}
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+								</button>
+							</div>
 						</div>
 					</div>
 				{/if}
