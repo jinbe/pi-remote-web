@@ -559,7 +559,7 @@
 	<!-- Header -->
 	<div class="navbar bg-base-200 shrink-0 z-10 border-b border-base-300">
 		<div class="navbar-start">
-			<a href="/" class="btn btn-ghost btn-sm">←</a>
+			<a href="/" class="btn btn-ghost btn-sm text-lg">←</a>
 		</div>
 		<div class="navbar-center flex flex-col items-center">
 			<span class="text-sm font-semibold truncate max-w-[200px] flex items-center gap-1.5">
@@ -600,8 +600,8 @@
 				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleStop}>Stop</button>
 				<!-- Mobile: dropdown menu -->
 				<div class="dropdown dropdown-end md:hidden">
-					<div tabindex="0" role="button" class="btn btn-ghost btn-xs">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" /></svg>
+					<div tabindex="0" role="button" class="btn btn-ghost btn-sm">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" /></svg>
 					</div>
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 					<ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-40 p-2 shadow-lg border border-base-300">

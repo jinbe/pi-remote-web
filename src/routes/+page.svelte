@@ -252,12 +252,13 @@
 					{#if stoppingAll}
 						<span class="loading loading-spinner loading-xs"></span>
 					{/if}
-					Stop All ({activeSet.size + runningDevSet.size})
+					<span class="hidden sm:inline">Stop All ({activeSet.size + runningDevSet.size})</span>
+					<span class="sm:hidden">Stop</span>
 				</button>
 			{/if}
 			<button class="btn btn-sm btn-primary" onclick={() => (showNewSession = true)}>+ New</button>
-			<button class="btn btn-sm btn-ghost" onclick={() => invalidateAll()}>↻</button>
-			<button class="btn btn-sm btn-ghost btn-circle" onclick={toggleTheme} title="Toggle theme">
+			<button class="btn btn-sm btn-ghost text-base" onclick={() => invalidateAll()}>↻</button>
+			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={toggleTheme} title="Toggle theme">
 				{#if theme === 'dark'}☀️{:else}🌙{/if}
 			</button>
 		</div>
@@ -295,7 +296,7 @@
 						onclick={() => toggleCollapse(group.cwd)}
 						onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') toggleCollapse(group.cwd); }}
 					>
-						<span class="text-xs opacity-50 transition-transform {expandedProjects.has(group.cwd) ? 'rotate-90' : ''}">▶</span>
+						<span class="text-sm opacity-50 transition-transform {expandedProjects.has(group.cwd) ? 'rotate-90' : ''}">▶</span>
 						<span class="font-semibold flex-1 truncate">{group.shortName}</span>
 						{#if group.hasActive}
 							<span class="badge badge-success badge-xs">active</span>
@@ -306,46 +307,46 @@
 						<!-- Dev server toggle -->
 						{#if group.devCommand || group.devServerRunning}
 							<button
-								class="btn btn-ghost btn-xs"
+								class="btn btn-ghost btn-sm md:btn-xs min-w-[2rem] min-h-[2rem]"
 								onclick={(e: MouseEvent) => { e.stopPropagation(); toggleDevServer(group.cwd, group.devCommand); }}
 								title={group.devServerRunning ? 'Stop dev server' : `Start dev server (${group.devCommand})`}
 							>
 								{#if group.devServerRunning}
-									<span class="text-info">⏹</span>
+									<span class="text-info text-base">⏹</span>
 								{:else}
-									<span class="opacity-50">▷</span>
+									<span class="opacity-50 text-base">▷</span>
 								{/if}
 							</button>
 						{/if}
 						<!-- Configure dev command -->
 						<button
-							class="btn btn-ghost btn-xs"
+							class="btn btn-ghost btn-sm md:btn-xs min-w-[2rem] min-h-[2rem]"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); startEditDevCommand(group.cwd, group.devCommand); }}
 							title={group.devCommand ? `Dev: ${group.devCommand} (click to edit)` : 'Configure dev command'}
 						>
-							<span class="opacity-40 text-xs">⚙</span>
+							<span class="opacity-40 text-base">⚙</span>
 						</button>
 						<button
-							class="btn btn-ghost btn-xs"
+							class="btn btn-ghost btn-sm md:btn-xs min-w-[2rem] min-h-[2rem]"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); createSessionForProject(group.cwd); }}
 							title="New session in {group.shortName}"
 							disabled={creatingForProject === group.cwd}
 						>
 							{#if creatingForProject === group.cwd}
-								<span class="loading loading-spinner loading-xs"></span>
+								<span class="loading loading-spinner loading-sm"></span>
 							{:else}
-								<span class="opacity-50">+</span>
+								<span class="opacity-50 text-base">+</span>
 							{/if}
 						</button>
 						<button
-							class="btn btn-ghost btn-xs"
+							class="btn btn-ghost btn-sm md:btn-xs min-w-[2rem] min-h-[2rem]"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); toggleFavorite(group.cwd); }}
 							title={group.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
 						>
 							{#if group.isFavorite}
-								<span class="text-warning">★</span>
+								<span class="text-warning text-base">★</span>
 							{:else}
-								<span class="opacity-30">☆</span>
+								<span class="opacity-30 text-base">☆</span>
 							{/if}
 						</button>
 					</div>
@@ -393,7 +394,7 @@
 										class="group flex items-start gap-3 px-4 py-3 hover:bg-base-300/50 transition-colors {i > 0 ? 'border-t border-base-300/50' : ''}"
 									>
 										<div
-											class="mt-1.5 h-2 w-2 flex-shrink-0 rounded-full {activeSet.has(session.id)
+											class="mt-1.5 h-2.5 w-2.5 flex-shrink-0 rounded-full {activeSet.has(session.id)
 												? 'bg-success'
 												: 'bg-base-content/20'}"
 										></div>

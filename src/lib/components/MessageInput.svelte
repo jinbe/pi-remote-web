@@ -244,12 +244,12 @@
 					{/if}
 				</button>
 				<button
-					class="btn btn-primary btn-sm btn-outline join-item px-1"
+					class="btn btn-primary btn-sm btn-outline join-item px-1.5"
 					aria-label="Send options"
 					onclick={() => (showSendMenu = !showSendMenu)}
 					disabled={disabled || sending}
 				>
-					<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+					<svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
 						<path d="M6 9l6 6 6-6" />
 					</svg>
 				</button>
