@@ -3,6 +3,7 @@
 	import { timeAgo } from '$lib/utils';
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
+	import StatusDot from '$lib/components/StatusDot.svelte';
 	import { getContext } from 'svelte';
 	import { browser } from '$app/environment';
 	import logoSvg from '$lib/assets/logo.svg';
@@ -304,17 +305,14 @@
 						<span class="font-semibold flex-1 truncate">{group.shortName}</span>
 						{#if group.hasStreaming}
 							<span class="hidden sm:inline badge badge-warning badge-xs">streaming</span>
-							<span class="sm:hidden relative flex h-2.5 w-2.5 flex-shrink-0">
-								<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-								<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
-							</span>
+							<span class="sm:hidden"><StatusDot status="streaming" size="md" /></span>
 						{:else if group.hasActive}
 							<span class="hidden sm:inline badge badge-success badge-xs">idle</span>
-							<span class="sm:hidden h-2.5 w-2.5 rounded-full bg-success flex-shrink-0"></span>
+							<span class="sm:hidden"><StatusDot status="idle" size="md" /></span>
 						{/if}
 						{#if group.devServerRunning}
 							<span class="hidden sm:inline badge badge-info badge-xs">dev</span>
-							<span class="sm:hidden h-2.5 w-2.5 rounded-full bg-info flex-shrink-0"></span>
+							<span class="sm:hidden"><StatusDot status="info" size="md" /></span>
 						{/if}
 						<!-- Dev server toggle -->
 						{#if group.devCommand || group.devServerRunning}
@@ -405,18 +403,12 @@
 										href="/session/{session.id}"
 										class="group flex items-start gap-3 px-4 py-3 hover:bg-base-300/50 transition-colors {i > 0 ? 'border-t border-base-300/50' : ''}"
 									>
-										{#if streamingSet.has(session.id)}
-											<div class="mt-1.5 relative flex h-2.5 w-2.5 flex-shrink-0">
-												<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-												<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
-											</div>
-										{:else}
-											<div
-												class="mt-1.5 h-2.5 w-2.5 flex-shrink-0 rounded-full {activeSet.has(session.id)
-													? 'bg-success'
-													: 'bg-base-content/20'}"
-											></div>
-										{/if}
+										<div class="mt-1.5">
+											<StatusDot
+												status={streamingSet.has(session.id) ? 'streaming' : activeSet.has(session.id) ? 'idle' : 'inactive'}
+												size="md"
+											/>
+										</div>
 										<div class="min-w-0 flex-1">
 											<div class="truncate text-sm font-medium">
 												{session.name || session.firstMessage || 'Empty session'}

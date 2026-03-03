@@ -4,6 +4,7 @@
 	import MessageInput from '$lib/components/MessageInput.svelte';
 	import ExtensionUIModal from '$lib/components/ExtensionUIModal.svelte';
 	import SessionTabs from '$lib/components/SessionTabs.svelte';
+	import StatusDot from '$lib/components/StatusDot.svelte';
 	import { timeAgo } from '$lib/utils';
 	import { getPathToNode, isAncestorOf, findLeafFrom, getBranchPoints } from '$lib/session-tree';
 	import { browser } from '$app/environment';
@@ -565,22 +566,8 @@
 			<span class="text-sm font-semibold truncate max-w-[200px] flex items-center gap-1.5">
 				{#if restarting}
 					<span class="loading loading-spinner loading-xs flex-shrink-0"></span>
-				{:else if sessionActive}
-					{#if streaming}
-						<span class="relative flex h-2.5 w-2.5 flex-shrink-0">
-							<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-							<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
-						</span>
-					{:else if !sseConnected}
-						<span class="relative flex h-2.5 w-2.5 flex-shrink-0">
-							<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-							<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning"></span>
-						</span>
-					{:else}
-						<span class="h-2.5 w-2.5 rounded-full bg-success flex-shrink-0"></span>
-					{/if}
 				{:else}
-					<span class="h-2.5 w-2.5 rounded-full bg-base-content/20 flex-shrink-0"></span>
+					<StatusDot status={sessionActive ? (streaming || !sseConnected ? 'streaming' : 'idle') : 'inactive'} size="md" />
 				{/if}
 				{data.meta.name || data.meta.firstMessage}
 			</span>
