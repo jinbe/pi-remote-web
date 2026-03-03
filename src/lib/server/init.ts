@@ -5,11 +5,13 @@ import { startWatching } from './session-watcher';
 import { homedir } from 'os';
 import { join } from 'path';
 
-let initialized = false;
+// Use globalThis to survive HMR module re-evaluation
+const g = globalThis as any;
+if (g.__piInitialized === undefined) g.__piInitialized = false;
 
 export async function ensureInit() {
-	if (initialized) return;
-	initialized = true;
+	if (g.__piInitialized) return;
+	g.__piInitialized = true;
 
 	await pruneCache();
 	registerCacheInvalidation();

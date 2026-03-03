@@ -101,3 +101,14 @@ export interface ExtensionUIRequest {
 	text?: string;
 	[key: string]: any;
 }
+
+// --- Session Events ---
+
+export interface SessionEvent {
+	id: number;
+	session_id: string;
+	event_type: string;
+	timestamp: string;
+	message_id: string | null;
+	metadata: string | null;
+}

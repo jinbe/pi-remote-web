@@ -64,14 +64,29 @@ async function pumpStdout() {
 }
 pumpStdout().catch(() => {});
 
-// Consume stderr
+// Consume stderr and log to file
+import { appendFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+const LOG_FILE = join(tmpdir(), 'pi-remote-web', 'debug.log');
+function relayLog(msg: string) {
+	try { appendFileSync(LOG_FILE, `${new Date().toISOString()} [INFO] [relay-daemon] ${msg}\n`); } catch {}
+}
+
 if (proc.stderr) {
-	new Response(proc.stderr as ReadableStream).text().then(text => {
-		if (text.trim()) {
-			// Write to our stderr so it's not lost
-			process.stderr.write(`[pi stderr] ${text.slice(0, 4000)}\n`);
+	const stderrReader = (proc.stderr as ReadableStream).getReader();
+	const stderrDecoder = new TextDecoder();
+	(async () => {
+		while (true) {
+			const { done, value } = await stderrReader.read();
+			if (done) break;
+			const text = stderrDecoder.decode(value, { stream: true });
+			if (text.trim()) {
+				relayLog(`[pi stderr] ${text.trim().slice(0, 2000)}`);
+				process.stderr.write(`[pi stderr] ${text.slice(0, 4000)}\n`);
+			}
 		}
-	}).catch(() => {});
+	})().catch(() => {});
 }
 
 // Listen for client connections
@@ -105,8 +120,10 @@ writeFileSync(pidPath, String(process.pid));
 
 // When pi exits, notify clients and shut down
 proc.exited.then((code) => {
+	const signalCode = proc.signalCode;
+	relayLog(`pi exited: code=${code} signal=${signalCode} pid=${proc.pid} clients=${clients.size}`);
 	dead = true;
-	const msg = JSON.stringify({ type: 'session_ended' }) + '\n';
+	const msg = JSON.stringify({ type: 'session_ended', exitCode: code, signal: signalCode }) + '\n';
 	const encoded = new TextEncoder().encode(msg);
 	for (const client of [...clients]) {
 		try {
@@ -122,6 +139,7 @@ proc.exited.then((code) => {
 
 // Handle signals — forward to pi and exit
 function handleSignal(signal: string) {
+	relayLog(`received signal: ${signal} — killing pi (pid=${proc.pid})`);
 	if (signal === 'SIGUSR1') {
 		// Graceful: kill pi, clean up
 		proc.kill();

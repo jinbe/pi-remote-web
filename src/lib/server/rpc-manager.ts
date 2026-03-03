@@ -2,8 +2,9 @@ import { existsSync, unlinkSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir, homedir } from 'os';
-import { getDb } from './cache';
+import { getDb, insertSessionEvent } from './cache';
 import { encodeSessionId } from './session-scanner';
+import { log } from './logger';
 import type { Socket } from 'bun';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -43,7 +44,7 @@ interface ActiveSessionRow {
 
 const MAX_STREAMING_TEXT = 100 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
-const AUTO_STOP_DELAY_MS = 1500;
+
 const RELAY_SCRIPT = join(__dirname, 'pi-relay.ts');
 const SOCKET_DIR = join(tmpdir(), 'pi-remote-web');
 
@@ -121,11 +122,13 @@ function sendCommand(managed: ManagedSession, cmd: Record<string, any>): Promise
 		return Promise.reject(err);
 	}
 
+	
+
 	const promise = new Promise<any>((resolve, reject) => {
 		managed.pendingCommands.set(id, { resolve, reject });
 		setTimeout(() => {
 			if (managed.pendingCommands.delete(id)) {
-				console.warn(`RPC command timed out: ${cmd.type} (session: ${managed.sessionId})`);
+				log.warn('rpc', `command timed out: ${cmd.type} id=${id} session=${managed.sessionId} pendingCommands remaining: ${managed.pendingCommands.size}`);
 				reject(new Error(`RPC command timed out: ${cmd.type}`));
 			}
 		}, COMMAND_TIMEOUT_MS);
@@ -153,6 +156,7 @@ function processData(managed: ManagedSession, raw: Buffer | Uint8Array) {
 					if (parsed.success) {
 						pending.resolve(parsed.data ?? parsed);
 					} else {
+						log.error('rpc', `command failed: ${parsed.command} error=${parsed.error}`);
 						pending.reject(new Error(parsed.error ?? 'RPC command failed'));
 					}
 				}
@@ -166,6 +170,7 @@ function processData(managed: ManagedSession, raw: Buffer | Uint8Array) {
 				managed.lastAgentStartTime = Date.now();
 				managed.streamingAssistantText = '';
 				managed.streamingThinkingText = '';
+				insertSessionEvent(managed.sessionId, 'agent_start');
 				if (managed.autoStopTimer) {
 					clearTimeout(managed.autoStopTimer);
 					managed.autoStopTimer = null;
@@ -176,17 +181,17 @@ function processData(managed: ManagedSession, raw: Buffer | Uint8Array) {
 				managed.lastAgentStartTime = null;
 				managed.streamingAssistantText = '';
 				managed.streamingThinkingText = '';
-				if (managed.autoStopTimer) clearTimeout(managed.autoStopTimer);
-				managed.autoStopTimer = setTimeout(() => {
-					managed.autoStopTimer = null;
-					if (!managed.isStreaming && activeSessions.has(managed.sessionId)) {
-						stopSession(managed.sessionId);
-					}
-				}, AUTO_STOP_DELAY_MS);
+				insertSessionEvent(managed.sessionId, 'agent_end');
 			}
 			if (parsed.type === 'session_ended') {
 				handleSessionEnded(managed);
 				return; // Stop processing — session is done
+			}
+			if (parsed.type === 'auto_compaction_start') {
+				insertSessionEvent(managed.sessionId, 'compaction_start');
+			}
+			if (parsed.type === 'auto_compaction_end') {
+				insertSessionEvent(managed.sessionId, 'compaction_end');
 			}
 			if (parsed.type === 'message_update') {
 				const ame = parsed.assistantMessageEvent;
@@ -217,6 +222,7 @@ function processData(managed: ManagedSession, raw: Buffer | Uint8Array) {
 // --- Handle session ended (relay reported pi exited) ---
 
 function handleSessionEnded(managed: ManagedSession) {
+	insertSessionEvent(managed.sessionId, 'session_ended');
 	if (managed.autoStopTimer) {
 		clearTimeout(managed.autoStopTimer);
 		managed.autoStopTimer = null;
@@ -247,7 +253,7 @@ async function spawnRelay(
 	cwd: string,
 	piArgs: string[]
 ): Promise<number> {
-	console.log(`Spawning relay: ${RELAY_SCRIPT} ${socketPath} ${cwd} ${piArgs.join(' ')}`);
+	log.info('relay', `spawning: ${RELAY_SCRIPT} ${socketPath} ${cwd} ${piArgs.join(' ')}`);
 
 	// Spawn relay as a detached process that survives our exit.
 	// Use stdin/stdout/stderr: 'ignore' so no pipe ties us to the child.
@@ -276,7 +282,7 @@ async function spawnRelay(
 		if (existsSync(pidPath) && existsSync(socketPath)) {
 			const pid = parseInt(readFileSync(pidPath, 'utf-8').trim(), 10);
 			if (pid > 0 && isProcessAlive(pid)) {
-				console.log(`Relay ready: pid ${pid}`);
+				log.info('relay', `ready: pid ${pid}`);
 				return pid;
 			}
 		}
@@ -306,7 +312,7 @@ async function connectToRelay(managed: ManagedSession): Promise<void> {
 						}
 					},
 					error(_socket, err) {
-						console.error(`Socket error for ${managed.sessionId}:`, err.message);
+						log.error('socket', `error for ${managed.sessionId}: ${err.message}`);
 					},
 				},
 			});
@@ -364,6 +370,9 @@ export async function resumeSession(
 		await connectToRelay(managed);
 		activeSessions.set(sessionId, managed);
 		updatePidStmt.run(relayPid, 'running', sessionId);
+
+		// Record session resumed event
+		insertSessionEvent(sessionId, 'session_resumed');
 
 		// Sync streaming state
 		try {
@@ -447,6 +456,9 @@ export async function createSession(cwd: string, model?: string): Promise<string
 		socketPath
 	);
 
+	// Record session created event
+	insertSessionEvent(sessionId, 'session_created');
+
 	return sessionId;
 }
 
@@ -456,14 +468,38 @@ export async function sendMessage(
 	behavior?: 'steer' | 'followUp'
 ): Promise<any> {
 	const managed = activeSessions.get(sessionId);
-	if (!managed) throw new Error('Session not active');
+	if (!managed) {
+		
+		throw new Error('Session not active');
+	}
+
+	// If we think we're streaming, verify with pi's actual state
+	// to handle missed agent_end events
+	let actuallyStreaming = managed.isStreaming;
+	if (actuallyStreaming && !behavior) {
+		try {
+			const state = await sendCommand(managed, { type: 'get_state' });
+			actuallyStreaming = state.isStreaming || (state.pendingMessageCount ?? 0) > 0;
+			if (!actuallyStreaming && managed.isStreaming) {
+				log.warn('sendMessage', `correcting streaming state — pi says not streaming, resetting`);
+				managed.isStreaming = false;
+				managed.lastAgentStartTime = null;
+				managed.streamingAssistantText = '';
+				managed.streamingThinkingText = '';
+			}
+		} catch {
+			// If get_state fails, fall back to local state
+		}
+	}
+
+	
 
 	if (behavior === 'steer') {
 		return sendCommand(managed, { type: 'steer', message });
 	} else if (behavior === 'followUp') {
 		return sendCommand(managed, { type: 'follow_up', message });
 	} else {
-		if (managed.isStreaming) {
+		if (actuallyStreaming) {
 			return sendCommand(managed, { type: 'follow_up', message });
 		}
 		return sendCommand(managed, { type: 'prompt', message });
@@ -485,6 +521,9 @@ export async function abortSession(sessionId: string): Promise<void> {
 export async function stopSession(sessionId: string): Promise<void> {
 	const managed = activeSessions.get(sessionId);
 	if (managed) {
+		
+		// Record event before stopping
+		insertSessionEvent(sessionId, 'session_stopped');
 		// Send SIGUSR1 to relay — it will kill pi, notify us via session_ended, then exit
 		try {
 			process.kill(managed.relayPid, 'SIGUSR1');
@@ -618,12 +657,24 @@ export async function recoverActiveSessions() {
 			continue;
 		}
 
+		// If already connected in-memory, skip — avoids duplicate connections on HMR
+		const existing = activeSessions.get(row.session_id);
+		if (existing?.socket) {
+			log.info('recovery', `already connected: ${row.session_id} — skipping`);
+			continue;
+		}
+
+		// Close any stale socket from a previous in-memory entry
+		if (existing) {
+			try { existing.socket?.end(); } catch {}
+		}
+
 		const socketPath = row.socket_path || socketPathFor(row.session_id);
 		const relayPid = getRelayPid(socketPath);
 
 		if (relayPid) {
 			// Relay is still alive! Just reconnect.
-			console.log(`Reconnecting to live relay: ${row.session_id} (pid ${relayPid})`);
+			log.info('recovery', `reconnecting to live relay: ${row.session_id} (pid ${relayPid})`);
 			try {
 				const managed: ManagedSession = {
 					sessionId: row.session_id,
@@ -658,7 +709,7 @@ export async function recoverActiveSessions() {
 				reconnected++;
 				continue;
 			} catch (err) {
-				console.error(`Failed to reconnect to relay ${row.session_id}:`, err);
+				log.error('recovery', `failed to reconnect to relay ${row.session_id}: ${err}`);
 				killRelay(relayPid, socketPath);
 			}
 		} else {
@@ -672,25 +723,25 @@ export async function recoverActiveSessions() {
 			}
 		}
 
-		console.log(`Recovering session: ${row.session_id} (${row.cwd})`);
+		log.info('recovery', `recovering session: ${row.session_id} (${row.cwd})`);
 		try {
 			await resumeSession(row.session_id, row.file_path, row.cwd);
 			recovered++;
 		} catch (err) {
-			console.error(`Failed to recover ${row.session_id}:`, err);
+			log.error('recovery', `failed to recover ${row.session_id}: ${err}`);
 			deleteActiveStmt.run(row.session_id);
 		}
 	}
 
 	if (rows.length > 0) {
-		console.log(`Recovery: ${reconnected} reconnected, ${recovered} respawned (of ${rows.length} total)`);
+		log.info('recovery', `${reconnected} reconnected, ${recovered} respawned (of ${rows.length} total)`);
 	}
 }
 
 // --- Graceful shutdown ---
 
 async function handleShutdown() {
-	console.log('Shutting down — disconnecting from relays (agents stay alive)...');
+	log.info('shutdown', 'disconnecting from relays (agents stay alive)...');
 
 	// Disconnect from all relays but DON'T kill them
 	for (const [, managed] of activeSessions) {

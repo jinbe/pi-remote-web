@@ -60,9 +60,21 @@ export function getDb(): Database {
 			dev_command TEXT
 		)`);
 
+		db.run(`CREATE TABLE IF NOT EXISTS session_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			timestamp TEXT NOT NULL,
+			message_id TEXT,
+			metadata TEXT,
+			FOREIGN KEY (session_id) REFERENCES active_sessions(session_id)
+		)`);
+
 		db.run('CREATE INDEX IF NOT EXISTS idx_meta_mtime ON session_meta(mtime_ms)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_meta_last_modified ON session_meta(last_modified)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_active_status ON active_sessions(status)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_events_session ON session_events(session_id)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_events_timestamp ON session_events(timestamp)');
 	}
 	return db;
 }
@@ -163,4 +175,25 @@ export async function pruneCache() {
 
 export function warmCache(scanAndParse: () => Promise<void>) {
 	setTimeout(() => scanAndParse(), 100);
+}
+
+// Session Events
+export interface SessionEvent {
+	id: number;
+	session_id: string;
+	event_type: string;
+	timestamp: string;
+	message_id: string | null;
+	metadata: string | null;
+}
+
+export function insertSessionEvent(sessionId: string, eventType: string, messageId?: string, metadata?: Record<string, any>) {
+	getDb().run(
+		'INSERT INTO session_events (session_id, event_type, timestamp, message_id, metadata) VALUES (?, ?, ?, ?, ?)',
+		[sessionId, eventType, new Date().toISOString(), messageId ?? null, metadata ? JSON.stringify(metadata) : null]
+	);
+}
+
+export function getSessionEvents(sessionId: string): SessionEvent[] {
+	return getDb().query('SELECT * FROM session_events WHERE session_id = ? ORDER BY timestamp ASC').all(sessionId) as SessionEvent[];
 }
