@@ -8,6 +8,7 @@
 		cwd: string;
 		model: string | null;
 		shortName: string;
+		isStreaming: boolean;
 	}
 
 	let { currentSessionId }: { currentSessionId: string } = $props();
@@ -66,7 +67,14 @@
 							? 'bg-base-100 text-base-content font-semibold border-t-2 border-t-primary'
 							: 'text-base-content/60 hover:bg-base-300/50 border-t-2 border-t-transparent'}"
 				>
-					<span class="h-2 w-2 rounded-full bg-success flex-shrink-0"></span>
+					{#if session.isStreaming}
+						<span class="relative flex h-2 w-2 flex-shrink-0">
+							<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
+							<span class="relative inline-flex rounded-full h-2 w-2 bg-warning"></span>
+						</span>
+					{:else}
+						<span class="h-2 w-2 rounded-full bg-success flex-shrink-0"></span>
+					{/if}
 					<span class="truncate">{label(session)}</span>
 				</a>
 			{/each}
