@@ -8,16 +8,18 @@
 	let {
 		sessionId,
 		disabled = false,
+		streaming = false,
 		onsent
 	}: {
 		sessionId: string;
 		disabled?: boolean;
+		streaming?: boolean;
 		onsent?: (text: string) => void;
 	} = $props();
 
 	let message = $state('');
-	let behavior = $state<'send' | 'steer' | 'followUp'>('send');
 	let sending = $state(false);
+	let showSendMenu = $state(false);
 
 	// Autocomplete state
 	let commands = $state<SlashCommand[]>([]);
@@ -62,9 +64,10 @@
 		showAutocomplete = false;
 	}
 
-	async function handleSend() {
+	async function doSend(behavior?: 'steer') {
 		if (!message.trim() || sending) return;
 		sending = true;
+		showSendMenu = false;
 
 		const sentText = message.trim();
 
@@ -74,7 +77,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					message: sentText,
-					behavior: behavior === 'send' ? undefined : behavior
+					behavior: behavior || undefined
 				})
 			});
 
@@ -86,6 +89,14 @@
 		} finally {
 			sending = false;
 		}
+	}
+
+	function handleSend() {
+		doSend();
+	}
+
+	function handleSteer() {
+		doSend('steer');
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -167,7 +178,19 @@
 			default: return 'badge-ghost';
 		}
 	}
+
+	// Close send menu on outside click
+	function handleWindowClick(e: MouseEvent) {
+		if (showSendMenu) {
+			const target = e.target as HTMLElement;
+			if (!target.closest('.send-menu-container')) {
+				showSendMenu = false;
+			}
+		}
+	}
 </script>
+
+<svelte:window onclick={handleWindowClick} />
 
 <div class="border-t border-base-300 bg-base-200 p-3 relative">
 	<!-- Autocomplete dropdown -->
@@ -211,38 +234,65 @@
 
 	<div class="flex gap-2">
 		<textarea
-			class="textarea flex-1 min-h-[2.5rem] max-h-32 resize-none"
+			class="textarea flex-1 min-h-[3rem] max-h-40 resize-none"
 			placeholder="Type a message... (/ for commands)"
 			bind:value={message}
 			onkeydown={handleKeydown}
 			oninput={handleInput}
 			{disabled}
-			rows={1}
+			rows={2}
 		></textarea>
-		<button
-			class="btn btn-primary btn-sm self-end"
-			onclick={handleSend}
-			disabled={disabled || !message.trim() || sending}
-		>
-			{#if sending}
-				<span class="loading loading-spinner loading-xs"></span>
+		<!-- Send button with optional steer dropdown while streaming -->
+		<div class="self-end send-menu-container relative">
+			{#if streaming}
+				<div class="join join-vertical">
+					<button
+						class="btn btn-primary btn-sm join-item"
+						onclick={handleSend}
+						disabled={disabled || !message.trim() || sending}
+					>
+						{#if sending}
+							<span class="loading loading-spinner loading-xs"></span>
+						{:else}
+							⏎
+						{/if}
+					</button>
+					<button
+						class="btn btn-primary btn-sm btn-outline join-item px-1"
+						aria-label="Send options"
+						onclick={() => (showSendMenu = !showSendMenu)}
+						disabled={disabled || !message.trim() || sending}
+					>
+						<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+							<path d="M6 9l6 6 6-6" />
+						</svg>
+					</button>
+				</div>
+				{#if showSendMenu}
+					<div class="absolute bottom-full right-0 mb-1 z-30">
+						<ul class="menu menu-sm bg-base-100 rounded-box shadow-lg border border-base-300 w-40">
+							<li>
+								<button onclick={handleSteer}>
+									<span>⚡ Steer</span>
+									<span class="text-[10px] opacity-50">interrupt</span>
+								</button>
+							</li>
+						</ul>
+					</div>
+				{/if}
 			{:else}
-				⏎
+				<button
+					class="btn btn-primary btn-sm"
+					onclick={handleSend}
+					disabled={disabled || !message.trim() || sending}
+				>
+					{#if sending}
+						<span class="loading loading-spinner loading-xs"></span>
+					{:else}
+						⏎
+					{/if}
+				</button>
 			{/if}
-		</button>
-	</div>
-	<div class="mt-2 flex gap-2 text-xs">
-		<label class="flex items-center gap-1 cursor-pointer">
-			<input type="radio" name="behavior" class="radio radio-xs" value="send" bind:group={behavior} />
-			Send
-		</label>
-		<label class="flex items-center gap-1 cursor-pointer">
-			<input type="radio" name="behavior" class="radio radio-xs" value="steer" bind:group={behavior} />
-			Steer
-		</label>
-		<label class="flex items-center gap-1 cursor-pointer">
-			<input type="radio" name="behavior" class="radio radio-xs" value="followUp" bind:group={behavior} />
-			Follow-up
-		</label>
+		</div>
 	</div>
 </div>

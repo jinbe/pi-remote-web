@@ -773,7 +773,7 @@
 				<span class="text-sm text-base-content/50 ml-2">Restarting session…</span>
 			</div>
 		{:else if sessionActive}
-			<MessageInput sessionId={data.sessionId} onsent={handleMessageSent} />
+			<MessageInput sessionId={data.sessionId} {streaming} onsent={handleMessageSent} />
 		{:else}
 			<div class="border-t border-base-300 bg-base-200 p-4 text-center">
 				<button class="btn btn-primary btn-sm" onclick={handleResume} disabled={resuming}>
