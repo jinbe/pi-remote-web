@@ -299,10 +299,12 @@
 						<span class="text-sm opacity-50 transition-transform {expandedProjects.has(group.cwd) ? 'rotate-90' : ''}">▶</span>
 						<span class="font-semibold flex-1 truncate">{group.shortName}</span>
 						{#if group.hasActive}
-							<span class="badge badge-success badge-xs">active</span>
+							<span class="hidden sm:inline badge badge-success badge-xs">active</span>
+							<span class="sm:hidden h-2.5 w-2.5 rounded-full bg-success flex-shrink-0"></span>
 						{/if}
 						{#if group.devServerRunning}
-							<span class="badge badge-info badge-xs">dev</span>
+							<span class="hidden sm:inline badge badge-info badge-xs">dev</span>
+							<span class="sm:hidden h-2.5 w-2.5 rounded-full bg-info flex-shrink-0"></span>
 						{/if}
 						<!-- Dev server toggle -->
 						{#if group.devCommand || group.devServerRunning}
