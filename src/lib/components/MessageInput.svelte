@@ -50,7 +50,6 @@
 	}
 
 	function updateAutocomplete() {
-		// Show autocomplete when input starts with / and has no spaces yet (typing command name)
 		if (message.startsWith('/') && !message.includes(' ') && message.length >= 1) {
 			showAutocomplete = true;
 			selectedIndex = 0;
@@ -155,6 +154,7 @@
 	async function sendQuickCommand(text: string) {
 		if (sending || disabled) return;
 		sending = true;
+		showSendMenu = false;
 		try {
 			const res = await fetch(`/api/sessions/${sessionId}/prompt`, {
 				method: 'POST',
@@ -219,19 +219,6 @@
 		</div>
 	{/if}
 
-	<!-- Quick commands -->
-	<div class="flex gap-1.5 mb-2 overflow-x-auto">
-		{#each quickCommands as cmd (cmd.label)}
-			<button
-				class="btn btn-xs btn-outline btn-ghost rounded-full whitespace-nowrap"
-				onclick={() => sendQuickCommand(cmd.message)}
-				disabled={disabled || sending}
-			>
-				{cmd.label}
-			</button>
-		{/each}
-	</div>
-
 	<div class="flex gap-2">
 		<textarea
 			class="textarea flex-1 min-h-[3rem] max-h-40 resize-none"
@@ -242,47 +229,11 @@
 			{disabled}
 			rows={2}
 		></textarea>
-		<!-- Send button with optional steer dropdown while streaming -->
+		<!-- Send button with dropdown menu -->
 		<div class="self-end send-menu-container relative">
-			{#if streaming}
-				<div class="join join-vertical">
-					<button
-						class="btn btn-primary btn-sm join-item"
-						onclick={handleSend}
-						disabled={disabled || !message.trim() || sending}
-					>
-						{#if sending}
-							<span class="loading loading-spinner loading-xs"></span>
-						{:else}
-							⏎
-						{/if}
-					</button>
-					<button
-						class="btn btn-primary btn-sm btn-outline join-item px-1"
-						aria-label="Send options"
-						onclick={() => (showSendMenu = !showSendMenu)}
-						disabled={disabled || !message.trim() || sending}
-					>
-						<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-							<path d="M6 9l6 6 6-6" />
-						</svg>
-					</button>
-				</div>
-				{#if showSendMenu}
-					<div class="absolute bottom-full right-0 mb-1 z-30">
-						<ul class="menu menu-sm bg-base-100 rounded-box shadow-lg border border-base-300 w-40">
-							<li>
-								<button onclick={handleSteer}>
-									<span>⚡ Steer</span>
-									<span class="text-[10px] opacity-50">interrupt</span>
-								</button>
-							</li>
-						</ul>
-					</div>
-				{/if}
-			{:else}
+			<div class="join join-vertical">
 				<button
-					class="btn btn-primary btn-sm"
+					class="btn btn-primary btn-sm join-item"
 					onclick={handleSend}
 					disabled={disabled || !message.trim() || sending}
 				>
@@ -292,6 +243,38 @@
 						⏎
 					{/if}
 				</button>
+				<button
+					class="btn btn-primary btn-sm btn-outline join-item px-1"
+					aria-label="Send options"
+					onclick={() => (showSendMenu = !showSendMenu)}
+					disabled={disabled || sending}
+				>
+					<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+						<path d="M6 9l6 6 6-6" />
+					</svg>
+				</button>
+			</div>
+			{#if showSendMenu}
+				<div class="absolute bottom-full right-0 mb-1 z-30">
+					<ul class="menu menu-sm bg-base-100 rounded-box shadow-lg border border-base-300 w-44">
+						{#if streaming}
+							<li>
+								<button onclick={handleSteer} disabled={!message.trim()}>
+									<span>⚡ Steer</span>
+									<span class="text-[10px] opacity-50">interrupt</span>
+								</button>
+							</li>
+							<li class="border-b border-base-300"></li>
+						{/if}
+						{#each quickCommands as cmd (cmd.label)}
+							<li>
+								<button onclick={() => sendQuickCommand(cmd.message)}>
+									{cmd.label}
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
 			{/if}
 		</div>
 	</div>
