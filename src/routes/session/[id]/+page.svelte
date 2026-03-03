@@ -418,7 +418,9 @@
 		};
 	});
 
-	// Fallback: poll session state to catch missed agent_end events
+	// Fallback: poll session state to catch missed agent_end events.
+	// Keep this as a fixed 1.5s interval — exponential backoff sounds nice but
+	// ends up waiting 30s to clear the UI when an agent_end event is missed.
 	$effect(() => {
 		if (!streaming) return;
 		const interval = setInterval(async () => {
