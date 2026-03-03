@@ -48,6 +48,7 @@
 	const label = (s: ActiveSession) => s.name || s.firstMessage || s.shortName || 'Session';
 
 	// Collect recent cwds/models from active sessions for the new session modal
+	const currentCwd = $derived(sessions.find((s) => s.id === currentSessionId)?.cwd ?? '');
 	const recentCwds = $derived([...new Set(sessions.map((s) => s.cwd))].slice(0, 10));
 	const recentModels = $derived(
 		[...new Set(sessions.map((s) => s.model).filter(Boolean) as string[])].slice(0, 10)
@@ -84,6 +85,7 @@
 
 <NewSessionModal
 	open={showNewSession}
+	defaultCwd={currentCwd}
 	{recentCwds}
 	{recentModels}
 	onclose={() => (showNewSession = false)}

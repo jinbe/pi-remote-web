@@ -3,11 +3,13 @@
 
 	let {
 		open = false,
+		defaultCwd = '',
 		recentCwds = [],
 		recentModels = [],
 		onclose
 	}: {
 		open: boolean;
+		defaultCwd?: string;
 		recentCwds?: string[];
 		recentModels?: string[];
 		onclose: () => void;
@@ -15,6 +17,13 @@
 
 	let cwd = $state('');
 	let model = $state('');
+
+	// Pre-fill cwd from defaultCwd when modal opens
+	$effect(() => {
+		if (open && defaultCwd && !cwd) {
+			cwd = defaultCwd;
+		}
+	});
 	let creating = $state(false);
 	let errorMsg = $state('');
 
