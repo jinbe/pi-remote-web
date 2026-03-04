@@ -36,12 +36,12 @@
 </script>
 
 {#if entry.type === 'compaction'}
-	<div class="divider text-xs text-base-content/40">
+	<div class="divider text-xs text-base-content-faint">
 		Context compacted
 	</div>
 {:else if entry.type === 'message'}
-	<div class="chat {isUser ? 'chat-end' : 'chat-start'} mb-2">
-		<div class="chat-header text-xs text-base-content/50 mb-1">
+	<div class="chat {isUser ? 'chat-end' : 'chat-start'} mb-3">
+		<div class="chat-header text-xs text-base-content-subtle mb-1">
 			{#if isUser}
 				You
 			{:else if isAssistant}
@@ -58,7 +58,7 @@
 				? 'chat-bubble-primary'
 				: isToolResult
 					? 'chat-bubble-secondary'
-					: ''} max-w-[85vw] md:max-w-xl"
+					: ''} max-w-[90vw] md:max-w-xl"
 		>
 			{#if isToolResult}
 				<!-- Tool results: collapsed by default, show truncated preview -->
@@ -107,13 +107,13 @@
 										<div class="text-[10px] opacity-50 mb-1">timeout: {args.timeout}s</div>
 									{/if}
 									<div class="rounded bg-base-100/40 border border-base-content/10 overflow-hidden">
-										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content/50 border-b border-base-content/10 font-mono">$ shell</div>
+										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content-subtle border-b border-base-content/10 font-mono">$ shell</div>
 										<pre class="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto p-2 text-success/90">{args.command || ''}</pre>
 									</div>
 								{:else if name === 'read'}
 									<!-- Read: file path with optional range -->
 									<div class="rounded bg-base-100/40 border border-base-content/10 overflow-hidden">
-										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content/50 border-b border-base-content/10 font-mono flex items-center gap-2">
+										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content-subtle border-b border-base-content/10 font-mono flex items-center gap-2">
 											<span>{args.path || ''}</span>
 											{#if args.offset || args.limit}
 												<span class="opacity-60">
@@ -147,14 +147,14 @@
 								{:else if name === 'write'}
 									<!-- Write: file path + content preview -->
 									<div class="rounded bg-base-100/40 border border-base-content/10 overflow-hidden">
-										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content/50 border-b border-base-content/10 font-mono">{args.path || ''}</div>
+										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content-subtle border-b border-base-content/10 font-mono">{args.path || ''}</div>
 										<pre class="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto p-2">{args.content || ''}</pre>
 									</div>
 								{:else if name === 'lsp'}
 									<!-- LSP: structured view -->
 									{@const lspRestEntries = Object.entries(args).filter(([k]) => !['action', 'file'].includes(k))}
 									<div class="rounded bg-base-100/40 border border-base-content/10 overflow-hidden">
-										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content/50 border-b border-base-content/10 font-mono flex items-center gap-2">
+										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content-subtle border-b border-base-content/10 font-mono flex items-center gap-2">
 											<span class="font-semibold">{args.action || ''}</span>
 											{#if args.file}<span class="opacity-60">{args.file}</span>{/if}
 										</div>
@@ -177,7 +177,7 @@
 			{/if}
 
 			{#if entry.message?.usage}
-				<div class="text-[10px] text-base-content/30 mt-1 text-right">
+				<div class="text-[10px] text-base-content-faint mt-1 text-right">
 					{entry.message.usage.input}↓ {entry.message.usage.output}↑
 					{#if entry.message.usage.cost?.total}
 						· ${entry.message.usage.cost.total.toFixed(4)}
