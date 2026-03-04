@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { BranchPoint } from '$lib/types';
+	import { hapticLight } from '$lib/haptics';
 
 	let {
 		branchPoint,
@@ -8,11 +9,16 @@
 		branchPoint: BranchPoint;
 		onselect: (childId: string) => void;
 	} = $props();
+
+	function selectBranch(childId: string) {
+		hapticLight();
+		onselect(childId);
+	}
 </script>
 
 <div class="my-2 flex items-center gap-2">
 	<div class="dropdown">
-		<div tabindex="0" role="button" class="badge badge-outline badge-sm cursor-pointer gap-1">
+		<div tabindex="0" role="button" class="badge badge-outline badge-sm cursor-pointer gap-1" aria-label="Switch branch">
 			🔀 {branchPoint.branches.length} branches
 		</div>
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -21,15 +27,15 @@
 				<li>
 					<button
 						class="text-left {branch.isCurrentPath ? 'active' : ''}"
-						onclick={() => onselect(branch.childId)}
+						onclick={() => selectBranch(branch.childId)}
 					>
 						<div class="flex flex-col">
 							<span class="text-xs font-medium">
 								{branch.isCurrentPath ? '▸ Current' : '▸ Alt'}
-								<span class="text-base-content/40">({branch.messageCount} msgs)</span>
+								<span class="text-base-content-faint">({branch.messageCount} msgs)</span>
 							</span>
 							{#if branch.preview}
-								<span class="text-xs text-base-content/60 truncate">
+								<span class="text-xs text-base-content-muted truncate">
 									"{branch.preview}"
 								</span>
 							{/if}

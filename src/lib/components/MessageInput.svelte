@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { hapticLight, hapticMedium } from '$lib/haptics';
+
 	interface SlashCommand {
 		name: string;
 		description?: string;
@@ -59,12 +61,14 @@
 	}
 
 	function acceptCompletion(cmd: SlashCommand) {
+		hapticLight();
 		message = '/' + cmd.name + ' ';
 		showAutocomplete = false;
 	}
 
 	async function doSend(behavior?: 'steer') {
 		if (!message.trim() || sending) return;
+		hapticMedium();
 		sending = true;
 		showSendMenu = false;
 
@@ -153,6 +157,7 @@
 
 	async function sendQuickCommand(text: string) {
 		if (sending || disabled) return;
+		hapticMedium();
 		sending = true;
 		showSendMenu = false;
 		try {
@@ -192,7 +197,7 @@
 
 <svelte:window onclick={handleWindowClick} />
 
-<div class="border-t border-base-300 bg-base-200 p-3 relative">
+<div class="border-t border-base-300 bg-base-200 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] relative">
 	<!-- Autocomplete dropdown -->
 	{#if showAutocomplete && filtered.length > 0}
 		<div class="absolute bottom-full left-3 right-3 mb-1 z-20">
@@ -210,7 +215,7 @@
 							<span class="font-mono text-sm">/{cmd.name}</span>
 							<span class="badge badge-xs {sourceBadge(cmd.source)}">{cmd.source}</span>
 							{#if cmd.description}
-								<span class="text-xs text-base-content/50 truncate">{cmd.description}</span>
+								<span class="text-xs text-base-content-subtle truncate">{cmd.description}</span>
 							{/if}
 						</button>
 					</li>

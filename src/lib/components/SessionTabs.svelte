@@ -1,6 +1,7 @@
 <script lang="ts">
 	import NewSessionModal from './NewSessionModal.svelte';
 	import StatusDot from './StatusDot.svelte';
+	import { hapticLight, hapticHeavy } from '$lib/haptics';
 
 	interface ActiveSession {
 		id: string;
@@ -31,6 +32,14 @@
 		}
 	}
 
+	async function stopSession(sessionId: string, e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		hapticHeavy();
+		await fetch(`/api/sessions/${sessionId}/stop`, { method: 'POST' });
+		loadActiveSessions();
+	}
+
 	// Load on mount
 	$effect(() => {
 		loadActiveSessions();
@@ -58,23 +67,32 @@
 </script>
 
 {#if !loading}
-	<div class="border-t border-base-300 bg-base-200 shrink-0 overflow-x-auto">
+	<div class="border-t border-base-300 bg-base-200 shrink-0 overflow-x-auto pb-[env(safe-area-inset-bottom)]">
 		<div class="flex min-w-0">
 			{#each sessions as session (session.id)}
 				<a
 					href="/session/{session.id}"
-					class="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-xs border-r border-base-300 transition-colors max-w-[160px] min-w-[80px]
+					onclick={() => hapticLight()}
+					class="group/tab flex-shrink-0 flex items-center gap-1.5 pl-3 pr-1.5 py-2 text-xs border-r border-base-300 transition-colors max-w-[180px] min-w-[80px]
 						{session.id === currentSessionId
 							? 'bg-base-100 text-base-content font-semibold border-t-2 border-t-primary'
-							: 'text-base-content/60 hover:bg-base-300/50 border-t-2 border-t-transparent'}"
+							: 'text-base-content-muted hover:bg-base-300/50 border-t-2 border-t-transparent'}"
 				>
 					<StatusDot status={session.isStreaming ? 'streaming' : 'idle'} size="sm" />
-					<span class="truncate">{label(session)}</span>
+					<span class="truncate flex-1">{label(session)}</span>
+					<button
+						class="flex-shrink-0 rounded-full w-5 h-5 flex items-center justify-center text-[10px] opacity-0 group-hover/tab:opacity-60 hover:!opacity-100 hover:bg-base-content/10 transition-opacity"
+						onclick={(e) => stopSession(session.id, e)}
+						aria-label="Stop session {label(session)}"
+					>
+						✕
+					</button>
 				</a>
 			{/each}
 			<button
-				class="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-xs border-r border-base-300 text-base-content/40 hover:text-base-content/70 hover:bg-base-300/50 transition-colors border-t-2 border-t-transparent"
-				onclick={() => (showNewSession = true)}
+				class="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-xs border-r border-base-300 text-base-content-faint hover:text-base-content/70 hover:bg-base-300/50 transition-colors border-t-2 border-t-transparent"
+				onclick={() => { hapticLight(); showNewSession = true; }}
+				aria-label="New session"
 			>
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 					<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
@@ -92,3 +110,12 @@
 	{recentModels}
 	onclose={() => (showNewSession = false)}
 />
+
+<style>
+	/* On touch devices, always show close buttons since there's no hover */
+	@media (hover: none) {
+		:global(.group\/tab) button {
+			opacity: 0.4 !important;
+		}
+	}
+</style>

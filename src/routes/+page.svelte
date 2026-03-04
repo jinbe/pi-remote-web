@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { timeAgo } from '$lib/utils';
+	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
@@ -110,10 +111,12 @@
 	});
 
 	function toggleCollapse(cwd: string) {
+		hapticLight();
 		expandedProject = expandedProject === cwd ? null : cwd;
 	}
 
 	async function toggleFavorite(cwd: string) {
+		hapticLight();
 		const action = favSet.has(cwd) ? 'remove' : 'add';
 		await fetch('/api/favorites', {
 			method: 'POST',
@@ -125,6 +128,7 @@
 
 	async function createSessionForProject(cwd: string) {
 		if (creatingForProject) return;
+		hapticMedium();
 		creatingForProject = cwd;
 		try {
 			const res = await fetch('/api/sessions/new', {
@@ -155,6 +159,7 @@
 		if (activeSet.size > 0) parts.push(`${activeSet.size} session(s)`);
 		if (runningDevSet.size > 0) parts.push(`${runningDevSet.size} dev server(s)`);
 		if (!confirm(`Stop all ${parts.join(' and ')}?`)) return;
+		hapticHeavy();
 		stoppingAll = true;
 		try {
 			await fetch('/api/sessions/stop-all', { method: 'POST' });
@@ -167,6 +172,7 @@
 	}
 
 	async function toggleDevServer(cwd: string, devCommand: string | null) {
+		hapticMedium();
 		if (runningDevSet.has(cwd)) {
 			await fetch('/api/dev-server', {
 				method: 'POST',
@@ -228,11 +234,54 @@
 			e.stopPropagation();
 		}
 		if (e && !confirm('Delete this session? This cannot be undone.')) return;
+		hapticHeavy();
 		try {
 			await fetch(`/api/sessions/${sessionId}/delete`, { method: 'POST' });
 			invalidateAll();
 		} catch (err) {
 			console.error('Failed to delete session:', err);
+		}
+	}
+
+	// Pull-to-refresh state
+	let pullStartY = $state(0);
+	let pullDistance = $state(0);
+	let isPulling = $state(false);
+	let isRefreshing = $state(false);
+	let scrollContainer: HTMLElement | undefined = $state();
+	const PULL_THRESHOLD = 80;
+
+	function onPullTouchStart(e: TouchEvent) {
+		if (!scrollContainer || scrollContainer.scrollTop > 0 || isRefreshing) return;
+		pullStartY = e.touches[0].clientY;
+		isPulling = true;
+	}
+
+	function onPullTouchMove(e: TouchEvent) {
+		if (!isPulling || isRefreshing) return;
+		const dy = e.touches[0].clientY - pullStartY;
+		if (dy > 0 && scrollContainer && scrollContainer.scrollTop <= 0) {
+			pullDistance = Math.min(dy * 0.5, 120); // Dampen the pull
+		} else {
+			pullDistance = 0;
+		}
+	}
+
+	async function onPullTouchEnd() {
+		if (!isPulling) return;
+		isPulling = false;
+		if (pullDistance >= PULL_THRESHOLD) {
+			hapticMedium();
+			isRefreshing = true;
+			pullDistance = PULL_THRESHOLD; // Hold at threshold during refresh
+			try {
+				await invalidateAll();
+			} finally {
+				isRefreshing = false;
+				pullDistance = 0;
+			}
+		} else {
+			pullDistance = 0;
 		}
 	}
 
@@ -244,7 +293,31 @@
 	});
 </script>
 
-<div class="mx-auto max-w-3xl px-4 py-6 h-full overflow-y-auto">
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	class="mx-auto max-w-3xl px-4 py-6 h-full overflow-y-auto"
+	bind:this={scrollContainer}
+	ontouchstart={onPullTouchStart}
+	ontouchmove={onPullTouchMove}
+	ontouchend={onPullTouchEnd}
+>
+	<!-- Pull-to-refresh indicator -->
+	<div
+		class="flex justify-center items-center overflow-hidden transition-all duration-300 ease-out"
+		style="height: {pullDistance}px; margin-top: {pullDistance > 0 ? '-0.5rem' : '0'};"
+	>
+		{#if isRefreshing}
+			<span class="loading loading-spinner loading-sm text-primary"></span>
+		{:else if pullDistance > 0}
+			<span
+				class="text-base-content/40 text-sm transition-transform duration-150"
+				style="transform: rotate({Math.min(pullDistance / PULL_THRESHOLD, 1) * 180}deg);"
+			>
+				↓
+			</span>
+		{/if}
+	</div>
+
 	<div class="mb-6 flex items-center justify-between">
 		<img src={logoSvg} alt="Pi" class="h-8 w-8 rounded-lg" />
 		<div class="flex gap-2">
@@ -261,9 +334,9 @@
 					<span class="sm:hidden">Stop</span>
 				</button>
 			{/if}
-			<button class="btn btn-sm btn-primary" onclick={() => (showNewSession = true)}>+ New</button>
-			<button class="btn btn-sm btn-ghost text-base" onclick={() => invalidateAll()}>↻</button>
-			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={toggleTheme} title="Toggle theme">
+			<button class="btn btn-sm btn-primary" onclick={() => { hapticMedium(); showNewSession = true; }}>+ New</button>
+			<button class="btn btn-sm btn-ghost text-base" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh">↻</button>
+			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
 				{#if theme === 'dark'}☀️{:else}🌙{/if}
 			</button>
 		</div>
@@ -281,7 +354,7 @@
 
 	<!-- Project groups -->
 	{#if projectGroups.length === 0}
-		<div class="py-12 text-center text-base-content/50">
+		<div class="py-12 text-center text-base-content-subtle">
 			{#if data.sessions.length === 0}
 				<p class="text-lg">No sessions found</p>
 				<p class="text-sm">Start a Pi session to see it here.</p>
@@ -299,6 +372,7 @@
 						role="button"
 						tabindex="0"
 						onclick={() => toggleCollapse(group.cwd)}
+						aria-label="Toggle project {group.shortName}"
 						onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') toggleCollapse(group.cwd); }}
 					>
 						<span class="text-sm opacity-50 transition-transform {expandedProjects.has(group.cwd) ? 'rotate-90' : ''}">▶</span>
@@ -317,9 +391,10 @@
 						<!-- Dev server toggle -->
 						{#if group.devCommand || group.devServerRunning}
 							<button
-								class="btn btn-ghost btn-sm md:btn-xs min-w-[2rem] min-h-[2rem]"
+								class="btn btn-ghost btn-sm min-w-[2.75rem] min-h-[2.75rem] md:min-w-[2rem] md:min-h-[2rem]"
 								onclick={(e: MouseEvent) => { e.stopPropagation(); toggleDevServer(group.cwd, group.devCommand); }}
 								title={group.devServerRunning ? 'Stop dev server' : `Start dev server (${group.devCommand})`}
+							aria-label={group.devServerRunning ? 'Stop dev server' : 'Start dev server'}
 							>
 								{#if group.devServerRunning}
 									<span class="text-info text-base">⏹</span>
@@ -328,18 +403,57 @@
 								{/if}
 							</button>
 						{/if}
-						<!-- Configure dev command -->
+						<!-- Mobile: kebab menu for less-frequent actions -->
+						<div class="dropdown dropdown-end md:hidden">
+							<button tabindex="0" class="btn btn-ghost btn-sm" onclick={(e) => e.stopPropagation()} aria-label="Project actions">
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" /></svg>
+							</button>
+							<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+							<ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-50 w-48 p-2 shadow-lg border border-base-300">
+								<li>
+									<button onclick={(e) => { e.stopPropagation(); createSessionForProject(group.cwd); }} disabled={creatingForProject === group.cwd}>
+										{#if creatingForProject === group.cwd}
+											<span class="loading loading-spinner loading-sm"></span>
+											New Session
+										{:else}
+											+ New Session
+										{/if}
+									</button>
+								</li>
+								<li>
+									<button onclick={(e) => { e.stopPropagation(); startEditDevCommand(group.cwd, group.devCommand); }}>
+										<span class="opacity-70">⚙</span>
+										Configure Dev
+									</button>
+								</li>
+								<li>
+									<button onclick={(e) => { e.stopPropagation(); toggleFavorite(group.cwd); }}>
+										{#if group.isFavorite}
+											<span class="text-warning">★</span>
+											Unfavorite
+										{:else}
+											<span class="opacity-50">☆</span>
+											Favorite
+										{/if}
+									</button>
+								</li>
+							</ul>
+						</div>
+
+						<!-- Desktop: inline buttons -->
 						<button
-							class="btn btn-ghost btn-sm md:btn-xs min-w-[2rem] min-h-[2rem]"
+							class="hidden md:inline-flex btn btn-ghost btn-xs"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); startEditDevCommand(group.cwd, group.devCommand); }}
 							title={group.devCommand ? `Dev: ${group.devCommand} (click to edit)` : 'Configure dev command'}
+							aria-label="Configure dev command"
 						>
 							<span class="opacity-40 text-base">⚙</span>
 						</button>
 						<button
-							class="btn btn-ghost btn-sm md:btn-xs min-w-[2rem] min-h-[2rem]"
+							class="hidden md:inline-flex btn btn-ghost btn-xs"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); createSessionForProject(group.cwd); }}
 							title="New session in {group.shortName}"
+							aria-label="New session in {group.shortName}"
 							disabled={creatingForProject === group.cwd}
 						>
 							{#if creatingForProject === group.cwd}
@@ -349,7 +463,7 @@
 							{/if}
 						</button>
 						<button
-							class="btn btn-ghost btn-sm md:btn-xs min-w-[2rem] min-h-[2rem]"
+							class="hidden md:inline-flex btn btn-ghost btn-xs"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); toggleFavorite(group.cwd); }}
 							title={group.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
 						>
@@ -362,10 +476,10 @@
 					</div>
 
 					<!-- Project path subtitle -->
-					<div class="px-4 -mt-1 pb-2 text-xs text-base-content/40 truncate">
+					<div class="px-4 -mt-1 pb-2 text-xs text-base-content-faint truncate">
 						{group.cwd}
 						{#if group.devCommand && !editingDevCommand}
-							<span class="ml-2 text-base-content/30">· {group.devCommand}</span>
+							<span class="ml-2 text-base-content-faint">· {group.devCommand}</span>
 						{/if}
 					</div>
 
@@ -413,7 +527,7 @@
 											<div class="truncate text-sm font-medium">
 												{session.name || session.firstMessage || 'Empty session'}
 											</div>
-											<div class="mt-0.5 flex items-center gap-2 text-xs text-base-content/40">
+											<div class="mt-0.5 flex items-center gap-2 text-xs text-base-content-faint">
 												<span>{timeAgo(session.lastModified)}</span>
 												<span>· {session.messageCount} msgs</span>
 												{#if session.model}
@@ -422,7 +536,7 @@
 											</div>
 										</div>
 										<button
-											class="hidden lg:flex btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity self-center flex-shrink-0 text-error/60 hover:text-error"
+											class="hidden lg:flex btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity self-center flex-shrink-0 text-error opacity-70"
 											onclick={(e: MouseEvent) => deleteSession(session.id, e)}
 											title="Delete session"
 										>

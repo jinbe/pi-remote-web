@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { hapticHeavy, hapticError } from '$lib/haptics';
 
 	interface Props {
 		ondelete: () => void;
@@ -68,6 +69,7 @@
 			// Snap to show full delete zone
 			confirmed = true;
 			offsetX = -DELETE_THRESHOLD;
+			hapticHeavy();
 		} else {
 			// Snap back
 			offsetX = 0;
@@ -77,6 +79,7 @@
 
 	async function executeDelete() {
 		deleting = true;
+		hapticError();
 		// Animate out
 		offsetX = -(containerEl?.offsetWidth ?? 400);
 		// Wait for animation then call delete

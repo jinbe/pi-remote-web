@@ -6,8 +6,10 @@
 	import SessionTabs from '$lib/components/SessionTabs.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import { timeAgo } from '$lib/utils';
+	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import { getPathToNode, isAncestorOf, findLeafFrom, getBranchPoints } from '$lib/session-tree';
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import type { AgentMessage, SessionTree, BranchPoint, ExtensionUIRequest, SessionEvent } from '$lib/types';
 
 	let { data } = $props();
@@ -56,6 +58,15 @@
 	let chatContainer: HTMLElement | undefined = $state();
 	let pageContainer: HTMLElement | undefined = $state();
 	let userScrolledUp = $state(false);
+
+	// Edge swipe to go back
+	let edgeSwipeStartX = $state(0);
+	let edgeSwipeStartY = $state(0);
+	let edgeSwipeOffset = $state(0);
+	let edgeSwiping = $state(false);
+	let edgeSwipeLocked = $state(false);
+	const EDGE_ZONE = 30; // px from left edge
+	const EDGE_SWIPE_THRESHOLD = 100;
 
 	function isNearBottom(): boolean {
 		if (!chatContainer) return true;
@@ -444,6 +455,7 @@
 
 	// Session control
 	async function handleResume() {
+		hapticMedium();
 		resuming = true;
 		try {
 			const res = await fetch(`/api/sessions/${data.sessionId}/resume`, { method: 'POST' });
@@ -456,17 +468,20 @@
 	}
 
 	async function handleStop() {
+		hapticHeavy();
 		await fetch(`/api/sessions/${data.sessionId}/stop`, { method: 'POST' });
 		sessionActiveOverride = false;
 	}
 
 	async function handleAbort() {
+		hapticHeavy();
 		await fetch(`/api/sessions/${data.sessionId}/abort`, { method: 'POST' });
 	}
 
 	let restarting = $state(false);
 
 	async function handleRestart() {
+		hapticMedium();
 		restarting = true;
 		try {
 			await fetch(`/api/sessions/${data.sessionId}/stop`, { method: 'POST' });
@@ -497,6 +512,7 @@
 
 	// Branch navigation
 	function switchBranch(childId: string) {
+		hapticLight();
 		const leafId = findLeafFrom(tree, childId);
 		currentLeaf = leafId;
 		currentMessages = getPathToNode(tree, leafId);
@@ -533,6 +549,7 @@
 
 	// Handle message sent callback (Issue 1)
 	function handleMessageSent(text: string) {
+		hapticMedium();
 		pendingUserMessage = text;
 		waitingForAgent = true;
 		scrollToBottom(true);
@@ -554,13 +571,80 @@
 
 	const branchPoints = $derived(getBranchPoints(tree));
 	const widgetList = $derived(Object.entries(widgetEntries));
+
+	// Edge swipe navigation
+	function onEdgeSwipeStart(e: TouchEvent) {
+		const touch = e.touches[0];
+		if (touch.clientX > EDGE_ZONE) return; // Only activate from left edge
+		edgeSwipeStartX = touch.clientX;
+		edgeSwipeStartY = touch.clientY;
+		edgeSwiping = true;
+		edgeSwipeLocked = false;
+		edgeSwipeOffset = 0;
+	}
+
+	function onEdgeSwipeMove(e: TouchEvent) {
+		if (!edgeSwiping) return;
+		const touch = e.touches[0];
+		const dx = touch.clientX - edgeSwipeStartX;
+		const dy = touch.clientY - edgeSwipeStartY;
+
+		if (!edgeSwipeLocked && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+			if (Math.abs(dy) > Math.abs(dx)) {
+				// Vertical — cancel edge swipe
+				edgeSwiping = false;
+				edgeSwipeOffset = 0;
+				return;
+			}
+			edgeSwipeLocked = true;
+		}
+
+		if (edgeSwipeLocked && dx > 0) {
+			e.preventDefault();
+			edgeSwipeOffset = Math.min(dx * 0.6, 200); // Dampen
+		}
+	}
+
+	function onEdgeSwipeEnd() {
+		if (!edgeSwiping) return;
+		if (edgeSwipeOffset >= EDGE_SWIPE_THRESHOLD) {
+			hapticLight();
+			edgeSwipeOffset = window.innerWidth; // Animate off screen
+			setTimeout(() => goto('/'), 200);
+		} else {
+			edgeSwipeOffset = 0;
+		}
+		edgeSwiping = false;
+		edgeSwipeLocked = false;
+	}
 </script>
 
-<div class="flex h-full flex-col" bind:this={pageContainer}>
+<!-- Edge swipe back indicator -->
+{#if edgeSwipeOffset > 0}
+	<div class="fixed inset-y-0 left-0 w-12 z-50 flex items-center justify-center pointer-events-none">
+		<span
+			class="text-2xl transition-opacity duration-150"
+			style="opacity: {Math.min(edgeSwipeOffset / EDGE_SWIPE_THRESHOLD, 1)};"
+		>
+			←
+		</span>
+	</div>
+{/if}
+
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	class="flex h-full flex-col"
+	class:swipe-back-transition={!edgeSwiping}
+	style="transform: translateX({edgeSwipeOffset}px);"
+	bind:this={pageContainer}
+	ontouchstart={onEdgeSwipeStart}
+	ontouchmove={onEdgeSwipeMove}
+	ontouchend={onEdgeSwipeEnd}
+>
 	<!-- Header -->
 	<div class="navbar bg-base-200 shrink-0 z-10 border-b border-base-300">
 		<div class="navbar-start">
-			<a href="/" class="btn btn-ghost btn-sm text-lg">←</a>
+			<a href="/" class="btn btn-ghost btn-md text-lg" aria-label="Back to dashboard">←</a>
 		</div>
 		<div class="navbar-center flex flex-col items-center">
 			<span class="text-sm font-semibold truncate max-w-[200px] flex items-center gap-1.5">
@@ -571,7 +655,7 @@
 				{/if}
 				{data.meta.name || data.meta.firstMessage}
 			</span>
-			<span class="text-xs text-base-content/50 truncate max-w-[200px]">
+			<span class="text-xs text-base-content-subtle truncate max-w-[200px]">
 				{data.meta.cwd}
 			</span>
 		</div>
@@ -580,14 +664,14 @@
 				<span class="text-xs text-base-content/50">Restarting…</span>
 			{:else if sessionActive}
 				<!-- Desktop: inline buttons -->
-				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={() => showEvents = !showEvents}>
+				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={() => { hapticLight(); showEvents = !showEvents; }} aria-label="Toggle activity log">
 					Activity
 				</button>
-				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleRestart}>Restart</button>
-				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleStop}>Stop</button>
+				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleRestart} aria-label="Restart session">Restart</button>
+				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleStop} aria-label="Stop session">Stop</button>
 				<!-- Mobile: dropdown menu -->
 				<div class="dropdown dropdown-end md:hidden">
-					<div tabindex="0" role="button" class="btn btn-ghost btn-sm">
+					<div tabindex="0" role="button" class="btn btn-ghost btn-md" aria-label="Session actions">
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" /></svg>
 					</div>
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -597,7 +681,7 @@
 					</ul>
 				</div>
 			{:else}
-				<span class="text-xs text-base-content/40">
+				<span class="text-xs text-base-content-faint">
 					{timeAgo(data.meta.lastModified)}
 				</span>
 			{/if}
@@ -609,18 +693,47 @@
 		<!-- Chat messages -->
 		<div class="flex-1 overflow-y-auto overscroll-contain px-4 py-4" style="-webkit-overflow-scrolling: touch;" bind:this={chatContainer} onscroll={handleScroll}>
 			{#if loadingMessages}
-				<div class="flex items-center justify-center py-12">
-					<span class="loading loading-spinner loading-md"></span>
-					<span class="ml-2 text-base-content/50">Loading messages…</span>
+				<div class="space-y-4 py-4 animate-pulse">
+					<!-- Skeleton: user message (right) -->
+					<div class="chat chat-end">
+						<div class="chat-bubble bg-primary/20 border-0 max-w-[65vw] md:max-w-md">
+							<div class="h-3 bg-primary/15 rounded w-48 mb-2"></div>
+							<div class="h-3 bg-primary/15 rounded w-32"></div>
+						</div>
+					</div>
+					<!-- Skeleton: assistant message (left) -->
+					<div class="chat chat-start">
+						<div class="chat-bubble bg-base-300/50 border-0 max-w-[75vw] md:max-w-lg">
+							<div class="h-3 bg-base-content/10 rounded w-56 mb-2"></div>
+							<div class="h-3 bg-base-content/10 rounded w-72 mb-2"></div>
+							<div class="h-3 bg-base-content/10 rounded w-40"></div>
+						</div>
+					</div>
+					<!-- Skeleton: tool result (left) -->
+					<div class="chat chat-start">
+						<div class="chat-bubble bg-secondary/15 border-0 max-w-[60vw] md:max-w-sm">
+							<div class="h-3 bg-base-content/10 rounded w-36 mb-2"></div>
+							<div class="h-3 bg-base-content/10 rounded w-24"></div>
+						</div>
+					</div>
+					<!-- Skeleton: assistant message (left) -->
+					<div class="chat chat-start">
+						<div class="chat-bubble bg-base-300/50 border-0 max-w-[75vw] md:max-w-lg">
+							<div class="h-3 bg-base-content/10 rounded w-64 mb-2"></div>
+							<div class="h-3 bg-base-content/10 rounded w-48 mb-2"></div>
+							<div class="h-3 bg-base-content/10 rounded w-56 mb-2"></div>
+							<div class="h-3 bg-base-content/10 rounded w-28"></div>
+						</div>
+					</div>
 				</div>
 			{:else}
 				{#if hasMore}
 					<div class="text-center py-3">
 						{#if loadingFull}
 							<span class="loading loading-spinner loading-xs"></span>
-							<span class="text-xs text-base-content/40 ml-1">Loading earlier messages…</span>
+							<span class="text-xs text-base-content-faint ml-1">Loading earlier messages…</span>
 						{:else}
-							<button class="btn btn-ghost btn-xs text-base-content/40" onclick={loadFullHistory}>Load earlier messages</button>
+							<button class="btn btn-ghost btn-xs text-base-content-faint" onclick={loadFullHistory}>Load earlier messages</button>
 						{/if}
 					</div>
 				{/if}
@@ -634,7 +747,7 @@
 				<!-- Optimistic pending user message (Issue 1) -->
 				{#if pendingUserMessage}
 					<div class="chat chat-end mb-2">
-						<div class="chat-bubble chat-bubble-primary max-w-[85vw] md:max-w-xl opacity-70 animate-pulse">
+						<div class="chat-bubble chat-bubble-primary max-w-[90vw] md:max-w-xl opacity-70 animate-pulse motion-reduce:animate-none">
 							<div class="whitespace-pre-wrap break-words text-sm">
 								{pendingUserMessage}
 							</div>
@@ -645,7 +758,7 @@
 				<!-- Waiting for agent indicator (Issue 1) -->
 				{#if waitingForAgent && !streaming}
 					<div class="chat chat-start mb-2">
-						<div class="chat-bubble max-w-[85vw] md:max-w-xl opacity-50">
+						<div class="chat-bubble max-w-[90vw] md:max-w-xl opacity-50">
 							<span class="loading loading-dots loading-xs"></span>
 							<span class="text-xs ml-1">sending to agent…</span>
 						</div>
@@ -655,7 +768,7 @@
 				<!-- Streaming assistant text -->
 				{#if streaming}
 					<div class="chat chat-start mb-2">
-						<div class="chat-bubble max-w-[85vw] md:max-w-xl">
+						<div class="chat-bubble max-w-[90vw] md:max-w-xl">
 							{#if currentThinkingText}
 								<details class="mb-2 rounded bg-base-300/30 -mx-1" open>
 									<summary class="cursor-pointer text-xs py-1 px-2 opacity-70">Thinking…</summary>
@@ -670,7 +783,7 @@
 							<div class="flex items-center gap-1 mt-1">
 								<span class="loading loading-dots loading-xs"></span>
 								<button
-									class="btn btn-ghost btn-circle btn-xs text-error/60 hover:text-error hover:bg-error/10"
+									class="btn btn-ghost btn-circle btn-xs text-error opacity-70"
 									aria-label="Abort"
 									onclick={handleAbort}
 								>
@@ -684,7 +797,7 @@
 				{#if compacting}
 					<div class="text-center py-4">
 						<span class="loading loading-spinner loading-sm"></span>
-						<span class="text-sm text-base-content/50 ml-2">Compacting context…</span>
+						<span class="text-sm text-base-content-subtle ml-2">Compacting context…</span>
 					</div>
 				{/if}
 
@@ -695,7 +808,7 @@
 				{/if}
 
 				{#if currentMessages.length === 0 && !streaming && !pendingUserMessage}
-					<div class="py-12 text-center text-base-content/50">
+					<div class="py-12 text-center text-base-content-subtle">
 						{#if sessionActive}
 							<p class="text-lg mb-2">Session ready</p>
 							<p class="text-sm flex items-center justify-center gap-2">
@@ -719,14 +832,14 @@
 				</div>
 				<div class="flex-1 overflow-y-auto p-2 space-y-1">
 					{#if sessionEvents.length === 0}
-						<div class="text-xs text-base-content/40 p-2">No events yet</div>
+						<div class="text-xs text-base-content-faint p-2">No events yet</div>
 					{:else}
 						{#each sessionEvents as event (event.id)}
 							<div class="text-xs flex items-start gap-2 py-1.5 px-2 rounded hover:bg-base-300/50">
 								<span class="text-base">{eventIcon(event.event_type)}</span>
 								<div class="flex-1 min-w-0">
 									<div class="font-medium">{eventLabel(event.event_type)}</div>
-									<div class="text-base-content/40">{timeAgo(event.timestamp)}</div>
+									<div class="text-base-content-faint">{timeAgo(event.timestamp)}</div>
 								</div>
 							</div>
 						{/each}
@@ -737,13 +850,11 @@
 	</div>
 
 	<!-- Scroll to bottom button -->
-	{#if userScrolledUp}
-		<div class="flex justify-center -mt-10 relative z-10">
-			<button class="btn btn-circle btn-sm btn-ghost bg-base-300/80 shadow" onclick={() => scrollToBottom(true)}>
-				↓
-			</button>
-		</div>
-	{/if}
+	<div class="flex justify-center -mt-10 relative z-10 transition-all duration-300 ease-out {userScrolledUp ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}">
+		<button class="btn btn-circle btn-sm btn-ghost bg-base-300/80 shadow" onclick={() => scrollToBottom(true)} aria-label="Scroll to bottom">
+			↓
+		</button>
+	</div>
 
 	<!-- Widget panels -->
 	{#if widgetList.length > 0}
@@ -762,14 +873,14 @@
 	<!-- Bottom bar — always visible -->
 	<div class="shrink-0">
 		{#if restarting}
-			<div class="border-t border-base-300 bg-base-200 p-4 text-center">
+			<div class="border-t border-base-300 bg-base-200 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-center">
 				<span class="loading loading-spinner loading-sm"></span>
-				<span class="text-sm text-base-content/50 ml-2">Restarting session…</span>
+				<span class="text-sm text-base-content-subtle ml-2">Restarting session…</span>
 			</div>
 		{:else if sessionActive}
 			<MessageInput sessionId={data.sessionId} {streaming} onsent={handleMessageSent} />
 		{:else}
-			<div class="border-t border-base-300 bg-base-200 p-4 text-center">
+			<div class="border-t border-base-300 bg-base-200 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-center">
 				<button class="btn btn-primary btn-sm" onclick={handleResume} disabled={resuming}>
 					{#if resuming}
 						<span class="loading loading-spinner loading-xs"></span>
@@ -777,7 +888,7 @@
 						Resume Session
 					{/if}
 				</button>
-				<div class="mt-2 flex items-center justify-center gap-2 text-xs text-base-content/50">
+				<div class="mt-2 flex items-center justify-center gap-2 text-xs text-base-content-subtle">
 					<span>{data.meta.messageCount} messages</span>
 					{#if data.meta.model}
 						<span class="badge badge-xs badge-ghost">{data.meta.model}</span>
@@ -805,3 +916,9 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.swipe-back-transition {
+		transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+	}
+</style>

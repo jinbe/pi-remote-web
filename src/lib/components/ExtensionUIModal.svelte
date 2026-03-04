@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ExtensionUIRequest } from '$lib/types';
+	import { hapticMedium } from '$lib/haptics';
 
 	let {
 		request = null,
@@ -28,6 +29,7 @@
 
 	async function sendResponse(responsePayload: Record<string, any>) {
 		if (!request) return;
+		hapticMedium();
 		await fetch(`/api/sessions/${sessionId}/extension-ui-response`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },

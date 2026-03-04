@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { hapticLight, hapticMedium } from '$lib/haptics';
 
 	let {
 		open = false,
@@ -29,6 +30,7 @@
 
 	async function handleCreate() {
 		if (!cwd.trim() || creating) return;
+		hapticMedium();
 		creating = true;
 		errorMsg = '';
 
@@ -77,7 +79,7 @@
 				{#if recentCwds.length > 0}
 					<div class="mt-2 flex flex-wrap gap-1">
 						{#each recentCwds.slice(0, 5) as rc}
-							<button class="badge badge-outline badge-sm cursor-pointer" onclick={() => (cwd = rc)}>
+							<button class="badge badge-outline badge-sm cursor-pointer" onclick={() => { hapticLight(); cwd = rc; }}>
 								{rc.split('/').pop()}
 							</button>
 						{/each}
@@ -98,7 +100,7 @@
 				{#if recentModels.length > 0}
 					<div class="mt-2 flex flex-wrap gap-1">
 						{#each recentModels.slice(0, 5) as rm}
-							<button class="badge badge-outline badge-sm cursor-pointer" onclick={() => (model = rm)}>
+							<button class="badge badge-outline badge-sm cursor-pointer" onclick={() => { hapticLight(); model = rm; }}>
 								{rm}
 							</button>
 						{/each}
