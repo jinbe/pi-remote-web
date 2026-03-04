@@ -44,5 +44,5 @@
 		<span class="relative inline-flex rounded-full {s} {color}"></span>
 	</span>
 {:else}
-	<span class="{s} rounded-full {color} flex-shrink-0"></span>
+	<span class="inline-block {s} rounded-full {color} flex-shrink-0"></span>
 {/if}
