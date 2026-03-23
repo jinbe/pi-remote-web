@@ -44,6 +44,7 @@ interface ActiveSessionRow {
 
 const MAX_STREAMING_TEXT = 100 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
+const STATE_CHECK_TIMEOUT_MS = 5_000; // shorter timeout for pre-send state checks
 
 const RELAY_SCRIPT = join(__dirname, 'pi-relay.ts');
 const SOCKET_DIR = join(tmpdir(), 'pi-remote-web');
@@ -112,7 +113,7 @@ function writeToSocket(managed: ManagedSession, data: string): void {
 
 // --- Command/Response correlation ---
 
-function sendCommand(managed: ManagedSession, cmd: Record<string, any>): Promise<any> {
+function sendCommand(managed: ManagedSession, cmd: Record<string, any>, timeoutMs = COMMAND_TIMEOUT_MS): Promise<any> {
 	const id = crypto.randomUUID();
 	const line = JSON.stringify({ ...cmd, id }) + '\n';
 
@@ -129,7 +130,7 @@ function sendCommand(managed: ManagedSession, cmd: Record<string, any>): Promise
 				log.warn('rpc', `command timed out: ${cmd.type} id=${id} session=${managed.sessionId} pendingCommands remaining: ${managed.pendingCommands.size}`);
 				reject(new Error(`RPC command timed out: ${cmd.type}`));
 			}
-		}, COMMAND_TIMEOUT_MS);
+		}, timeoutMs);
 	});
 
 	return promise;
@@ -463,7 +464,8 @@ export async function createSession(cwd: string, model?: string): Promise<string
 export async function sendMessage(
 	sessionId: string,
 	message: string,
-	behavior?: 'steer' | 'followUp'
+	behavior?: 'steer' | 'followUp',
+	images?: Array<{ type: 'image'; data: string; mimeType: string }>
 ): Promise<any> {
 	const managed = activeSessions.get(sessionId);
 	if (!managed) {
@@ -471,11 +473,12 @@ export async function sendMessage(
 	}
 
 	// If we think we're streaming, verify with pi's actual state
-	// to handle missed agent_end events
+	// to handle missed agent_end events. Use a short timeout so this
+	// pre-check doesn't block the user for 30s when pi is unresponsive.
 	let actuallyStreaming = managed.isStreaming;
 	if (actuallyStreaming && !behavior) {
 		try {
-			const state = await sendCommand(managed, { type: 'get_state' });
+			const state = await sendCommand(managed, { type: 'get_state' }, STATE_CHECK_TIMEOUT_MS);
 			actuallyStreaming = state.isStreaming || (state.pendingMessageCount ?? 0) > 0;
 			if (!actuallyStreaming && managed.isStreaming) {
 				log.warn('sendMessage', `correcting streaming state — pi says not streaming, resetting`);
@@ -485,19 +488,23 @@ export async function sendMessage(
 				managed.streamingThinkingText = '';
 			}
 		} catch {
-			// If get_state fails, fall back to local state
+			// If get_state fails/times out, fall back to local state.
+			// Don't block the prompt send — the user is waiting.
+			log.warn('sendMessage', `get_state pre-check failed, falling back to local state (isStreaming=${managed.isStreaming})`);
 		}
 	}
 
+	const imagePayload = images && images.length > 0 ? images : undefined;
+
 	if (behavior === 'steer') {
-		return sendCommand(managed, { type: 'steer', message });
+		return sendCommand(managed, { type: 'steer', message, ...(imagePayload && { images: imagePayload }) });
 	} else if (behavior === 'followUp') {
-		return sendCommand(managed, { type: 'follow_up', message });
+		return sendCommand(managed, { type: 'follow_up', message, ...(imagePayload && { images: imagePayload }) });
 	} else {
 		if (actuallyStreaming) {
-			return sendCommand(managed, { type: 'follow_up', message });
+			return sendCommand(managed, { type: 'follow_up', message, ...(imagePayload && { images: imagePayload }) });
 		}
-		return sendCommand(managed, { type: 'prompt', message });
+		return sendCommand(managed, { type: 'prompt', message, ...(imagePayload && { images: imagePayload }) });
 	}
 }
 
