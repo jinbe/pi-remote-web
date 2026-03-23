@@ -26,6 +26,9 @@ interface ManagedSession {
 	pendingCommands: Map<string, { resolve: (data: any) => void; reject: (err: Error) => void }>;
 	lastAgentStartTime: number | null;
 	autoStopTimer: ReturnType<typeof setTimeout> | null;
+	// Write queue for handling socket backpressure on large payloads
+	writeQueue: Uint8Array[];
+	writing: boolean;
 }
 
 interface ActiveSessionRow {
@@ -108,12 +111,43 @@ function pidPathFor(socketPath: string): string {
 
 // --- Write to relay socket ---
 
+/**
+ * Drain the write queue, handling partial writes from Bun's socket.
+ * Bun Socket.write() returns the number of bytes actually written and may
+ * return less than the full buffer (8KB typical limit). When that happens
+ * the remaining data must be re-queued and sent when the `drain` callback fires.
+ */
+function drainWriteQueue(managed: ManagedSession): void {
+	if (!managed.socket || managed.writeQueue.length === 0) {
+		managed.writing = false;
+		return;
+	}
+	managed.writing = true;
+
+	while (managed.writeQueue.length > 0) {
+		const chunk = managed.writeQueue[0];
+		const written = managed.socket.write(chunk);
+		if (written === 0) {
+			// Socket buffer full — wait for drain callback
+			return;
+		}
+		if (written < chunk.length) {
+			// Partial write — re-queue the remainder and wait for drain
+			managed.writeQueue[0] = chunk.slice(written);
+			return;
+		}
+		// Full chunk written — remove from queue and continue
+		managed.writeQueue.shift();
+	}
+	managed.writing = false;
+}
+
 function writeToSocket(managed: ManagedSession, data: string): void {
 	if (!managed.socket) throw new Error('Not connected to relay');
-	try {
-		managed.socket.write(data);
-	} catch (err) {
-		throw new Error(`Failed to write to relay socket: ${err}`);
+	const encoded = new TextEncoder().encode(data);
+	managed.writeQueue.push(encoded);
+	if (!managed.writing) {
+		drainWriteQueue(managed);
 	}
 }
 
@@ -309,6 +343,10 @@ async function connectToRelay(managed: ManagedSession): Promise<void> {
 					data(_socket, data) {
 						processData(managed, data);
 					},
+					drain() {
+						// Socket is ready for more data — continue draining the write queue
+						drainWriteQueue(managed);
+					},
 					open() {},
 					close() {
 						if (activeSessions.has(managed.sessionId) && managed.socket) {
@@ -370,6 +408,8 @@ export async function resumeSession(
 			pendingCommands: new Map(),
 			lastAgentStartTime: null,
 			autoStopTimer: null,
+			writeQueue: [],
+			writing: false,
 		};
 
 		await connectToRelay(managed);
@@ -421,6 +461,8 @@ export async function createSession(cwd: string, model?: string): Promise<string
 		pendingCommands: new Map(),
 		lastAgentStartTime: null,
 		autoStopTimer: null,
+		writeQueue: [],
+		writing: false,
 	};
 
 	await connectToRelay(managed);
@@ -699,6 +741,8 @@ export async function recoverActiveSessions() {
 					pendingCommands: new Map(),
 					lastAgentStartTime: null,
 					autoStopTimer: null,
+					writeQueue: [],
+					writing: false,
 				};
 
 				await connectToRelay(managed);
