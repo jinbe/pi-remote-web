@@ -89,25 +89,56 @@ if (proc.stderr) {
 	})().catch(() => {});
 }
 
+// Buffer incoming client data and flush complete JSONL lines to pi's stdin.
+// Large payloads (e.g. base64 image data) may arrive fragmented across
+// multiple socket data events — we must reassemble complete lines before
+// forwarding to pi, otherwise partial JSON reaches the JSONL parser and
+// gets discarded silently.
+const clientBuffers = new Map<Socket<undefined>, string>();
+
 // Listen for client connections
 const server = Bun.listen({
 	unix: socketPath,
 	socket: {
-		data(_socket, data) {
+		data(socket, data) {
 			// Forward client data to pi's stdin
 			if (dead) return;
 			try {
-				const stdin = proc.stdin as import('bun').FileSink;
-				stdin.write(data);
-			} catch {
-				// pi process died
+				const prev = clientBuffers.get(socket) ?? '';
+				let buffer = prev + new TextDecoder().decode(data);
+
+				// Forward complete lines only — pi's JSONL parser splits on \n
+				let newlineIdx: number;
+				while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+					const line = buffer.slice(0, newlineIdx + 1); // include \n
+					buffer = buffer.slice(newlineIdx + 1);
+
+					const stdin = proc.stdin as import('bun').FileSink;
+					stdin.write(line);
+					stdin.flush();
+
+					// Log command type and payload size for debugging
+					try {
+						const parsed = JSON.parse(line);
+						const size = line.length;
+						if (size > 10_000) {
+							relayLog(`forwarded large command: type=${parsed.type} size=${(size / 1024).toFixed(0)}KB`);
+						}
+					} catch { /* not valid JSON — forward anyway */ }
+				}
+
+				clientBuffers.set(socket, buffer);
+			} catch (err) {
+				relayLog(`stdin write error: ${(err as Error).message}`);
 			}
 		},
 		open(socket) {
 			clients.add(socket);
+			clientBuffers.set(socket, '');
 		},
 		close(socket) {
 			clients.delete(socket);
+			clientBuffers.delete(socket);
 		},
 		error(_socket, err) {
 			console.error('Socket error:', err.message);

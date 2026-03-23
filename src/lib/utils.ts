@@ -18,3 +18,8 @@ export function truncatePath(path: string, maxLen = 30): string {
 	if (path.length <= maxLen) return path;
 	return '…' + path.slice(path.length - maxLen + 1);
 }
+
+export function shortenHome(path: string): string {
+	if (!path) return '';
+	return path.replace(/^\/Users\/[^/]+\//, '~/');
+}

@@ -3,9 +3,10 @@
 	import BranchIndicator from '$lib/components/BranchIndicator.svelte';
 	import MessageInput from '$lib/components/MessageInput.svelte';
 	import ExtensionUIModal from '$lib/components/ExtensionUIModal.svelte';
+	import DiffModal from '$lib/components/DiffModal.svelte';
 	import SessionTabs from '$lib/components/SessionTabs.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
-	import { timeAgo } from '$lib/utils';
+	import { timeAgo, shortenHome } from '$lib/utils';
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import { getPathToNode, isAncestorOf, findLeafFrom, getBranchPoints } from '$lib/session-tree';
 	import { browser } from '$app/environment';
@@ -46,6 +47,9 @@
 
 	// Extension UI
 	let extensionUIRequest = $state<ExtensionUIRequest | null>(null);
+
+	// Diff viewer
+	let showDiff = $state(false);
 
 	// Toasts
 	let toasts = $state<{ id: string; message: string; severity: string }[]>([]);
@@ -655,8 +659,11 @@
 				{/if}
 				{data.meta.name || data.meta.firstMessage}
 			</span>
-			<span class="text-xs text-base-content-subtle truncate max-w-[200px]">
-				{data.meta.cwd}
+			<span class="text-xs text-base-content-subtle truncate max-w-[200px] flex items-center gap-1">
+				{shortenHome(data.meta.cwd)}
+				{#if data.gitBranch}
+					<button class="badge badge-xs badge-outline gap-0.5 font-mono cursor-pointer hover:badge-primary transition-colors" onclick={(e) => { e.stopPropagation(); hapticLight(); showDiff = true; }}>⎇ {data.gitBranch}</button>
+				{/if}
 			</span>
 		</div>
 		<div class="navbar-end gap-1">
@@ -664,6 +671,11 @@
 				<span class="text-xs text-base-content/50">Restarting…</span>
 			{:else if sessionActive}
 				<!-- Desktop: inline buttons -->
+				{#if data.gitBranch}
+					<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={() => { hapticLight(); showDiff = true; }} aria-label="View changes">
+						Changes
+					</button>
+				{/if}
 				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={() => { hapticLight(); showEvents = !showEvents; }} aria-label="Toggle activity log">
 					Activity
 				</button>
@@ -676,6 +688,9 @@
 					</div>
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 					<ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-40 p-2 shadow-lg border border-base-300">
+						{#if data.gitBranch}
+							<li><button onclick={() => { showDiff = true; }}>Changes</button></li>
+						{/if}
 						<li><button onclick={handleRestart}>Restart</button></li>
 						<li><button onclick={handleStop}>Stop</button></li>
 					</ul>
@@ -903,6 +918,13 @@
 		request={extensionUIRequest}
 		sessionId={data.sessionId}
 		onclose={() => (extensionUIRequest = null)}
+	/>
+
+	<!-- Diff Viewer Modal -->
+	<DiffModal
+		open={showDiff}
+		sessionId={data.sessionId}
+		onclose={() => (showDiff = false)}
 	/>
 
 	<!-- Toast stack -->

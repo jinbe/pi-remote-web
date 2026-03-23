@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { timeAgo } from '$lib/utils';
+	import { timeAgo, shortenHome } from '$lib/utils';
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
@@ -477,7 +477,7 @@
 
 					<!-- Project path subtitle -->
 					<div class="px-4 -mt-1 pb-2 text-xs text-base-content-faint truncate">
-						{group.cwd}
+						{shortenHome(group.cwd)}
 						{#if group.devCommand && !editingDevCommand}
 							<span class="ml-2 text-base-content-faint">· {group.devCommand}</span>
 						{/if}
