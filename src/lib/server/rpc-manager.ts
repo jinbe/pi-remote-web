@@ -45,6 +45,12 @@ interface ActiveSessionRow {
 const MAX_STREAMING_TEXT = 100 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
 const STATE_CHECK_TIMEOUT_MS = 5_000; // shorter timeout for pre-send state checks
+// prompt responds immediately in pi's RPC mode (fire-and-forget), so use a
+// shorter timeout. If the command doesn't reach pi within 10s something is wrong.
+const PROMPT_TIMEOUT_MS = 10_000;
+// steer/follow_up await session methods and may block while the agent is busy,
+// so they need a longer timeout.
+const STEER_TIMEOUT_MS = 60_000;
 
 const RELAY_SCRIPT = join(__dirname, 'pi-relay.ts');
 const SOCKET_DIR = join(tmpdir(), 'pi-remote-web');
@@ -497,14 +503,15 @@ export async function sendMessage(
 	const imagePayload = images && images.length > 0 ? images : undefined;
 
 	if (behavior === 'steer') {
-		return sendCommand(managed, { type: 'steer', message, ...(imagePayload && { images: imagePayload }) });
+		return sendCommand(managed, { type: 'steer', message, ...(imagePayload && { images: imagePayload }) }, STEER_TIMEOUT_MS);
 	} else if (behavior === 'followUp') {
-		return sendCommand(managed, { type: 'follow_up', message, ...(imagePayload && { images: imagePayload }) });
+		return sendCommand(managed, { type: 'follow_up', message, ...(imagePayload && { images: imagePayload }) }, STEER_TIMEOUT_MS);
 	} else {
 		if (actuallyStreaming) {
-			return sendCommand(managed, { type: 'follow_up', message, ...(imagePayload && { images: imagePayload }) });
+			return sendCommand(managed, { type: 'follow_up', message, ...(imagePayload && { images: imagePayload }) }, STEER_TIMEOUT_MS);
 		}
-		return sendCommand(managed, { type: 'prompt', message, ...(imagePayload && { images: imagePayload }) });
+		// prompt responds immediately in pi's RPC mode (fire-and-forget)
+		return sendCommand(managed, { type: 'prompt', message, ...(imagePayload && { images: imagePayload }) }, PROMPT_TIMEOUT_MS);
 	}
 }
 
