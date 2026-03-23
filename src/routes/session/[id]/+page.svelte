@@ -6,7 +6,7 @@
 	import DiffModal from '$lib/components/DiffModal.svelte';
 	import SessionTabs from '$lib/components/SessionTabs.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
-	import { timeAgo, shortenHome } from '$lib/utils';
+	import { timeAgo, shortenHome, uniqueId } from '$lib/utils';
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import { getPathToNode, isAncestorOf, findLeafFrom, getBranchPoints } from '$lib/session-tree';
 	import { browser } from '$app/environment';
@@ -398,7 +398,7 @@
 	}
 
 	function addToast(message: string, severity: string) {
-		const id = crypto.randomUUID();
+		const id = uniqueId();
 		toasts = [...toasts, { id, message, severity }];
 		setTimeout(() => {
 			toasts = toasts.filter((t) => t.id !== id);

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { AgentMessage } from '$lib/types';
-	import { getArgs, shortPath, toolSummary, buildDiffLines } from '$lib/tool-display';
+	import { getArgs, toolSummary, buildDiffLines } from '$lib/tool-display';
+	import { renderMarkdown } from '$lib/markdown';
 
 	let { entry }: { entry: AgentMessage } = $props();
 
@@ -8,6 +9,10 @@
 	const isUser = $derived(role === 'user');
 	const isAssistant = $derived(role === 'assistant');
 	const isToolResult = $derived(role === 'toolResult');
+
+	// Copy to clipboard state
+	let copied = $state(false);
+	let copyTimeout: ReturnType<typeof setTimeout> | undefined;
 
 	function getTextContent(msg: AgentMessage['message']): string {
 		if (!msg?.content) return '';
@@ -30,9 +35,31 @@
 			.join('');
 	}
 
+	function getImages(msg: AgentMessage['message']): Array<{ data: string; mimeType: string }> {
+		if (!msg?.content) return [];
+		return msg.content
+			.filter((c: any) => c.type === 'image' && c.data)
+			.map((c: any) => ({ data: c.data, mimeType: c.mimeType || 'image/png' }));
+	}
+
+	async function copyToClipboard() {
+		const content = text;
+		if (!content) return;
+		try {
+			await navigator.clipboard.writeText(content);
+		} catch {
+			// Ignore — clipboard API may not be available in all contexts
+		}
+		copied = true;
+		if (copyTimeout) clearTimeout(copyTimeout);
+		copyTimeout = setTimeout(() => { copied = false; }, 1500);
+	}
+
 	const text = $derived(getTextContent(entry.message));
 	const toolCalls = $derived(getToolCalls(entry.message));
 	const thinking = $derived(getThinkingContent(entry.message));
+	const images = $derived(getImages(entry.message));
+	const renderedHtml = $derived(isAssistant && text ? renderMarkdown(text) : '');
 </script>
 
 {#if entry.type === 'compaction'}
@@ -58,8 +85,23 @@
 				? 'chat-bubble-primary'
 				: isToolResult
 					? 'chat-bubble-secondary'
-					: ''} max-w-[90vw] md:max-w-xl"
+					: ''} max-w-[90vw] md:max-w-xl group/bubble relative"
 		>
+			<!-- Copy button (shown on hover / focus) -->
+			{#if text && !isToolResult}
+				<button
+					class="copy-btn absolute {isUser ? 'left-0 -translate-x-[calc(100%+4px)]' : 'right-0 translate-x-[calc(100%+4px)]'} top-1 opacity-0 group-hover/bubble:opacity-100 focus:opacity-100 transition-opacity duration-150 btn btn-ghost btn-xs btn-circle text-base-content-muted hover:text-base-content"
+					aria-label="Copy message"
+					onclick={copyToClipboard}
+				>
+					{#if copied}
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+					{:else}
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+					{/if}
+				</button>
+			{/if}
+
 			{#if isToolResult}
 				<!-- Tool results: collapsed by default, show truncated preview -->
 				<details class="group">
@@ -82,10 +124,31 @@
 					</details>
 				{/if}
 
-				{#if text}
-					<div class="whitespace-pre-wrap break-words text-sm">
-						{text}
+				{#if images.length > 0}
+					<div class="flex flex-wrap gap-2 {text ? 'mb-2' : ''}">
+						{#each images as img}
+								<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+							<a href="data:{img.mimeType};base64,{img.data}" target="_blank" rel="noopener noreferrer">
+								<img
+									src="data:{img.mimeType};base64,{img.data}"
+									alt="Attached"
+									class="max-h-48 max-w-full rounded-lg border border-base-content/10 hover:opacity-90 transition-opacity"
+								/>
+							</a>
+						{/each}
 					</div>
+				{/if}
+
+				{#if text}
+					{#if isAssistant}
+						<div class="markdown-body text-sm">
+							{@html renderedHtml}
+						</div>
+					{:else}
+						<div class="whitespace-pre-wrap break-words text-sm">
+							{text}
+						</div>
+					{/if}
 				{/if}
 
 				{#if toolCalls.length > 0}
@@ -187,3 +250,230 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+	/* ── Markdown body styles ─────────────────────────────────────── */
+
+	:global(.markdown-body) {
+		line-height: 1.6;
+		word-wrap: break-word;
+		overflow-wrap: break-word;
+	}
+
+	/* Headings */
+	:global(.markdown-body h1),
+	:global(.markdown-body h2),
+	:global(.markdown-body h3),
+	:global(.markdown-body h4),
+	:global(.markdown-body h5),
+	:global(.markdown-body h6) {
+		font-weight: 600;
+		line-height: 1.3;
+		margin-top: 1em;
+		margin-bottom: 0.5em;
+	}
+
+	:global(.markdown-body h1) { font-size: 1.25em; }
+	:global(.markdown-body h2) { font-size: 1.15em; }
+	:global(.markdown-body h3) { font-size: 1.05em; }
+	:global(.markdown-body h4),
+	:global(.markdown-body h5),
+	:global(.markdown-body h6) { font-size: 1em; }
+
+	:global(.markdown-body > :first-child) {
+		margin-top: 0;
+	}
+
+	:global(.markdown-body > :last-child) {
+		margin-bottom: 0;
+	}
+
+	/* Paragraphs */
+	:global(.markdown-body p) {
+		margin: 0.5em 0;
+	}
+
+	:global(.markdown-body p:first-child) {
+		margin-top: 0;
+	}
+
+	:global(.markdown-body p:last-child) {
+		margin-bottom: 0;
+	}
+
+	/* Inline code */
+	:global(.markdown-body code) {
+		font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono',
+			Menlo, Consolas, 'Liberation Mono', monospace;
+		font-size: 0.85em;
+		padding: 0.15em 0.35em;
+		border-radius: 0.25em;
+		background: oklch(0% 0 0 / 0.15);
+	}
+
+	/* Code blocks — undo inline code styles inside pre */
+	:global(.markdown-body pre code) {
+		font-size: 0.8em;
+		padding: 0;
+		border-radius: 0;
+		background: transparent;
+	}
+
+	:global(.markdown-body pre) {
+		margin: 0;
+		white-space: pre-wrap;
+		word-wrap: break-word;
+		overflow-x: auto;
+		max-height: 24rem;
+		overflow-y: auto;
+		padding: 0.75em;
+		line-height: 1.5;
+	}
+
+	/* Code block wrapper */
+	:global(.markdown-body .code-block-wrapper) {
+		position: relative;
+		margin: 0.5em 0;
+		border-radius: 0.375rem;
+		overflow: hidden;
+		background: oklch(0% 0 0 / 0.15);
+		border: 1px solid oklch(50% 0 0 / 0.1);
+	}
+
+	:global(.markdown-body .code-lang) {
+		position: absolute;
+		top: 0;
+		left: 0;
+		font-size: 0.65em;
+		padding: 0.2em 0.5em;
+		opacity: 0.5;
+		font-family: 'JetBrains Mono', ui-monospace, monospace;
+		user-select: none;
+	}
+
+	:global(.markdown-body .code-copy-btn) {
+		position: absolute;
+		top: 0.25em;
+		right: 0.35em;
+		font-size: 0.65em;
+		padding: 0.15em 0.5em;
+		border-radius: 0.25em;
+		background: oklch(50% 0 0 / 0.15);
+		color: inherit;
+		opacity: 0;
+		transition: opacity 0.15s;
+		cursor: pointer;
+		border: 1px solid oklch(50% 0 0 / 0.1);
+		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+	}
+
+	:global(.markdown-body .code-block-wrapper:hover .code-copy-btn) {
+		opacity: 0.8;
+	}
+
+	:global(.markdown-body .code-copy-btn:hover) {
+		opacity: 1 !important;
+		background: oklch(50% 0 0 / 0.25);
+	}
+
+	/* Lists */
+	:global(.markdown-body ul),
+	:global(.markdown-body ol) {
+		margin: 0.4em 0;
+		padding-left: 1.5em;
+	}
+
+	:global(.markdown-body ul) {
+		list-style-type: disc;
+	}
+
+	:global(.markdown-body ol) {
+		list-style-type: decimal;
+	}
+
+	:global(.markdown-body li) {
+		margin: 0.15em 0;
+	}
+
+	:global(.markdown-body li > ul),
+	:global(.markdown-body li > ol) {
+		margin: 0.1em 0;
+	}
+
+	/* Blockquotes */
+	:global(.markdown-body blockquote) {
+		margin: 0.5em 0;
+		padding: 0.25em 0.75em;
+		border-left: 3px solid oklch(50% 0 0 / 0.3);
+		opacity: 0.85;
+	}
+
+	:global(.markdown-body blockquote p) {
+		margin: 0.2em 0;
+	}
+
+	/* Links */
+	:global(.markdown-body a) {
+		text-decoration: underline;
+		text-underline-offset: 2px;
+		opacity: 0.9;
+	}
+
+	:global(.markdown-body a:hover) {
+		opacity: 1;
+	}
+
+	/* Horizontal rule */
+	:global(.markdown-body hr) {
+		margin: 0.75em 0;
+		border: none;
+		border-top: 1px solid oklch(50% 0 0 / 0.2);
+	}
+
+	/* Tables */
+	:global(.markdown-body table) {
+		width: 100%;
+		border-collapse: collapse;
+		margin: 0.5em 0;
+		font-size: 0.85em;
+	}
+
+	:global(.markdown-body th),
+	:global(.markdown-body td) {
+		padding: 0.35em 0.6em;
+		border: 1px solid oklch(50% 0 0 / 0.15);
+		text-align: left;
+	}
+
+	:global(.markdown-body th) {
+		font-weight: 600;
+		background: oklch(0% 0 0 / 0.08);
+	}
+
+	/* Strong and emphasis */
+	:global(.markdown-body strong) {
+		font-weight: 600;
+	}
+
+	:global(.markdown-body em) {
+		font-style: italic;
+	}
+
+	/* Task lists (GFM) */
+	:global(.markdown-body input[type="checkbox"]) {
+		margin-right: 0.3em;
+	}
+
+	/* Images in markdown */
+	:global(.markdown-body img) {
+		max-width: 100%;
+		border-radius: 0.375rem;
+	}
+
+	/* Mobile: always show copy button on touch devices */
+	@media (hover: none) {
+		.copy-btn {
+			opacity: 0.6 !important;
+		}
+	}
+</style>
