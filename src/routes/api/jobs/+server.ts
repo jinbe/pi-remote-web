@@ -20,15 +20,16 @@ export const POST: RequestHandler = async ({ request }) => {
 		const body = await request.json();
 		const { type, title, description, repo, branch, issue_url, target_branch, priority, max_loops, review_skill } = body;
 
-		if (!type || !['task', 'review'].includes(type)) {
-			throw error(400, 'Invalid job type — must be "task" or "review"');
+		// Type is now optional (defaults to 'task' in createJob)
+		if (type && !['task', 'review'].includes(type)) {
+			throw error(400, 'Invalid job type — must be "task" or "review" (or omitted)');
 		}
 		if (!title || typeof title !== 'string' || !title.trim()) {
 			throw error(400, 'Title is required');
 		}
 
 		const job = createJob({
-			type,
+			type: type || undefined, // Let createJob apply default
 			title: title.trim(),
 			description: description?.trim() || undefined,
 			repo: repo?.trim() || undefined,

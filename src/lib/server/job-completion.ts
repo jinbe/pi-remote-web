@@ -1,8 +1,8 @@
 /**
- * Job completion handler — processes callback results from the Pi extension
- * and applies the task→review→fix loop logic.
+ * Job completion handler — provides cleanup utilities for worktree and session migration.
+ * The main completion logic is now in job-poller.ts (handleJobAgentEnd).
  */
-import { getJob, updateJobStatus, createJob, type Job } from './job-queue';
+import { getJob, updateJobStatus, type Job } from './job-queue';
 import { log } from './logger';
 import { existsSync, mkdirSync, readdirSync, rmSync, copyFileSync } from 'fs';
 import { execFileSync } from 'child_process';
@@ -23,8 +23,9 @@ export interface CompletionPayload {
 // --- Main handler ---
 
 /**
- * Handle job completion callback. Validates the job is running,
- * updates result fields, cleans up worktree, and applies loop logic.
+ * Handle job completion callback from the extension (fallback).
+ * In the new single-job model, this is only used as a fallback — the primary
+ * completion path is through handleJobAgentEnd in job-poller.ts.
  */
 export function handleCompletion(jobId: string, payload: CompletionPayload): Job {
 	const job = getJob(jobId);
@@ -32,8 +33,10 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 		throw new Error(`Job not found: ${jobId}`);
 	}
 
-	if (job.status !== 'running' && job.status !== 'claimed') {
-		throw new Error(`Job ${jobId} is not running (current status: ${job.status})`);
+	// If already in a terminal state, ignore
+	if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') {
+		log.info('job-completion', `job ${jobId} already in terminal state ${job.status} — ignoring callback`);
+		return job;
 	}
 
 	// Handle failure
@@ -43,12 +46,12 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 			error: payload.error ?? 'Job failed without error details',
 			result_summary: payload.resultSummary,
 		});
-		cleanupWorktree(job);
+		cleanupJob(job);
 		log.info('job-completion', `job ${jobId} failed: ${payload.error}`);
 		return updated!;
 	}
 
-	// Update common result fields
+	// Simple done transition — the poller handles the state machine
 	const updates: Parameters<typeof updateJobStatus>[1] = {
 		status: 'done',
 		result_summary: payload.resultSummary,
@@ -63,108 +66,19 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 	}
 
 	const updatedJob = updateJobStatus(jobId, updates)!;
-
-	// Apply loop logic based on job type and result.
-	// Worktree cleanup is deferred — task worktrees stay alive until the
-	// review completes (or the chain ends).
-	const followUpCreated = applyLoopLogic(updatedJob, payload);
-
-	// Only clean up the worktree if no follow-up job was created.
-	// For task→review chains, the worktree is cleaned up after the review.
-	if (!followUpCreated) {
-		cleanupWorktree(job);
-	}
+	cleanupJob(job);
 
 	return updatedJob;
 }
 
-// --- Loop logic ---
+// --- Cleanup functions (exported for use by job-poller) ---
 
 /**
- * After a job completes, determine whether to enqueue a follow-up:
- * - Task done → enqueue Review (if loop_count < max_loops)
- * - Review changes_requested → enqueue Task fix (increment loop_count)
- * - Review approved → done, clean up worktree
- * - Loop cap reached → done with note
- *
- * Returns true if a follow-up job was created (worktree cleanup should be deferred).
+ * Clean up a job's resources: migrate sessions to repo directory, remove worktree.
  */
-function applyLoopLogic(job: Job, payload: CompletionPayload): boolean {
-	if (job.type === 'task') {
-		// Task completed — enqueue a review if we haven't exceeded loop cap
-		if (job.loop_count >= job.max_loops) {
-			log.info('job-completion', `job ${job.id} reached loop cap (${job.max_loops}) — no review enqueued`);
-			updateJobStatus(job.id, {
-				result_summary: (job.result_summary ?? '') + '\n[Loop cap reached — skipped automatic review]',
-			});
-			return false;
-		}
-
-		const reviewJob = createJob({
-			type: 'review',
-			title: `Review: ${job.title}`,
-			description: `Automatic review for task job ${job.id}`,
-			repo: job.repo ?? undefined,
-			branch: job.branch ?? undefined,
-			target_branch: job.target_branch,
-			parent_job_id: job.id,
-			loop_count: job.loop_count,
-			max_loops: job.max_loops,
-			pr_url: payload.prUrl ?? job.pr_url ?? undefined,
-			priority: job.priority,
-			review_skill: job.review_skill ?? undefined,
-		});
-
-		// Pass worktree path to the review job so it can be cleaned up
-		// after the review (or passed to a fix job if changes are requested)
-		if (job.worktree_path) {
-			updateJobStatus(reviewJob.id, { worktree_path: job.worktree_path });
-		}
-
-		log.info('job-completion', `enqueued review job ${reviewJob.id} for task ${job.id}`);
-		return true;
-	} else if (job.type === 'review') {
-		if (payload.verdict === 'approved') {
-			log.info('job-completion', `review ${job.id} approved — chain complete`);
-			// Clean up the worktree inherited from the task job
-			cleanupWorktree(job);
-			return false;
-		}
-
-		if (payload.verdict === 'changes_requested') {
-			const nextLoopCount = job.loop_count + 1;
-
-			if (nextLoopCount >= job.max_loops) {
-				log.info('job-completion', `review ${job.id} requested changes but loop cap reached (${job.max_loops})`);
-				updateJobStatus(job.id, {
-					result_summary: (job.result_summary ?? '') + '\n[Loop cap reached — skipped automatic fix]',
-				});
-				// Clean up the worktree — no more fixes coming
-				cleanupWorktree(job);
-				return false;
-			}
-
-			const fixJob = createJob({
-				type: 'task',
-				title: `Fix: ${job.title.replace(/^Review:\s*/, '')}`,
-				description: `Fix review comments from review job ${job.id}`,
-				repo: job.repo ?? undefined,
-				branch: job.branch ?? undefined,
-				target_branch: job.target_branch,
-				parent_job_id: job.id,
-				loop_count: nextLoopCount,
-				max_loops: job.max_loops,
-				pr_url: job.pr_url ?? undefined,
-				priority: job.priority,
-				review_skill: job.review_skill ?? undefined,
-			});
-
-			log.info('job-completion', `enqueued fix job ${fixJob.id} for review ${job.id} (loop ${nextLoopCount}/${job.max_loops})`);
-			return true;
-		}
-	}
-
-	return false;
+export function cleanupJob(job: Job): void {
+	migrateWorktreeSessions(job);
+	cleanupWorktree(job);
 }
 
 // --- Session migration ---

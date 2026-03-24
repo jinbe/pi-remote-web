@@ -72,8 +72,8 @@ export function getDb(): Database {
 
 		db.run(`CREATE TABLE IF NOT EXISTS jobs (
 			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
-			type TEXT NOT NULL CHECK (type IN ('task', 'review')),
-			status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'claimed', 'running', 'done', 'failed', 'cancelled')),
+			type TEXT,
+			status TEXT NOT NULL DEFAULT 'queued',
 			priority INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL DEFAULT (datetime('now')),
 			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -87,7 +87,7 @@ export function getDb(): Database {
 			target_branch TEXT DEFAULT 'main',
 			pr_url TEXT,
 			pr_number INTEGER,
-			review_verdict TEXT CHECK (review_verdict IS NULL OR review_verdict IN ('approved', 'changes_requested')),
+			review_verdict TEXT,
 			parent_job_id TEXT REFERENCES jobs(id),
 			loop_count INTEGER NOT NULL DEFAULT 0,
 			max_loops INTEGER NOT NULL DEFAULT 5,
@@ -104,6 +104,61 @@ export function getDb(): Database {
 		// Migrations: add columns if missing (from older schema)
 		try { db.run('ALTER TABLE jobs ADD COLUMN callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16))))'); } catch {}
 		try { db.run('ALTER TABLE jobs ADD COLUMN review_skill TEXT'); } catch {}
+
+		// Migration: Test if 'reviewing' status is allowed by trying a test insert
+		// If it fails, we need to migrate the schema to remove CHECK constraints
+		let needsSchemaUpdate = false;
+		try {
+			db.prepare("INSERT INTO jobs (id, type, status, title) VALUES (?, ?, ?, ?)").run('__test__', null, 'reviewing', '__test__');
+			// If we got here, the insert worked — now clean it up
+			db.run("DELETE FROM jobs WHERE id = '__test__'");
+		} catch {
+			// The insert failed — we need to migrate
+			needsSchemaUpdate = true;
+		}
+
+		if (needsSchemaUpdate) {
+			// Recreate the table without CHECK constraints
+			db.run(`CREATE TABLE jobs_new (
+				id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+				type TEXT,
+				status TEXT NOT NULL DEFAULT 'queued',
+				priority INTEGER NOT NULL DEFAULT 0,
+				created_at TEXT NOT NULL DEFAULT (datetime('now')),
+				updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+				claimed_at TEXT,
+				completed_at TEXT,
+				title TEXT NOT NULL,
+				description TEXT,
+				repo TEXT,
+				branch TEXT,
+				issue_url TEXT,
+				target_branch TEXT DEFAULT 'main',
+				pr_url TEXT,
+				pr_number INTEGER,
+				review_verdict TEXT,
+				parent_job_id TEXT REFERENCES jobs(id),
+				loop_count INTEGER NOT NULL DEFAULT 0,
+				max_loops INTEGER NOT NULL DEFAULT 5,
+				session_id TEXT,
+				worktree_path TEXT,
+				result_summary TEXT,
+				error TEXT,
+				retry_count INTEGER NOT NULL DEFAULT 0,
+				max_retries INTEGER NOT NULL DEFAULT 2,
+				callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+				review_skill TEXT
+			)`);
+			db.run(`INSERT INTO jobs_new SELECT * FROM jobs`);
+			db.run('DROP TABLE jobs');
+			db.run('ALTER TABLE jobs_new RENAME TO jobs');
+			// Recreate indexes
+			db.run('CREATE INDEX idx_jobs_status ON jobs(status)');
+			db.run('CREATE INDEX idx_jobs_type ON jobs(type)');
+			db.run('CREATE INDEX idx_jobs_parent ON jobs(parent_job_id)');
+			db.run('CREATE INDEX idx_jobs_repo ON jobs(repo)');
+			db.run('CREATE INDEX idx_jobs_created ON jobs(created_at)');
+		}
 
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type)');

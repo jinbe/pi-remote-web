@@ -11,7 +11,8 @@ import type { RequestHandler } from './$types';
 const VALID_TRANSITIONS: Record<string, string[]> = {
 	queued: ['claimed', 'cancelled'],
 	claimed: ['running', 'failed', 'cancelled'],
-	running: ['done', 'failed', 'cancelled'],
+	running: ['reviewing', 'done', 'failed', 'cancelled'],
+	reviewing: ['running', 'done', 'failed', 'cancelled'],
 	// Terminal states — no further transitions via PATCH (use retryJob for failed→queued)
 	done: [],
 	failed: [],
