@@ -87,6 +87,16 @@
 		}
 	}
 
+	async function requestReview(jobId: string) {
+		hapticMedium();
+		try {
+			await fetch(`/api/jobs/${jobId}/review`, { method: 'POST' });
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to request review:', e);
+		}
+	}
+
 	async function deleteJob(jobId: string) {
 		if (!confirm('Delete this job?')) return;
 		hapticMedium();
@@ -155,6 +165,13 @@
 					</span>
 
 					<!-- Actions -->
+					{#if job.status === 'done'}
+						<button
+							class="btn btn-ghost btn-xs"
+							onclick={(e) => { e.stopPropagation(); requestReview(job.id); }}
+							title="Request review"
+						><Icon name="search" class="w-3 h-3" /></button>
+					{/if}
 					{#if job.status === 'failed'}
 						<button
 							class="btn btn-ghost btn-xs"

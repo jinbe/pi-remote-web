@@ -282,3 +282,37 @@ export function retryJob(id: string): Job | null {
 	}
 	return row;
 }
+
+/**
+ * Enqueue a review for a completed job. Creates a new review job linked to the
+ * given job, inheriting repo, branch, PR URL, and review skill settings.
+ * Only works on done task or review jobs.
+ */
+export function enqueueReview(id: string): Job {
+	const job = getJob(id);
+	if (!job) {
+		throw new Error(`Job not found: ${id}`);
+	}
+
+	if (job.status !== 'done') {
+		throw new Error(`Cannot enqueue review for job in '${job.status}' status — only done jobs can be reviewed`);
+	}
+
+	const reviewJob = createJob({
+		type: 'review',
+		title: `Review: ${job.title.replace(/^Review:\s*/, '')}`,
+		description: `Manual review requested for job ${job.id}`,
+		repo: job.repo ?? undefined,
+		branch: job.branch ?? undefined,
+		target_branch: job.target_branch,
+		parent_job_id: job.id,
+		loop_count: job.loop_count,
+		max_loops: job.max_loops,
+		pr_url: job.pr_url ?? undefined,
+		priority: job.priority,
+		review_skill: job.review_skill ?? undefined,
+	});
+
+	log.info('job-queue', `enqueued manual review ${reviewJob.id} for job ${id}`);
+	return reviewJob;
+}
