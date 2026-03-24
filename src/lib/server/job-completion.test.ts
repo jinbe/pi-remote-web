@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { handleCompletion } from './job-completion';
+import { handleCompletion, cwdToSessionDirName } from './job-completion';
 import { createJob, getJob, getJobs, updateJobStatus } from './job-queue';
 import { getDb } from './cache';
 
@@ -155,6 +155,26 @@ describe('job-completion', () => {
 
 			const allJobs = getJobs();
 			expect(allJobs).toHaveLength(1); // No fix enqueued
+		});
+	});
+
+	describe('cwdToSessionDirName', () => {
+		it('converts absolute path to pi session dir name', () => {
+			expect(cwdToSessionDirName('/Users/jchan/code/my-project')).toBe(
+				'--Users-jchan-code-my-project--'
+			);
+		});
+
+		it('handles paths with colons (Windows-style)', () => {
+			expect(cwdToSessionDirName('C:\\Users\\dev\\project')).toBe(
+				'--C--Users-dev-project--'
+			);
+		});
+
+		it('strips leading slash', () => {
+			const result = cwdToSessionDirName('/foo/bar');
+			expect(result).toBe('--foo-bar--');
+			expect(result.startsWith('---')).toBe(false);
 		});
 	});
 });

@@ -4,8 +4,10 @@
  */
 import { getJob, updateJobStatus, createJob, type Job } from './job-queue';
 import { log } from './logger';
-import { rmSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, copyFileSync } from 'fs';
 import { execFileSync } from 'child_process';
+import { join, resolve } from 'path';
+import { homedir } from 'os';
 
 // --- Types ---
 
@@ -144,14 +146,66 @@ function applyLoopLogic(job: Job, payload: CompletionPayload): void {
 	}
 }
 
+// --- Session migration ---
+
+const SESSIONS_DIR = join(homedir(), '.pi', 'agent', 'sessions');
+
+/**
+ * Convert a cwd path to the session directory name pi uses.
+ * Mirrors pi's internal convention: `--path-parts--`
+ * Exported for testing.
+ */
+export function cwdToSessionDirName(cwd: string): string {
+	return `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
+}
+
+/**
+ * Copy session files from the worktree's session directory to the repo's
+ * session directory so they appear under the correct project in the dashboard.
+ */
+function migrateWorktreeSessions(job: Job): void {
+	if (!job.worktree_path || !job.repo) return;
+
+	const worktreeSessionDir = join(SESSIONS_DIR, cwdToSessionDirName(resolve(job.worktree_path)));
+	const repoSessionDir = join(SESSIONS_DIR, cwdToSessionDirName(resolve(job.repo)));
+
+	if (!existsSync(worktreeSessionDir)) {
+		log.info('job-completion', `no worktree session dir to migrate: ${worktreeSessionDir}`);
+		return;
+	}
+
+	try {
+		mkdirSync(repoSessionDir, { recursive: true });
+
+		const files = readdirSync(worktreeSessionDir).filter(f => f.endsWith('.jsonl'));
+		for (const file of files) {
+			const src = join(worktreeSessionDir, file);
+			const dest = join(repoSessionDir, file);
+			copyFileSync(src, dest);
+		}
+
+		log.info('job-completion', `migrated ${files.length} session file(s) from worktree to repo: ${repoSessionDir}`);
+
+		// Remove the worktree session directory
+		rmSync(worktreeSessionDir, { recursive: true, force: true });
+		log.info('job-completion', `removed worktree session dir: ${worktreeSessionDir}`);
+	} catch (err) {
+		log.warn('job-completion', `failed to migrate worktree sessions: ${err}`);
+	}
+}
+
 // --- Worktree cleanup ---
 
 /**
- * Remove the git worktree using `git worktree remove` to properly unregister
- * it from git's tracking, then fall back to rmSync if git fails.
+ * Migrate session files to the repo's session directory, then remove the
+ * git worktree using `git worktree remove` to properly unregister it from
+ * git's tracking. Falls back to rmSync if git fails.
  */
 function cleanupWorktree(job: Job): void {
 	if (!job.worktree_path) return;
+
+	// Copy session files to repo's session directory before cleanup
+	migrateWorktreeSessions(job);
 
 	// Try git worktree remove first (uses repo path if available)
 	try {
