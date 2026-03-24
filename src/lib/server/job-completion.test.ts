@@ -53,7 +53,7 @@ describe('job-completion', () => {
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/1');
 		});
 
-		it('delegates to state machine — fire-and-forget goes to reviewing (not done)', () => {
+		it('delegates to state machine — fire-and-forget with PR goes straight to done', () => {
 			const job = createTestJob({ title: 'Quick task', max_loops: 0 });
 			updateJobStatus(job.id, { status: 'running' });
 
@@ -64,8 +64,21 @@ describe('job-completion', () => {
 			});
 
 			const updated = getJob(job.id)!;
-			expect(updated.status).toBe('reviewing');
+			expect(updated.status).toBe('done');
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/2');
+		});
+
+		it('delegates to state machine — fire-and-forget without PR goes to reviewing', () => {
+			const job = createTestJob({ title: 'Quick task no PR', max_loops: 0 });
+			updateJobStatus(job.id, { status: 'running' });
+
+			handleCompletion(job.id, {
+				jobId: job.id,
+				status: 'done',
+			});
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('reviewing');
 		});
 
 		it('delegates to state machine — review with approved verdict marks done', () => {

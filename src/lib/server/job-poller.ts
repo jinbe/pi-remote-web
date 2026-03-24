@@ -8,8 +8,9 @@
 import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
 import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt } from './job-prompts';
 import { cleanupJob } from './job-completion';
-import { createSession, sendMessage, subscribe, stopSession } from './rpc-manager';
+import { createSession, sendMessage, subscribe, stopSession, isActive } from './rpc-manager';
 import { log } from './logger';
+import { getDb } from './cache';
 import { join } from 'path';
 import { mkdirSync, existsSync, rmSync } from 'fs';
 import { execFileSync } from 'child_process';
@@ -23,6 +24,13 @@ const WORKTREE_BASE = process.env.PI_WORKTREE_DIR || join(process.cwd(), '.workt
 const PR_URL_PATTERN = /PR_URL:\s*(\S+)/;
 const VERDICT_PATTERN = /VERDICT:\s*(approved|changes_requested)/;
 
+/**
+ * Fuzzy fallback patterns for verdict detection when the exact VERDICT marker
+ * is missing. Checked in order — first match wins.
+ */
+const VERDICT_FALLBACK_APPROVED = /\b(?:gh pr review \d+ --approve|LGTM|looks good to merge|approving this PR)\b/i;
+const VERDICT_FALLBACK_CHANGES = /\b(?:gh pr review \d+ --request-changes|requesting changes|changes are needed|must fix before merge)\b/i;
+
 // --- State ---
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -35,6 +43,8 @@ const sessionUnsubscribers = new Map<string, () => void>();
 
 /**
  * Start the background poller. Polls every 30 seconds for queued jobs.
+ * On startup, recovers orphaned jobs that were mid-dispatch when the server
+ * last restarted.
  */
 export function start(): void {
 	if (pollTimer) {
@@ -45,11 +55,14 @@ export function start(): void {
 	// Ensure worktree base directory exists
 	try { mkdirSync(WORKTREE_BASE, { recursive: true }); } catch { /* already exists */ }
 
+	// Recover jobs orphaned by a server restart before polling for new work
+	recoverOrphanedJobs();
+
 	pollTimer = setInterval(() => pollOnce(), POLL_INTERVAL_MS);
 	log.info('job-poller', `started (interval: ${POLL_INTERVAL_MS}ms, worktree dir: ${WORKTREE_BASE})`);
 
-	// Run an immediate poll on start
-	pollOnce();
+	// Run an immediate poll on start (fire-and-forget — runs async)
+	setTimeout(() => pollOnce(), 0);
 }
 
 /**
@@ -64,10 +77,68 @@ export function stop(): void {
 }
 
 /**
+ * Reset internal state for testing. Clears the `isPolling` guard so tests
+ * can call `pollOnce()` reliably after `stop()`.
+ */
+export function _resetForTesting(): void {
+	isPolling = false;
+}
+
+/**
  * Check whether the poller is currently active.
  */
 export function isRunning(): boolean {
 	return pollTimer !== null;
+}
+
+// --- Orphaned job recovery ---
+
+/**
+ * Recover jobs that were orphaned by a server restart.
+ *
+ * A job is orphaned if it's in 'claimed' or 'running' status but has no active
+ * session — this means the server died mid-dispatch before the session was
+ * created or registered. Re-queue these so the next poll picks them up.
+ *
+ * For 'running' jobs that DO have a session_id, the session recovery in
+ * rpc-manager handles reconnection — we only touch sessionless jobs here.
+ */
+export function recoverOrphanedJobs(): void {
+	const orphaned = getDb().query(
+		`SELECT * FROM jobs WHERE status IN ('claimed', 'running') AND session_id IS NULL`
+	).all() as Job[];
+
+	for (const job of orphaned) {
+		// Clean up any partial worktree that was created before the crash
+		if (job.worktree_path) {
+			try {
+				cleanupJob(job);
+			} catch (err) {
+				log.warn('job-poller', `failed to clean up orphaned worktree for job ${job.id}: ${err}`);
+			}
+		}
+
+		// Clean up stale auto-generated branch (job/<id>) if it exists
+		if (!job.branch && job.repo) {
+			const staleBranch = `job/${job.id}`;
+			try {
+				execFileSync('git', ['branch', '-D', staleBranch], { cwd: job.repo, stdio: 'pipe' });
+				log.info('job-poller', `deleted stale branch ${staleBranch} during recovery`);
+			} catch { /* branch doesn't exist — fine */ }
+		}
+
+		// Reset to queued — clear claimed_at, worktree_path, and branch so dispatch starts fresh
+		getDb().query(`
+			UPDATE jobs
+			SET status = 'queued', claimed_at = NULL, worktree_path = NULL, branch = NULL, updated_at = datetime('now')
+			WHERE id = ?
+		`).run(job.id);
+		log.info('job-poller', `recovered orphaned job ${job.id} (was ${job.status}) → re-queued`);
+	}
+
+	if (orphaned.length > 0) {
+		log.info('job-poller', `recovered ${orphaned.length} orphaned job(s)`);
+	}
 }
 
 /** Maximum number of jobs to dispatch in a single poll iteration. */
@@ -103,29 +174,36 @@ export async function pollOnce(): Promise<void> {
 // --- Job dispatch ---
 
 /**
- * Set up a worktree, create a Pi session, and send the task prompt.
- * All jobs (tasks) get an isolated worktree.
+ * Set up a worktree (for task jobs), create a Pi session, and send the prompt.
+ * Review jobs skip the worktree — they only need to read the PR diff via `gh`.
  */
 async function dispatchJob(job: Job): Promise<void> {
 	let worktreePath: string | null = null;
+	const isReview = job.type === 'review';
 
 	try {
-		// Determine the repository path
 		const repoPath = job.repo;
 		if (!repoPath || !existsSync(repoPath)) {
 			throw new Error(`Repository path not found: ${repoPath}`);
 		}
 
-		// All jobs get an isolated worktree
-		worktreePath = createWorktree(repoPath, job);
-		const sessionCwd = worktreePath;
-		
+		let sessionCwd: string;
+
+		if (isReview) {
+			// Review jobs run directly in the repo — no worktree needed
+			sessionCwd = repoPath;
+		} else {
+			// Task jobs get an isolated worktree
+			worktreePath = createWorktree(repoPath, job);
+			sessionCwd = worktreePath;
+		}
+
 		updateJobStatus(job.id, {
 			status: 'running',
-			worktree_path: worktreePath,
+			worktree_path: worktreePath ?? undefined,
 		});
 
-		// Create a Pi session in the worktree (with optional model override)
+		// Create a Pi session (with optional model override)
 		const sessionId = await createSession(sessionCwd, job.model ?? undefined);
 
 		// Update job with session ID
@@ -135,11 +213,11 @@ async function dispatchJob(job: Job): Promise<void> {
 		// phase transitions server-side — the extension callback is a fallback.
 		subscribeToJobSession(job.id, sessionId);
 
-		// Send the task prompt
-		const prompt = buildTaskPrompt(job);
+		// Send the appropriate prompt
+		const prompt = isReview ? buildReviewPrompt(job) : buildTaskPrompt(job);
 		await sendMessage(sessionId, prompt);
 
-		log.info('job-poller', `dispatched job ${job.id} → session ${sessionId}`);
+		log.info('job-poller', `dispatched ${isReview ? 'review' : 'task'} job ${job.id} → session ${sessionId}`);
 	} catch (err: any) {
 		log.error('job-poller', `failed to dispatch job ${job.id}: ${err.message}`);
 		updateJobStatus(job.id, {
@@ -204,8 +282,25 @@ function cleanupSubscription(jobId: string): void {
 }
 
 /**
+ * Extract a verdict from assistant text. Tries the exact VERDICT marker first,
+ * then falls back to fuzzy pattern matching.
+ */
+function extractVerdict(
+	assistantText: string,
+	exactMatch: RegExpMatchArray | null,
+): 'approved' | 'changes_requested' | null {
+	if (exactMatch) {
+		return exactMatch[1] as 'approved' | 'changes_requested';
+	}
+	if (VERDICT_FALLBACK_APPROVED.test(assistantText)) return 'approved';
+	if (VERDICT_FALLBACK_CHANGES.test(assistantText)) return 'changes_requested';
+	return null;
+}
+
+/**
  * Handle agent_end for a job session. Implements the state machine:
- * - running → reviewing: extract PR_URL, send review prompt
+ * - running (review job) → done: extract verdict directly
+ * - running (task job) → reviewing: extract PR_URL, send review prompt
  * - reviewing → done (approved): cleanup
  * - reviewing → running (changes_requested): send fix prompt or done if loop cap reached
  */
@@ -232,9 +327,50 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 
 		// State machine transitions
 		if (job.status === 'running') {
-			// Task phase complete — always transition to reviewing
+
+			// Review-type jobs: dispatched with a review prompt, so agent_end
+			// means the review is complete. Extract the verdict and finish.
+			if (job.type === 'review') {
+				const verdict = extractVerdict(assistantText, verdictMatch);
+				if (verdict) {
+					updateJobStatus(jobId, {
+						status: 'done',
+						review_verdict: verdict,
+					});
+					await cleanupJobAfterCompletion(job);
+					cleanupSubscription(jobId);
+					log.info('job-poller', `review job ${jobId} → done (verdict: ${verdict})`);
+				} else {
+					log.warn('job-poller', `review job ${jobId} ended without verdict — marking as failed`);
+					updateJobStatus(jobId, {
+						status: 'failed',
+						error: 'Review ended without VERDICT marker',
+					});
+					await cleanupJobAfterCompletion(job);
+					cleanupSubscription(jobId);
+				}
+				return;
+			}
+
+			// Task jobs below
 			const prUrl = prUrlMatch?.[1];
 
+			// Fire-and-forget jobs (max_loops=0): having a PR is as good as done —
+			// skip the reviewing phase entirely since no verdict check will follow.
+			if (job.max_loops === 0 && prUrl) {
+				updateJobStatus(jobId, {
+					status: 'done',
+					pr_url: prUrl,
+				});
+
+				await cleanupJobAfterCompletion(job);
+				cleanupSubscription(jobId);
+
+				log.info('job-poller', `job ${jobId} fire-and-forget with PR → done, cleaned up`);
+				return;
+			}
+
+			// Jobs with review loops: transition to reviewing
 			updateJobStatus(jobId, {
 				status: 'reviewing',
 				pr_url: prUrl,
@@ -250,11 +386,11 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 				}
 			}
 			
-			log.info('job-poller', `job ${jobId} transitioned running → reviewing${job.max_loops === 0 ? ' (awaiting manual review)' : ''}`);
+			log.info('job-poller', `job ${jobId} transitioned running → reviewing`);
 			
 		} else if (job.status === 'reviewing') {
-			// Review phase complete → check verdict
-			const verdict = verdictMatch?.[1] as 'approved' | 'changes_requested' | undefined;
+			// Review phase complete → check verdict (exact match first, then fuzzy fallback)
+			const verdict = extractVerdict(assistantText, verdictMatch);
 			
 			if (verdict === 'approved') {
 				// Review approved → done
@@ -322,6 +458,13 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 			status: 'failed',
 			error: `Phase transition failed: ${err}`,
 		});
+
+		// Ensure cleanup still runs — migrate sessions + remove worktree
+		const failedJob = getJob(jobId);
+		if (failedJob) {
+			await cleanupJobAfterCompletion(failedJob);
+		}
+		cleanupSubscription(jobId);
 	}
 }
 
@@ -406,6 +549,13 @@ function createWorktree(repoPath: string, job: Job): string {
 		// Create a new branch for the job
 		const branchName = `job/${job.id}`;
 		validateGitRef(branchName, 'auto-generated branch');
+
+		// Delete stale branch from a previous failed dispatch attempt
+		try {
+			execFileSync('git', ['branch', '-D', branchName], { cwd: repoPath, stdio: 'pipe' });
+			log.info('job-poller', `deleted stale branch ${branchName} before recreating`);
+		} catch { /* branch doesn't exist — expected for fresh jobs */ }
+
 		execFileSync('git', ['worktree', 'add', '-b', branchName, worktreePath, targetBranch], { cwd: repoPath, stdio: 'pipe' });
 		// Update job with the auto-generated branch name
 		updateJobStatus(job.id, { branch: branchName });

@@ -6,6 +6,7 @@
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import AddJobModal from '$lib/components/AddJobModal.svelte';
+	import AddReviewJobModal from '$lib/components/AddReviewJobModal.svelte';
 	import JobList from '$lib/components/JobList.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import { getContext } from 'svelte';
@@ -26,6 +27,8 @@
 	let creatingForProject = $state<string | null>(null);
 	let showAddJob = $state(false);
 	let addJobRepo = $state('');
+	let showAddReviewJob = $state(false);
+	let addReviewJobRepo = $state('');
 
 	// Persist expanded project to localStorage
 	$effect(() => {
@@ -159,6 +162,12 @@
 		hapticMedium();
 		addJobRepo = repo;
 		showAddJob = true;
+	}
+
+	function openAddReviewJob(repo: string) {
+		hapticMedium();
+		addReviewJobRepo = repo;
+		showAddReviewJob = true;
 	}
 
 	const hasActiveSessions = $derived(activeSet.size > 0);
@@ -461,7 +470,13 @@
 								<li>
 									<button onclick={(e) => { e.stopPropagation(); openAddJob(group.cwd); }}>
 										<span class="opacity-70 inline-flex"><Icon name="hammer" class="w-4 h-4" /></span>
-										New Job
+										New Task Job
+									</button>
+								</li>
+								<li>
+									<button onclick={(e) => { e.stopPropagation(); openAddReviewJob(group.cwd); }}>
+										<span class="opacity-70 inline-flex"><Icon name="search" class="w-4 h-4" /></span>
+										New Review Job
 									</button>
 								</li>
 								<li>
@@ -484,14 +499,22 @@
 							</ul>
 						</div>
 
-						<!-- Desktop: inline button -->
+						<!-- Desktop: inline buttons -->
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); openAddJob(group.cwd); }}
-							title="New job for {group.shortName}"
-							aria-label="New job"
+							title="New task job for {group.shortName}"
+							aria-label="New task job"
 						>
-							<span class="opacity-50 text-xs inline-flex items-center gap-0.5"><Icon name="hammer" class="w-3 h-3" /> Job</span>
+							<span class="opacity-50 text-xs inline-flex items-center gap-0.5"><Icon name="hammer" class="w-3 h-3" /> Task</span>
+						</button>
+						<button
+							class="hidden md:inline-flex btn btn-ghost btn-xs"
+							onclick={(e: MouseEvent) => { e.stopPropagation(); openAddReviewJob(group.cwd); }}
+							title="New review job for {group.shortName}"
+							aria-label="New review job"
+						>
+							<span class="opacity-50 text-xs inline-flex items-center gap-0.5"><Icon name="search" class="w-3 h-3" /> Review</span>
 						</button>
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
@@ -624,6 +647,12 @@
 	open={showAddJob}
 	defaultRepo={addJobRepo}
 	onclose={() => (showAddJob = false)}
+/>
+
+<AddReviewJobModal
+	open={showAddReviewJob}
+	defaultRepo={addReviewJobRepo}
+	onclose={() => (showAddReviewJob = false)}
 />
 
 <style>

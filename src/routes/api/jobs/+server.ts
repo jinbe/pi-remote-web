@@ -1,9 +1,12 @@
 /**
  * GET /api/jobs — List jobs with optional filters
  * POST /api/jobs — Create a new job
+ *
+ * Review jobs can omit the title — it's inferred from the PR URL via `gh` CLI.
  */
 import { json, error } from '@sveltejs/kit';
 import { getJobs, createJob } from '$lib/server/job-queue';
+import { fetchPrMetadata, fallbackTitle } from '$lib/server/pr-metadata';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url }) => {
@@ -18,26 +21,51 @@ export const GET: RequestHandler = async ({ url }) => {
 export const POST: RequestHandler = async ({ request }) => {
 	try {
 		const body = await request.json();
-		const { type, title, description, repo, branch, issue_url, target_branch, priority, max_loops, review_skill, model } = body;
+		const { type, title, description, repo, branch, issue_url, target_branch, priority, max_loops, pr_url, review_skill, model } = body;
 
 		// Type is now optional (defaults to 'task' in createJob)
 		if (type && !['task', 'review'].includes(type)) {
 			throw error(400, 'Invalid job type — must be "task" or "review" (or omitted)');
 		}
-		if (!title || typeof title !== 'string' || !title.trim()) {
+
+		const isReview = type === 'review';
+		const trimmedPrUrl = pr_url?.trim() || undefined;
+		let resolvedTitle = title?.trim() || undefined;
+		let resolvedBranch = branch?.trim() || undefined;
+		let resolvedTargetBranch = target_branch?.trim() || undefined;
+
+		// Review jobs: infer title/branch/target from PR metadata when not provided
+		if (isReview && trimmedPrUrl) {
+			const meta = fetchPrMetadata(trimmedPrUrl);
+			if (meta) {
+				if (!resolvedTitle) resolvedTitle = meta.title;
+				if (!resolvedBranch) resolvedBranch = meta.branch;
+				if (!resolvedTargetBranch) resolvedTargetBranch = meta.targetBranch;
+			} else if (!resolvedTitle) {
+				// gh unavailable — use PR number as fallback title
+				resolvedTitle = fallbackTitle(trimmedPrUrl);
+			}
+		}
+
+		// Title is required for non-review jobs; review jobs must have a PR URL at minimum
+		if (isReview && !trimmedPrUrl) {
+			throw error(400, 'PR URL is required for review jobs');
+		}
+		if (!resolvedTitle) {
 			throw error(400, 'Title is required');
 		}
 
 		const job = createJob({
 			type: type || undefined, // Let createJob apply default
-			title: title.trim(),
+			title: resolvedTitle,
 			description: description?.trim() || undefined,
 			repo: repo?.trim() || undefined,
-			branch: branch?.trim() || undefined,
+			branch: resolvedBranch,
 			issue_url: issue_url?.trim() || undefined,
-			target_branch: target_branch?.trim() || undefined,
+			target_branch: resolvedTargetBranch,
 			priority: typeof priority === 'number' ? priority : undefined,
 			max_loops: typeof max_loops === 'number' ? max_loops : undefined,
+			pr_url: trimmedPrUrl,
 			review_skill: review_skill?.trim() || undefined,
 			model: model?.trim() || undefined,
 		});

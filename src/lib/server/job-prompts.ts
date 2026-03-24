@@ -57,8 +57,14 @@ export function buildTaskPrompt(job: Job): string {
 	}
 
 	parts.push('');
-	parts.push('When done, output exactly:');
+	parts.push('=== CRITICAL: REQUIRED OUTPUT ===');
+	parts.push('When you are completely done, you MUST output this exact line as the VERY LAST thing in your response:');
+	parts.push('');
 	parts.push('PR_URL: <the full PR URL>');
+	parts.push('');
+	parts.push('This is a machine-parsed marker. The job cannot proceed without it.');
+	parts.push('Do NOT paraphrase, reword, or wrap it in a code block. Output the exact line on its own.');
+	parts.push('=================================');
 
 	return parts.join('\n');
 }
@@ -73,8 +79,14 @@ export function buildTaskFixPrompt(job: Job, _reviewComments: string): string {
 	if (job.pr_url) parts.push(`PR: ${job.pr_url}`);
 
 	parts.push('');
-	parts.push('When done, output exactly:');
+	parts.push('=== CRITICAL: REQUIRED OUTPUT ===');
+	parts.push('When you are completely done, you MUST output this exact line as the VERY LAST thing in your response:');
+	parts.push('');
 	parts.push('PR_URL: <the full PR URL>');
+	parts.push('');
+	parts.push('This is a machine-parsed marker. The job cannot proceed without it.');
+	parts.push('Do NOT paraphrase, reword, or wrap it in a code block. Output the exact line on its own.');
+	parts.push('=================================');
 
 	return parts.join('\n');
 }
@@ -101,9 +113,15 @@ export function buildReviewPrompt(job: Job): string {
 	}
 
 	parts.push('');
-	parts.push('When finished, output exactly one of:');
+	parts.push('=== CRITICAL: REQUIRED OUTPUT ===');
+	parts.push('After completing the review, you MUST output EXACTLY one of these two lines as the VERY LAST thing in your response:');
+	parts.push('');
 	parts.push('VERDICT: approved');
 	parts.push('VERDICT: changes_requested');
+	parts.push('');
+	parts.push('This is a machine-parsed marker. The job will FAIL if you do not include it.');
+	parts.push('Do NOT paraphrase, reword, or wrap it in a code block. Output the exact line on its own.');
+	parts.push('=================================');
 
 	return parts.join('\n');
 }

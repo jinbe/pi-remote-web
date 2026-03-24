@@ -42,6 +42,21 @@ describe('job-queue', () => {
 			expect(job.max_loops).toBe(3);
 		});
 
+		it('creates a review job with pr_url', () => {
+			const job = createTestJob({
+				type: 'review',
+				title: 'Review external PR',
+				pr_url: 'https://github.com/org/repo/pull/42',
+				repo: '/path/to/repo',
+				max_loops: 1,
+			});
+
+			expect(job.type).toBe('review');
+			expect(job.pr_url).toBe('https://github.com/org/repo/pull/42');
+			expect(job.repo).toBe('/path/to/repo');
+			expect(job.max_loops).toBe(1);
+		});
+
 		it('creates a job with parent_job_id', () => {
 			const parent = createTestJob({ type: 'task', title: 'Parent' });
 			const child = createTestJob({ type: 'review', title: 'Child', parent_job_id: parent.id });

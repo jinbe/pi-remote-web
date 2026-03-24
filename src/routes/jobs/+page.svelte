@@ -3,6 +3,7 @@
 	import { timeAgo, shortenHome } from '$lib/utils';
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import AddJobModal from '$lib/components/AddJobModal.svelte';
+	import AddReviewJobModal from '$lib/components/AddReviewJobModal.svelte';
 	import JobChain from '$lib/components/JobChain.svelte';
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
@@ -46,6 +47,7 @@
 	let typeFilter = $state<string>('all');
 	let search = $state('');
 	let showAddJob = $state(false);
+	let showAddReviewJob = $state(false);
 
 	// Expanded job for detail view
 	let expandedJob = $state<string | null>(null);
@@ -503,7 +505,8 @@
 					<span class="hidden sm:inline">Poller Off</span>
 				{/if}
 			</button>
-			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAddJob = true; }}><Icon name="plus" class="w-4 h-4" /> New Job</button>
+			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAddJob = true; }}><Icon name="plus" class="w-4 h-4" /> New Task</button>
+			<button class="btn btn-sm btn-secondary gap-1" onclick={() => { hapticMedium(); showAddReviewJob = true; }}><Icon name="search" class="w-4 h-4" /> New Review</button>
 			<button class="btn btn-sm btn-ghost" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh"><Icon name="refresh" class="w-4 h-4" /></button>
 			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
 				{#if theme === 'dark'}<Icon name="sun" class="w-5 h-5" />{:else}<Icon name="moon" class="w-5 h-5" />{/if}
@@ -588,4 +591,9 @@
 <AddJobModal
 	open={showAddJob}
 	onclose={() => (showAddJob = false)}
+/>
+
+<AddReviewJobModal
+	open={showAddReviewJob}
+	onclose={() => (showAddReviewJob = false)}
 />

@@ -48,7 +48,7 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 		return job;
 	}
 
-	// Handle failure directly — no state machine needed
+	// Handle failure directly — no state machine needed, but still clean up
 	if (payload.status === 'failed') {
 		const updated = updateJobStatus(jobId, {
 			status: 'failed',
@@ -56,6 +56,10 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 			result_summary: payload.resultSummary,
 		});
 		log.info('job-completion', `job ${jobId} failed via callback: ${payload.error}`);
+
+		// Still migrate sessions and clean up worktree on failure
+		cleanupJob(job);
+
 		return updated!;
 	}
 
