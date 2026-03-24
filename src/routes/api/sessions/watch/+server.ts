@@ -1,4 +1,5 @@
 import { onSessionsChanged } from '$lib/server/session-watcher';
+import { onJobEvent } from '$lib/server/job-events';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = ({ request }) => {
@@ -6,9 +7,17 @@ export const GET: RequestHandler = ({ request }) => {
 		start(controller) {
 			const encoder = new TextEncoder();
 
-			const unsubscribe = onSessionsChanged(() => {
+			const unsubscribeSessions = onSessionsChanged(() => {
 				try {
 					controller.enqueue(encoder.encode(`data: {"type":"sessions_changed"}\n\n`));
+				} catch {
+					/* stream closed */
+				}
+			});
+
+			const unsubscribeJobs = onJobEvent((event) => {
+				try {
+					controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
 				} catch {
 					/* stream closed */
 				}
@@ -23,7 +32,8 @@ export const GET: RequestHandler = ({ request }) => {
 			}, 30000);
 
 			request.signal.addEventListener('abort', () => {
-				unsubscribe();
+				unsubscribeSessions();
+				unsubscribeJobs();
 				clearInterval(heartbeat);
 				try {
 					controller.close();

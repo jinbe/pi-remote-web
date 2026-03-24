@@ -296,11 +296,26 @@
 		}
 	}
 
-	// Auto-refresh via SSE
+	// Auto-refresh via SSE (sessions + job events are both emitted on this endpoint)
 	$effect(() => {
+		let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+		const DEBOUNCE_MS = 500;
+
+		function debouncedRefresh() {
+			if (debounceTimer) clearTimeout(debounceTimer);
+			debounceTimer = setTimeout(() => {
+				debounceTimer = null;
+				invalidateAll();
+			}, DEBOUNCE_MS);
+		}
+
 		const es = new EventSource('/api/sessions/watch');
-		es.onmessage = () => invalidateAll();
-		return () => es.close();
+		es.onmessage = () => debouncedRefresh();
+
+		return () => {
+			if (debounceTimer) clearTimeout(debounceTimer);
+			es.close();
+		};
 	});
 </script>
 
