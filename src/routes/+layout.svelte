@@ -27,6 +27,6 @@
 	<title>Pi Dashboard</title>
 </svelte:head>
 
-<div data-theme={daisyTheme} class="fixed inset-0 bg-base-100 text-base-content overflow-hidden">
+<div data-theme={daisyTheme} class="fixed inset-0 bg-base-100 text-base-content overflow-hidden overscroll-none">
 	{@render children()}
 </div>

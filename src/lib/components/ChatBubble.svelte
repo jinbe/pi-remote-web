@@ -2,6 +2,7 @@
 	import type { AgentMessage } from '$lib/types';
 	import { getArgs, toolSummary, buildDiffLines } from '$lib/tool-display';
 	import { renderMarkdown } from '$lib/markdown';
+	import { hapticLight } from '$lib/haptics';
 
 	let { entry }: { entry: AgentMessage } = $props();
 
@@ -13,6 +14,16 @@
 	// Copy to clipboard state
 	let copied = $state(false);
 	let copyTimeout: ReturnType<typeof setTimeout> | undefined;
+
+	// Swipe-to-copy state
+	let swipeOffsetX = $state(0);
+	let swiping = $state(false);
+	let swipeStartX = 0;
+	let swipeStartY = 0;
+	let swipeLocked = false;
+	let swipeDismissed = false;
+	const COPY_THRESHOLD = 60;
+	const SWIPE_LOCK_DISTANCE = 10;
 
 	function getTextContent(msg: AgentMessage['message']): string {
 		if (!msg?.content) return '';
@@ -50,9 +61,59 @@
 		} catch {
 			// Ignore — clipboard API may not be available in all contexts
 		}
+		hapticLight();
 		copied = true;
 		if (copyTimeout) clearTimeout(copyTimeout);
 		copyTimeout = setTimeout(() => { copied = false; }, 1500);
+	}
+
+	// Swipe handlers
+	function onSwipeStart(e: TouchEvent) {
+		if (!text || isToolResult) return;
+		const touch = e.touches[0];
+		swipeStartX = touch.clientX;
+		swipeStartY = touch.clientY;
+		swiping = true;
+		swipeLocked = false;
+		swipeDismissed = false;
+		swipeOffsetX = 0;
+	}
+
+	function onSwipeMove(e: TouchEvent) {
+		if (!swiping || swipeDismissed) return;
+		const touch = e.touches[0];
+		const dx = touch.clientX - swipeStartX;
+		const dy = touch.clientY - swipeStartY;
+
+		if (!swipeLocked && (Math.abs(dx) > SWIPE_LOCK_DISTANCE || Math.abs(dy) > SWIPE_LOCK_DISTANCE)) {
+			if (Math.abs(dy) > Math.abs(dx)) {
+				// Vertical — let scroll happen
+				swipeDismissed = true;
+				swiping = false;
+				swipeOffsetX = 0;
+				return;
+			}
+			swipeLocked = true;
+		}
+
+		if (swipeLocked) {
+			e.preventDefault();
+			// Swipe left only (negative dx), with dampening
+			swipeOffsetX = Math.min(0, dx * 0.5);
+		}
+	}
+
+	function onSwipeEnd() {
+		if (!swiping && !swipeLocked) return;
+
+		if (Math.abs(swipeOffsetX) >= COPY_THRESHOLD / 2) {
+			copyToClipboard();
+		}
+
+		// Snap back
+		swipeOffsetX = 0;
+		swiping = false;
+		swipeLocked = false;
 	}
 
 	const text = $derived(getTextContent(entry.message));
@@ -60,6 +121,7 @@
 	const thinking = $derived(getThinkingContent(entry.message));
 	const images = $derived(getImages(entry.message));
 	const renderedHtml = $derived(isAssistant && text ? renderMarkdown(text) : '');
+	const canSwipeCopy = $derived(!!text && !isToolResult);
 </script>
 
 {#if entry.type === 'compaction'}
@@ -67,7 +129,37 @@
 		Context compacted
 	</div>
 {:else if entry.type === 'message'}
-	<div class="chat {isUser ? 'chat-end' : 'chat-start'} mb-3">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="swipe-copy-container relative overflow-hidden"
+		ontouchstart={canSwipeCopy ? onSwipeStart : undefined}
+		ontouchmove={canSwipeCopy ? onSwipeMove : undefined}
+		ontouchend={canSwipeCopy ? onSwipeEnd : undefined}
+	>
+		<!-- Copy indicator (revealed by swipe) -->
+		{#if canSwipeCopy}
+			<div
+				class="absolute inset-y-0 right-0 flex items-center justify-center pointer-events-none transition-opacity duration-100"
+				style="width: {COPY_THRESHOLD}px; opacity: {Math.min(1, Math.abs(swipeOffsetX) / (COPY_THRESHOLD / 2))}"
+			>
+				<div class="flex flex-col items-center gap-0.5">
+					{#if copied}
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+						<span class="text-[10px] font-semibold text-success">Copied</span>
+					{:else}
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+						<span class="text-[10px] font-semibold text-base-content-muted">Copy</span>
+					{/if}
+				</div>
+			</div>
+		{/if}
+
+		<!-- Swipeable chat content -->
+		<div
+			class:swipe-snap-back={!swiping}
+			style="transform: translateX({swipeOffsetX}px)"
+		>
+	<div class="chat {isUser ? 'chat-end' : 'chat-start'} mb-3 min-w-0">
 		<div class="chat-header text-xs text-base-content-subtle mb-1">
 			{#if isUser}
 				You
@@ -85,23 +177,8 @@
 				? 'chat-bubble-primary'
 				: isToolResult
 					? 'chat-bubble-secondary'
-					: ''} max-w-[90vw] md:max-w-xl group/bubble relative"
+					: ''} max-w-[90vw] md:max-w-xl relative overflow-hidden"
 		>
-			<!-- Copy button (shown on hover / focus) -->
-			{#if text && !isToolResult}
-				<button
-					class="copy-btn absolute {isUser ? 'left-0 -translate-x-[calc(100%+4px)]' : 'right-0 translate-x-[calc(100%+4px)]'} top-1 opacity-0 group-hover/bubble:opacity-100 focus:opacity-100 transition-opacity duration-150 btn btn-ghost btn-xs btn-circle text-base-content-muted hover:text-base-content"
-					aria-label="Copy message"
-					onclick={copyToClipboard}
-				>
-					{#if copied}
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-					{:else}
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-					{/if}
-				</button>
-			{/if}
-
 			{#if isToolResult}
 				<!-- Tool results: collapsed by default, show truncated preview -->
 				<details class="group">
@@ -112,7 +189,7 @@
 						{/if}
 						<span class="opacity-50 ml-1">({text.length} chars)</span>
 					</summary>
-					<pre class="mt-2 text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">{text}</pre>
+					<pre class="mt-2 text-xs font-mono whitespace-pre-wrap break-all max-h-64 overflow-y-auto">{text}</pre>
 				</details>
 			{:else}
 				{#if thinking}
@@ -171,7 +248,7 @@
 									{/if}
 									<div class="rounded bg-base-100/40 border border-base-content/10 overflow-hidden">
 										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content-subtle border-b border-base-content/10 font-mono">$ shell</div>
-										<pre class="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto p-2 text-success/90">{args.command || ''}</pre>
+										<pre class="text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto p-2 text-success/90">{args.command || ''}</pre>
 									</div>
 								{:else if name === 'read'}
 									<!-- Read: file path with optional range -->
@@ -205,13 +282,13 @@
 											</div>
 										</div>
 									{:else}
-										<pre class="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto">{JSON.stringify(args, null, 2)}</pre>
+										<pre class="text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{JSON.stringify(args, null, 2)}</pre>
 									{/if}
 								{:else if name === 'write'}
 									<!-- Write: file path + content preview -->
 									<div class="rounded bg-base-100/40 border border-base-content/10 overflow-hidden">
 										<div class="text-[10px] px-2 py-0.5 bg-base-content/5 text-base-content-subtle border-b border-base-content/10 font-mono">{args.path || ''}</div>
-										<pre class="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto p-2">{args.content || ''}</pre>
+										<pre class="text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto p-2">{args.content || ''}</pre>
 									</div>
 								{:else if name === 'lsp'}
 									<!-- LSP: structured view -->
@@ -231,7 +308,7 @@
 									</div>
 								{:else}
 									<!-- Fallback: pretty JSON -->
-									<pre class="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto">{typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(args, null, 2)}</pre>
+									<pre class="text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(args, null, 2)}</pre>
 								{/if}
 							</div>
 						</details>
@@ -249,15 +326,23 @@
 			{/if}
 		</div>
 	</div>
+		</div><!-- /swipeable content -->
+	</div><!-- /swipe-copy-container -->
 {/if}
 
 <style>
+	.swipe-snap-back {
+		transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+	}
+
 	/* ── Markdown body styles ─────────────────────────────────────── */
 
 	:global(.markdown-body) {
 		line-height: 1.6;
 		word-wrap: break-word;
 		overflow-wrap: break-word;
+		min-width: 0;
+		max-width: 100%;
 	}
 
 	/* Headings */
@@ -323,7 +408,7 @@
 		margin: 0;
 		white-space: pre-wrap;
 		word-wrap: break-word;
-		overflow-x: auto;
+		word-break: break-all;
 		max-height: 24rem;
 		overflow-y: auto;
 		padding: 0.75em;
@@ -430,9 +515,12 @@
 		border-top: 1px solid oklch(50% 0 0 / 0.2);
 	}
 
-	/* Tables */
+	/* Tables — scroll horizontally within the bubble rather than overflowing */
 	:global(.markdown-body table) {
-		width: 100%;
+		display: block;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		max-width: 100%;
 		border-collapse: collapse;
 		margin: 0.5em 0;
 		font-size: 0.85em;
@@ -470,10 +558,4 @@
 		border-radius: 0.375rem;
 	}
 
-	/* Mobile: always show copy button on touch devices */
-	@media (hover: none) {
-		.copy-btn {
-			opacity: 0.6 !important;
-		}
-	}
 </style>

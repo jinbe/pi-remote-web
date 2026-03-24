@@ -638,7 +638,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="flex h-full flex-col"
-	class:swipe-back-transition={!edgeSwiping}
+	class:swipe-transition={!edgeSwiping}
 	style="transform: translateX({edgeSwipeOffset}px);"
 	bind:this={pageContainer}
 	ontouchstart={onEdgeSwipeStart}
@@ -706,7 +706,7 @@
 	<!-- Main content area: chat + event sidebar -->
 	<div class="flex-1 flex flex-row overflow-hidden">
 		<!-- Chat messages -->
-		<div class="flex-1 overflow-y-auto overscroll-contain px-4 py-4" style="-webkit-overflow-scrolling: touch;" bind:this={chatContainer} onscroll={handleScroll}>
+		<div class="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4" style="-webkit-overflow-scrolling: touch;" bind:this={chatContainer} onscroll={handleScroll}>
 			{#if loadingMessages}
 				<div class="space-y-4 py-4 animate-pulse">
 					<!-- Skeleton: user message (right) -->
@@ -762,7 +762,7 @@
 				<!-- Optimistic pending user message (Issue 1) -->
 				{#if pendingUserMessage}
 					<div class="chat chat-end mb-2">
-						<div class="chat-bubble chat-bubble-primary max-w-[90vw] md:max-w-xl opacity-70 animate-pulse motion-reduce:animate-none">
+						<div class="chat-bubble chat-bubble-primary max-w-[90vw] md:max-w-xl overflow-hidden opacity-70 animate-pulse motion-reduce:animate-none">
 							<div class="whitespace-pre-wrap break-words text-sm">
 								{pendingUserMessage}
 							</div>
@@ -773,7 +773,7 @@
 				<!-- Waiting for agent indicator (Issue 1) -->
 				{#if waitingForAgent && !streaming}
 					<div class="chat chat-start mb-2">
-						<div class="chat-bubble max-w-[90vw] md:max-w-xl opacity-50">
+						<div class="chat-bubble max-w-[90vw] md:max-w-xl overflow-hidden opacity-50">
 							<span class="loading loading-dots loading-xs"></span>
 							<span class="text-xs ml-1">sending to agent…</span>
 						</div>
@@ -783,7 +783,7 @@
 				<!-- Streaming assistant text -->
 				{#if streaming}
 					<div class="chat chat-start mb-2">
-						<div class="chat-bubble max-w-[90vw] md:max-w-xl">
+						<div class="chat-bubble max-w-[90vw] md:max-w-xl overflow-hidden">
 							{#if currentThinkingText}
 								<details class="mb-2 rounded bg-base-300/30 -mx-1" open>
 									<summary class="cursor-pointer text-xs py-1 px-2 opacity-70">Thinking…</summary>
@@ -940,7 +940,7 @@
 </div>
 
 <style>
-	.swipe-back-transition {
+	.swipe-transition {
 		transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 	}
 </style>
