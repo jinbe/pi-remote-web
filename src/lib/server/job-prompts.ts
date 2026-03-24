@@ -77,11 +77,9 @@ export function buildTaskFixPrompt(job: Job, reviewComments: string): string {
 		parts.push('');
 	}
 
-	parts.push('## Review Feedback');
+	parts.push('The review comments are in the conversation above. Address all the feedback.');
 	parts.push('');
-	parts.push(reviewComments);
-	parts.push('');
-	parts.push('Address all the review comments above. Push the fixes to the existing branch.');
+	parts.push('Push the fixes to the existing branch.');
 	parts.push('Run tests and typecheck before pushing.');
 	parts.push('');
 	parts.push('When finished, output exactly:');
@@ -120,7 +118,9 @@ export function buildReviewPrompt(job: Job): string {
 	}
 
 	parts.push('');
-	parts.push('Review the changes in the PR thoroughly. Check for:');
+	parts.push('Review the changes you just made. You have full context of the code in this session.');
+	parts.push('');
+	parts.push('Check for:');
 	parts.push('- Correctness and logic errors');
 	parts.push('- Test coverage');
 	parts.push('- Code style and conventions');

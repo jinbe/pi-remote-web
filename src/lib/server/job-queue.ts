@@ -9,8 +9,8 @@ import { log } from './logger';
 
 export interface Job {
 	id: string;
-	type: 'task' | 'review';
-	status: 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'cancelled';
+	type?: 'task' | 'review' | null; // Deprecated - kept for backwards compatibility
+	status: 'queued' | 'claimed' | 'running' | 'reviewing' | 'done' | 'failed' | 'cancelled';
 	priority: number;
 	created_at: string;
 	updated_at: string;
@@ -39,7 +39,7 @@ export interface Job {
 }
 
 export interface CreateJobInput {
-	type: 'task' | 'review';
+	type?: 'task' | 'review'; // Deprecated - optional for backwards compatibility
 	title: string;
 	description?: string;
 	repo?: string;
@@ -65,6 +65,7 @@ export interface UpdateJobInput {
 	error?: string;
 	branch?: string;
 	review_skill?: string;
+	loop_count?: number;
 }
 
 // --- Query helpers ---
@@ -109,7 +110,7 @@ function deleteJobQuery() {
  */
 export function createJob(input: CreateJobInput): Job {
 	const row = insertJobQuery().get({
-		$type: input.type,
+		$type: input.type ?? 'task', // Default to 'task' for backwards compatibility
 		$title: input.title,
 		$description: input.description ?? null,
 		$repo: input.repo ?? null,
@@ -124,7 +125,7 @@ export function createJob(input: CreateJobInput): Job {
 		$review_skill: input.review_skill ?? null,
 	}) as Job;
 
-	log.info('job-queue', `created job ${row.id} (${row.type}): ${row.title}`);
+	log.info('job-queue', `created job ${row.id} (${row.type ?? 'task'}): ${row.title}`);
 	return row;
 }
 
@@ -166,6 +167,7 @@ export function updateJobStatus(id: string, updates: UpdateJobInput): Job | null
 	if (updates.error !== undefined) { setClauses.push('error = $error'); params.$error = updates.error; }
 	if (updates.branch !== undefined) { setClauses.push('branch = $branch'); params.$branch = updates.branch; }
 	if (updates.review_skill !== undefined) { setClauses.push('review_skill = $review_skill'); params.$review_skill = updates.review_skill; }
+	if (updates.loop_count !== undefined) { setClauses.push('loop_count = $loop_count'); params.$loop_count = updates.loop_count; }
 
 	const sql = `UPDATE jobs SET ${setClauses.join(', ')} WHERE id = $id RETURNING *`;
 	const row = getDb().query(sql).get(params) as Job | null;
@@ -243,9 +245,9 @@ export function deleteJob(id: string): Job | null {
 	const job = getJob(id);
 	if (!job) return null;
 
-	const deletableStatuses = ['queued', 'failed', 'cancelled'];
+	const deletableStatuses = ['queued', 'done', 'failed', 'cancelled'];
 	if (!deletableStatuses.includes(job.status)) {
-		throw new Error(`Cannot delete job in '${job.status}' status — only queued, failed, or cancelled jobs can be deleted`);
+		throw new Error(`Cannot delete job in '${job.status}' status — only queued, done, failed, or cancelled jobs can be deleted`);
 	}
 
 	const deleted = deleteJobQuery().get(id) as Job | null;
@@ -281,38 +283,4 @@ export function retryJob(id: string): Job | null {
 		log.info('job-queue', `retried job ${id} (attempt ${row.retry_count}/${row.max_retries})`);
 	}
 	return row;
-}
-
-/**
- * Enqueue a review for a completed job. Creates a new review job linked to the
- * given job, inheriting repo, branch, PR URL, and review skill settings.
- * Only works on done task or review jobs.
- */
-export function enqueueReview(id: string): Job {
-	const job = getJob(id);
-	if (!job) {
-		throw new Error(`Job not found: ${id}`);
-	}
-
-	if (job.status !== 'done') {
-		throw new Error(`Cannot enqueue review for job in '${job.status}' status — only done jobs can be reviewed`);
-	}
-
-	const reviewJob = createJob({
-		type: 'review',
-		title: `Review: ${job.title.replace(/^Review:\s*/, '')}`,
-		description: `Manual review requested for job ${job.id}`,
-		repo: job.repo ?? undefined,
-		branch: job.branch ?? undefined,
-		target_branch: job.target_branch,
-		parent_job_id: job.id,
-		loop_count: job.loop_count,
-		max_loops: job.max_loops,
-		pr_url: job.pr_url ?? undefined,
-		priority: job.priority,
-		review_skill: job.review_skill ?? undefined,
-	});
-
-	log.info('job-queue', `enqueued manual review ${reviewJob.id} for job ${id}`);
-	return reviewJob;
 }

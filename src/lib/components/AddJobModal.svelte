@@ -4,17 +4,14 @@
 
 	let {
 		open = false,
-		defaultType = 'task' as 'task' | 'review',
 		defaultRepo = '',
 		onclose,
 	}: {
 		open: boolean;
-		defaultType?: 'task' | 'review';
 		defaultRepo?: string;
 		onclose: () => void;
 	} = $props();
 
-	let type = $state<'task' | 'review'>('task');
 	let title = $state('');
 	let description = $state('');
 	let repo = $state('');
@@ -29,7 +26,6 @@
 	// Reset form when modal opens
 	$effect(() => {
 		if (open) {
-			type = defaultType;
 			repo = defaultRepo;
 			title = '';
 			description = '';
@@ -53,7 +49,7 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					type,
+					// No type — defaults to 'task' in the backend
 					title: title.trim(),
 					description: description.trim() || undefined,
 					repo: repo.trim() || undefined,
@@ -84,25 +80,10 @@
 {#if open}
 	<dialog class="modal" {open}>
 		<div class="modal-box max-w-lg">
-			<h3 class="font-bold text-lg">New {type === 'task' ? 'Task' : 'Review'} Job</h3>
-
-			<!-- Type toggle -->
-			<div class="form-control mt-4">
-				<div class="flex gap-2">
-					<button
-						class="btn btn-sm {type === 'task' ? 'btn-primary' : 'btn-ghost'}"
-						onclick={() => { hapticLight(); type = 'task'; }}
-					>
-						Task
-					</button>
-					<button
-						class="btn btn-sm {type === 'review' ? 'btn-primary' : 'btn-ghost'}"
-						onclick={() => { hapticLight(); type = 'review'; }}
-					>
-						Review
-					</button>
-				</div>
-			</div>
+			<h3 class="font-bold text-lg">New Job</h3>
+			<p class="text-sm mt-1 text-base-content/60">
+				Jobs automatically run task → review → fix loops until approved or max loops reached.
+			</p>
 
 			<!-- Title -->
 			<div class="form-control mt-4">
@@ -198,7 +179,7 @@
 				</div>
 			</div>
 
-			<!-- Review skill (optional — used for review jobs or auto-queued reviews from tasks) -->
+			<!-- Review skill (optional — used during the auto-review phase) -->
 			<div class="form-control mt-3">
 				<label class="label" for="job-review-skill">
 					<span class="label-text">Review Skill (optional)</span>
@@ -211,11 +192,7 @@
 				/>
 				<div class="label">
 					<span class="label-text-alt text-base-content/40">
-						{#if type === 'review'}
-							Skill to use when reviewing
-						{:else}
-							Skill to use when auto-queued reviews run
-						{/if}
+						Skill to use during the automatic review phase
 					</span>
 				</div>
 			</div>

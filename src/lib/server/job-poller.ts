@@ -1,11 +1,14 @@
 /**
  * Background poller that claims queued jobs and dispatches them to Pi sessions.
  * Creates git worktrees for isolation and spawns sessions via rpc-manager.
+ * 
+ * Jobs now use a single-job review loop model with phase transitions:
+ * queued → claimed → running → reviewing → done/failed/cancelled
  */
 import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
 import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt } from './job-prompts';
-import { handleCompletion } from './job-completion';
-import { createSession, sendMessage, subscribe } from './rpc-manager';
+import { cleanupJob } from './job-completion';
+import { createSession, sendMessage, subscribe, stopSession } from './rpc-manager';
 import { log } from './logger';
 import { join } from 'path';
 import { mkdirSync, existsSync, rmSync } from 'fs';
@@ -100,9 +103,8 @@ export async function pollOnce(): Promise<void> {
 // --- Job dispatch ---
 
 /**
- * Set up a worktree (for task jobs), create a Pi session, and send the
- * appropriate prompt. Review jobs run in the repo's main cwd — they only
- * need to read the PR diff, not modify files.
+ * Set up a worktree, create a Pi session, and send the task prompt.
+ * All jobs (tasks) get an isolated worktree.
  */
 async function dispatchJob(job: Job): Promise<void> {
 	let worktreePath: string | null = null;
@@ -114,37 +116,30 @@ async function dispatchJob(job: Job): Promise<void> {
 			throw new Error(`Repository path not found: ${repoPath}`);
 		}
 
-		let sessionCwd: string;
+		// All jobs get an isolated worktree
+		worktreePath = createWorktree(repoPath, job);
+		const sessionCwd = worktreePath;
+		
+		updateJobStatus(job.id, {
+			status: 'running',
+			worktree_path: worktreePath,
+		});
 
-		if (job.type === 'review') {
-			// Reviews run in the repo's main cwd — no worktree needed
-			sessionCwd = repoPath;
-			updateJobStatus(job.id, { status: 'running' });
-		} else {
-			// Task jobs get an isolated worktree
-			worktreePath = createWorktree(repoPath, job);
-			sessionCwd = worktreePath;
-			updateJobStatus(job.id, {
-				status: 'running',
-				worktree_path: worktreePath,
-			});
-		}
-
-		// Create a Pi session in the appropriate directory
+		// Create a Pi session in the worktree
 		const sessionId = await createSession(sessionCwd);
 
 		// Update job with session ID
 		updateJobStatus(job.id, { session_id: sessionId });
 
 		// Subscribe to session events so we can detect agent_end and trigger
-		// job completion server-side — the extension callback is a fallback.
+		// phase transitions server-side — the extension callback is a fallback.
 		subscribeToJobSession(job.id, sessionId);
 
-		// Build and send the appropriate prompt
-		const prompt = buildPromptForJob(job);
+		// Send the task prompt
+		const prompt = buildTaskPrompt(job);
 		await sendMessage(sessionId, prompt);
 
-		log.info('job-poller', `dispatched job ${job.id} (${job.type}) → session ${sessionId}`);
+		log.info('job-poller', `dispatched job ${job.id} → session ${sessionId}`);
 	} catch (err: any) {
 		log.error('job-poller', `failed to dispatch job ${job.id}: ${err.message}`);
 		updateJobStatus(job.id, {
@@ -159,11 +154,11 @@ async function dispatchJob(job: Job): Promise<void> {
 
 /**
  * Subscribe to a job's Pi session to detect agent_end events.
- * When the agent finishes, we extract result markers from the last assistant
- * message and call handleCompletion directly — no reliance on the extension.
+ * The subscription persists through all phase transitions (task → review → fix)
+ * and is only cleaned up when the job reaches a terminal state.
  */
 function subscribeToJobSession(jobId: string, sessionId: string): void {
-	// Accumulated assistant text across all messages in the session
+	// Accumulated assistant text for the current phase — reset between phases
 	let fullAssistantText = '';
 
 	const unsubscribe = subscribe(sessionId, (event: any) => {
@@ -180,8 +175,11 @@ function subscribeToJobSession(jobId: string, sessionId: string): void {
 			const lastText = event._lastAssistantText ?? '';
 			const combinedText = fullAssistantText + '\n' + lastText;
 
+			// Handle phase transition — don't cleanup subscription yet
 			handleJobAgentEnd(jobId, combinedText);
-			cleanupSubscription(jobId);
+			
+			// Reset accumulated text for the next phase
+			fullAssistantText = '';
 		}
 
 		if (event.type === 'session_ended') {
@@ -206,24 +204,23 @@ function cleanupSubscription(jobId: string): void {
 }
 
 /**
- * Handle agent_end for a job session. Extracts PR_URL and VERDICT from the
- * accumulated assistant text and calls handleCompletion.
- *
- * Guards against double-completion — if the extension callback already
- * completed the job, this is a no-op.
+ * Handle agent_end for a job session. Implements the state machine:
+ * - running → reviewing: extract PR_URL, send review prompt
+ * - reviewing → done (approved): cleanup
+ * - reviewing → running (changes_requested): send fix prompt or done if loop cap reached
  */
-export function handleJobAgentEnd(jobId: string, assistantText: string): void {
+export async function handleJobAgentEnd(jobId: string, assistantText: string): Promise<void> {
 	try {
-		// Re-fetch the job to check current status — the extension callback
-		// may have already completed it.
+		// Re-fetch the job to check current status
 		const job = getJob(jobId);
 		if (!job) {
 			log.warn('job-poller', `agent_end for unknown job ${jobId}`);
 			return;
 		}
 
-		if (job.status !== 'running' && job.status !== 'claimed') {
-			log.info('job-poller', `agent_end for job ${jobId} but status is already '${job.status}' — skipping (likely handled by extension callback)`);
+		// Terminal states — no transitions
+		if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') {
+			log.info('job-poller', `agent_end for job ${jobId} but status is already '${job.status}' — no action`);
 			return;
 		}
 
@@ -231,16 +228,119 @@ export function handleJobAgentEnd(jobId: string, assistantText: string): void {
 		const prUrlMatch = assistantText.match(PR_URL_PATTERN);
 		const verdictMatch = assistantText.match(VERDICT_PATTERN);
 
-		log.info('job-poller', `agent_end for job ${jobId} — prUrl=${prUrlMatch?.[1] ?? 'none'}, verdict=${verdictMatch?.[1] ?? 'none'}`);
+		log.info('job-poller', `agent_end for job ${jobId} (status=${job.status}) — prUrl=${prUrlMatch?.[1] ?? 'none'}, verdict=${verdictMatch?.[1] ?? 'none'}`);
 
-		handleCompletion(jobId, {
-			jobId,
-			status: 'done',
-			prUrl: prUrlMatch?.[1],
-			verdict: verdictMatch?.[1] as 'approved' | 'changes_requested' | undefined,
-		});
+		// State machine transitions
+		if (job.status === 'running') {
+			// Task phase complete → transition to review
+			const prUrl = prUrlMatch?.[1];
+			
+			updateJobStatus(jobId, {
+				status: 'reviewing',
+				pr_url: prUrl,
+			});
+
+			// Send review prompt to the SAME session
+			if (!job.session_id) {
+				throw new Error(`Job ${jobId} has no session_id`);
+			}
+
+			const reviewPrompt = buildReviewPrompt(job);
+			await sendMessage(job.session_id, reviewPrompt);
+			
+			log.info('job-poller', `job ${jobId} transitioned running → reviewing, sent review prompt`);
+			
+		} else if (job.status === 'reviewing') {
+			// Review phase complete → check verdict
+			const verdict = verdictMatch?.[1] as 'approved' | 'changes_requested' | undefined;
+			
+			if (verdict === 'approved') {
+				// Review approved → done
+				updateJobStatus(jobId, {
+					status: 'done',
+					review_verdict: 'approved',
+				});
+
+				// Cleanup: migrate sessions, remove worktree, stop session
+				await cleanupJobAfterCompletion(job);
+				cleanupSubscription(jobId);
+				
+				log.info('job-poller', `job ${jobId} approved → done, cleaned up`);
+				
+			} else if (verdict === 'changes_requested') {
+				const nextLoopCount = job.loop_count + 1;
+				
+				if (nextLoopCount >= job.max_loops) {
+					// Loop cap reached → done
+					updateJobStatus(jobId, {
+						status: 'done',
+						review_verdict: 'changes_requested',
+						result_summary: (job.result_summary ?? '') + '\n[Loop cap reached — review requested changes but no more fix iterations allowed]',
+					});
+
+					await cleanupJobAfterCompletion(job);
+					cleanupSubscription(jobId);
+					
+					log.info('job-poller', `job ${jobId} loop cap reached (${job.max_loops}) → done`);
+					
+				} else {
+					// Send fix prompt to the SAME session
+					updateJobStatus(jobId, {
+						status: 'running',
+						loop_count: nextLoopCount,
+						review_verdict: 'changes_requested',
+					});
+
+					if (!job.session_id) {
+						throw new Error(`Job ${jobId} has no session_id`);
+					}
+
+					// Build fix prompt with review comments from the assistant text
+					const fixPrompt = buildTaskFixPrompt(job, assistantText);
+					await sendMessage(job.session_id, fixPrompt);
+					
+					log.info('job-poller', `job ${jobId} changes_requested → running (loop ${nextLoopCount}/${job.max_loops}), sent fix prompt`);
+				}
+			} else {
+				// No verdict found — treat as failure
+				log.warn('job-poller', `job ${jobId} review phase ended without verdict — marking as failed`);
+				updateJobStatus(jobId, {
+					status: 'failed',
+					error: 'Review phase ended without VERDICT marker',
+				});
+				await cleanupJobAfterCompletion(job);
+				cleanupSubscription(jobId);
+			}
+		}
 	} catch (err) {
 		log.error('job-poller', `failed to handle agent_end for job ${jobId}: ${err}`);
+		// Mark job as failed
+		updateJobStatus(jobId, {
+			status: 'failed',
+			error: `Phase transition failed: ${err}`,
+		});
+	}
+}
+
+/**
+ * Cleanup after a job completes (done/failed/cancelled).
+ * Migrates sessions, removes worktree, and stops the session.
+ */
+async function cleanupJobAfterCompletion(job: Job): Promise<void> {
+	try {
+		await cleanupJob(job);
+		
+		// Stop the session if it's still running
+		if (job.session_id) {
+			try {
+				await stopSession(job.session_id);
+				log.info('job-poller', `stopped session ${job.session_id} for job ${job.id}`);
+			} catch (err) {
+				log.warn('job-poller', `failed to stop session ${job.session_id}: ${err}`);
+			}
+		}
+	} catch (err) {
+		log.error('job-poller', `cleanup failed for job ${job.id}: ${err}`);
 	}
 }
 
@@ -348,23 +448,4 @@ function installDependencies(worktreePath: string, jobId: string): void {
 			return; // Only run the first matching installer
 		}
 	}
-}
-
-// --- Prompt building ---
-
-/**
- * Build the correct prompt based on the job type and context.
- */
-function buildPromptForJob(job: Job): string {
-	if (job.type === 'review') {
-		return buildReviewPrompt(job);
-	}
-
-	// Task job — determine if this is a fix (has parent review) or new work
-	if (job.parent_job_id && job.loop_count > 0) {
-		// This is a fix iteration — the description should contain review comments
-		return buildTaskFixPrompt(job, job.description ?? 'Address the review comments.');
-	}
-
-	return buildTaskPrompt(job);
 }

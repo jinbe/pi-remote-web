@@ -7,7 +7,7 @@
 
 	interface Job {
 		id: string;
-		type: 'task' | 'review';
+		type?: 'task' | 'review' | null;
 		status: string;
 		title: string;
 		repo: string | null;
@@ -33,6 +33,7 @@
 		queued: 'badge-ghost',
 		claimed: 'badge-info',
 		running: 'badge-warning',
+		reviewing: 'badge-secondary',
 		done: 'badge-success',
 		failed: 'badge-error',
 		cancelled: 'badge-ghost opacity-50',
@@ -41,6 +42,7 @@
 		queued: 'clock',
 		claimed: 'lock',
 		running: 'bolt',
+		reviewing: 'search',
 	};
 
 	const statusIconFallback: Record<string, IconName> = {
@@ -84,16 +86,6 @@
 			invalidateAll();
 		} catch (e) {
 			console.error('Failed to retry job:', e);
-		}
-	}
-
-	async function requestReview(jobId: string) {
-		hapticMedium();
-		try {
-			await fetch(`/api/jobs/${jobId}/review`, { method: 'POST' });
-			invalidateAll();
-		} catch (e) {
-			console.error('Failed to request review:', e);
 		}
 	}
 
@@ -165,13 +157,6 @@
 					</span>
 
 					<!-- Actions -->
-					{#if job.status === 'done'}
-						<button
-							class="btn btn-ghost btn-xs"
-							onclick={(e) => { e.stopPropagation(); requestReview(job.id); }}
-							title="Request review"
-						><Icon name="search" class="w-3 h-3" /></button>
-					{/if}
 					{#if job.status === 'failed'}
 						<button
 							class="btn btn-ghost btn-xs"
@@ -179,7 +164,7 @@
 							title="Retry"
 						><Icon name="refresh" class="w-3.5 h-3.5" /></button>
 					{/if}
-					{#if ['queued', 'failed', 'cancelled'].includes(job.status)}
+					{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
 						<button
 							class="btn btn-ghost btn-xs text-error/60"
 							onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}

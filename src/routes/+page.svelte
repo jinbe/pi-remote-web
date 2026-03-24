@@ -25,7 +25,6 @@
 	let devCommandInput = $state('');
 	let creatingForProject = $state<string | null>(null);
 	let showAddJob = $state(false);
-	let addJobType = $state<'task' | 'review'>('task');
 	let addJobRepo = $state('');
 
 	// Persist expanded project to localStorage
@@ -156,9 +155,8 @@
 		}
 	}
 
-	function openAddJob(type: 'task' | 'review', repo: string) {
+	function openAddJob(repo: string) {
 		hapticMedium();
-		addJobType = type;
 		addJobRepo = repo;
 		showAddJob = true;
 	}
@@ -446,15 +444,9 @@
 									</button>
 								</li>
 								<li>
-									<button onclick={(e) => { e.stopPropagation(); openAddJob('task', group.cwd); }}>
+									<button onclick={(e) => { e.stopPropagation(); openAddJob(group.cwd); }}>
 										<span class="opacity-70 inline-flex"><Icon name="hammer" class="w-4 h-4" /></span>
-										New Task Job
-									</button>
-								</li>
-								<li>
-									<button onclick={(e) => { e.stopPropagation(); openAddJob('review', group.cwd); }}>
-										<span class="opacity-70 inline-flex"><Icon name="search" class="w-4 h-4" /></span>
-										New Review Job
+										New Job
 									</button>
 								</li>
 								<li>
@@ -477,22 +469,14 @@
 							</ul>
 						</div>
 
-						<!-- Desktop: inline buttons -->
+						<!-- Desktop: inline button -->
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
-							onclick={(e: MouseEvent) => { e.stopPropagation(); openAddJob('task', group.cwd); }}
-							title="New task job for {group.shortName}"
-							aria-label="New task job"
+							onclick={(e: MouseEvent) => { e.stopPropagation(); openAddJob(group.cwd); }}
+							title="New job for {group.shortName}"
+							aria-label="New job"
 						>
-							<span class="opacity-50 text-xs inline-flex items-center gap-0.5"><Icon name="hammer" class="w-3 h-3" /> Task</span>
-						</button>
-						<button
-							class="hidden md:inline-flex btn btn-ghost btn-xs"
-							onclick={(e: MouseEvent) => { e.stopPropagation(); openAddJob('review', group.cwd); }}
-							title="New review job for {group.shortName}"
-							aria-label="New review job"
-						>
-							<span class="opacity-50 text-xs inline-flex items-center gap-0.5"><Icon name="search" class="w-3 h-3" /> Review</span>
+							<span class="opacity-50 text-xs inline-flex items-center gap-0.5"><Icon name="hammer" class="w-3 h-3" /> Job</span>
 						</button>
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
@@ -623,7 +607,6 @@
 
 <AddJobModal
 	open={showAddJob}
-	defaultType={addJobType}
 	defaultRepo={addJobRepo}
 	onclose={() => (showAddJob = false)}
 />

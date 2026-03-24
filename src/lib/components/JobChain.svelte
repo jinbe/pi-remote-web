@@ -4,7 +4,7 @@
 
 	interface Job {
 		id: string;
-		type: 'task' | 'review';
+		type?: 'task' | 'review' | null;
 		status: string;
 		title: string;
 		review_verdict: string | null;
@@ -20,6 +20,7 @@
 		queued: 'bg-base-content/20',
 		claimed: 'bg-info',
 		running: 'bg-warning',
+		reviewing: 'bg-secondary',
 		done: 'bg-success',
 		failed: 'bg-error',
 		cancelled: 'bg-base-content/10',
