@@ -64,11 +64,16 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 
 	const updatedJob = updateJobStatus(jobId, updates)!;
 
-	// Clean up worktree now that the job is done
-	cleanupWorktree(job);
+	// Apply loop logic based on job type and result.
+	// Worktree cleanup is deferred — task worktrees stay alive until the
+	// review completes (or the chain ends).
+	const followUpCreated = applyLoopLogic(updatedJob, payload);
 
-	// Apply loop logic based on job type and result
-	applyLoopLogic(updatedJob, payload);
+	// Only clean up the worktree if no follow-up job was created.
+	// For task→review chains, the worktree is cleaned up after the review.
+	if (!followUpCreated) {
+		cleanupWorktree(job);
+	}
 
 	return updatedJob;
 }
@@ -79,10 +84,12 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
  * After a job completes, determine whether to enqueue a follow-up:
  * - Task done → enqueue Review (if loop_count < max_loops)
  * - Review changes_requested → enqueue Task fix (increment loop_count)
- * - Review approved → done, no follow-up
+ * - Review approved → done, clean up worktree
  * - Loop cap reached → done with note
+ *
+ * Returns true if a follow-up job was created (worktree cleanup should be deferred).
  */
-function applyLoopLogic(job: Job, payload: CompletionPayload): void {
+function applyLoopLogic(job: Job, payload: CompletionPayload): boolean {
 	if (job.type === 'task') {
 		// Task completed — enqueue a review if we haven't exceeded loop cap
 		if (job.loop_count >= job.max_loops) {
@@ -90,7 +97,7 @@ function applyLoopLogic(job: Job, payload: CompletionPayload): void {
 			updateJobStatus(job.id, {
 				result_summary: (job.result_summary ?? '') + '\n[Loop cap reached — skipped automatic review]',
 			});
-			return;
+			return false;
 		}
 
 		const reviewJob = createJob({
@@ -108,11 +115,20 @@ function applyLoopLogic(job: Job, payload: CompletionPayload): void {
 			review_skill: job.review_skill ?? undefined,
 		});
 
+		// Pass worktree path to the review job so it can be cleaned up
+		// after the review (or passed to a fix job if changes are requested)
+		if (job.worktree_path) {
+			updateJobStatus(reviewJob.id, { worktree_path: job.worktree_path });
+		}
+
 		log.info('job-completion', `enqueued review job ${reviewJob.id} for task ${job.id}`);
+		return true;
 	} else if (job.type === 'review') {
 		if (payload.verdict === 'approved') {
 			log.info('job-completion', `review ${job.id} approved — chain complete`);
-			return;
+			// Clean up the worktree inherited from the task job
+			cleanupWorktree(job);
+			return false;
 		}
 
 		if (payload.verdict === 'changes_requested') {
@@ -123,7 +139,9 @@ function applyLoopLogic(job: Job, payload: CompletionPayload): void {
 				updateJobStatus(job.id, {
 					result_summary: (job.result_summary ?? '') + '\n[Loop cap reached — skipped automatic fix]',
 				});
-				return;
+				// Clean up the worktree — no more fixes coming
+				cleanupWorktree(job);
+				return false;
 			}
 
 			const fixJob = createJob({
@@ -142,8 +160,11 @@ function applyLoopLogic(job: Job, payload: CompletionPayload): void {
 			});
 
 			log.info('job-completion', `enqueued fix job ${fixJob.id} for review ${job.id} (loop ${nextLoopCount}/${job.max_loops})`);
+			return true;
 		}
 	}
+
+	return false;
 }
 
 // --- Session migration ---

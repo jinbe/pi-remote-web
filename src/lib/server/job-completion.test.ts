@@ -45,14 +45,14 @@ describe('job-completion', () => {
 			expect(allJobs).toHaveLength(1);
 		});
 
-		it('completes a task and enqueues a review', () => {
+		it('completes a task and enqueues a review with inherited worktree_path', () => {
 			const job = createJob({
 				type: 'task',
 				title: 'Implement feature',
 				repo: '/repo',
 				branch: 'feat/test',
 			});
-			updateJobStatus(job.id, { status: 'running' });
+			updateJobStatus(job.id, { status: 'running', worktree_path: '/tmp/worktree-123' });
 
 			const result = handleCompletion(job.id, {
 				jobId: job.id,
@@ -72,6 +72,8 @@ describe('job-completion', () => {
 			expect(reviewJob!.parent_job_id).toBe(job.id);
 			expect(reviewJob!.status).toBe('queued');
 			expect(reviewJob!.pr_url).toBe('https://github.com/org/repo/pull/1');
+			// Review inherits the worktree path for cleanup after review
+			expect(reviewJob!.worktree_path).toBe('/tmp/worktree-123');
 		});
 
 		it('completes a review with approved verdict — no follow-up', () => {
