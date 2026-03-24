@@ -5,6 +5,8 @@
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
+	import AddJobModal from '$lib/components/AddJobModal.svelte';
+	import JobList from '$lib/components/JobList.svelte';
 	import { getContext } from 'svelte';
 	import { browser } from '$app/environment';
 	import logoSvg from '$lib/assets/logo.svg';
@@ -21,6 +23,9 @@
 	let editingDevCommand = $state<string | null>(null);
 	let devCommandInput = $state('');
 	let creatingForProject = $state<string | null>(null);
+	let showAddJob = $state(false);
+	let addJobType = $state<'task' | 'review'>('task');
+	let addJobRepo = $state('');
 
 	// Persist expanded project to localStorage
 	$effect(() => {
@@ -148,6 +153,13 @@
 			console.error('Failed to create session:', e);
 			creatingForProject = null;
 		}
+	}
+
+	function openAddJob(type: 'task' | 'review', repo: string) {
+		hapticMedium();
+		addJobType = type;
+		addJobRepo = repo;
+		showAddJob = true;
 	}
 
 	const hasActiveSessions = $derived(activeSet.size > 0);
@@ -421,6 +433,18 @@
 									</button>
 								</li>
 								<li>
+									<button onclick={(e) => { e.stopPropagation(); openAddJob('task', group.cwd); }}>
+										<span class="opacity-70">⚒</span>
+										New Task Job
+									</button>
+								</li>
+								<li>
+									<button onclick={(e) => { e.stopPropagation(); openAddJob('review', group.cwd); }}>
+										<span class="opacity-70">🔍</span>
+										New Review Job
+									</button>
+								</li>
+								<li>
 									<button onclick={(e) => { e.stopPropagation(); startEditDevCommand(group.cwd, group.devCommand); }}>
 										<span class="opacity-70">⚙</span>
 										Configure Dev
@@ -433,7 +457,7 @@
 											Unfavorite
 										{:else}
 											<span class="opacity-50">☆</span>
-											Favorite
+											Favourite
 										{/if}
 									</button>
 								</li>
@@ -441,6 +465,22 @@
 						</div>
 
 						<!-- Desktop: inline buttons -->
+						<button
+							class="hidden md:inline-flex btn btn-ghost btn-xs"
+							onclick={(e: MouseEvent) => { e.stopPropagation(); openAddJob('task', group.cwd); }}
+							title="New task job for {group.shortName}"
+							aria-label="New task job"
+						>
+							<span class="opacity-50 text-xs">⚒ Task</span>
+						</button>
+						<button
+							class="hidden md:inline-flex btn btn-ghost btn-xs"
+							onclick={(e: MouseEvent) => { e.stopPropagation(); openAddJob('review', group.cwd); }}
+							title="New review job for {group.shortName}"
+							aria-label="New review job"
+						>
+							<span class="opacity-50 text-xs">🔍 Review</span>
+						</button>
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); startEditDevCommand(group.cwd, group.devCommand); }}
@@ -546,6 +586,14 @@
 								</SwipeToDelete>
 							{/each}
 						</div>
+
+						<!-- Jobs for this project -->
+						{#if data.jobs.filter((j: any) => j.repo === group.cwd).length > 0}
+							<div class="border-t border-base-300 px-4 py-3">
+								<div class="text-xs font-semibold text-base-content/50 mb-2">Jobs</div>
+								<JobList jobs={data.jobs} repo={group.cwd} />
+							</div>
+						{/if}
 					{/if}
 				</div>
 			{/each}
@@ -558,4 +606,11 @@
 	{recentCwds}
 	{recentModels}
 	onclose={() => (showNewSession = false)}
+/>
+
+<AddJobModal
+	open={showAddJob}
+	defaultType={addJobType}
+	defaultRepo={addJobRepo}
+	onclose={() => (showAddJob = false)}
 />

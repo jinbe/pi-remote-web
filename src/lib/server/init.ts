@@ -2,6 +2,7 @@ import { pruneCache, warmCache, registerCacheInvalidation } from './cache';
 import { warmAllSessions } from './session-scanner';
 import { recoverActiveSessions } from './rpc-manager';
 import { startWatching } from './session-watcher';
+import { start as startJobPoller } from './job-poller';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -28,6 +29,9 @@ export async function ensureInit() {
 
 	const sessionsDir = process.env.PI_SESSIONS_DIR || join(homedir(), '.pi', 'agent', 'sessions');
 	startWatching(sessionsDir);
+
+	// Start the job queue poller (claims and dispatches queued jobs)
+	startJobPoller();
 
 	console.log('Pi Dashboard initialized');
 }
