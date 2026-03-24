@@ -38,11 +38,33 @@ Open [http://localhost:4020](http://localhost:4020) in your browser.
 
 ## Environment Variables
 
-| Variable | Default     | Description                          |
-| -------- | ----------- | ------------------------------------ |
-| `PI_BIN` | `pi`        | Path to the Pi binary                |
-| `PORT`   | `3000`      | Port for the standalone server       |
-| `HOST`   | `0.0.0.0`  | Host for the standalone server       |
+| Variable           | Default     | Description                                                            |
+| ------------------ | ----------- | ---------------------------------------------------------------------- |
+| `PI_BIN`           | `pi`        | Path to the Pi binary                                                  |
+| `PORT`             | `3000`      | Port for the standalone server                                         |
+| `HOST`             | `0.0.0.0`  | Host for the standalone server                                         |
+| `PI_AUTH_PASSWORD`  | _(unset)_   | Password to protect the dashboard. Supports plaintext or bcrypt hash.  |
+
+### Authentication
+
+When `PI_AUTH_PASSWORD` is set, all routes require authentication. Users are
+redirected to a login page where they enter the password. A session cookie is
+issued on success and lasts 30 days.
+
+The password can be supplied as either:
+
+- **Plaintext** — e.g. `PI_AUTH_PASSWORD=my-secret`
+- **Bcrypt hash** — e.g. `PI_AUTH_PASSWORD='$2b$10$...'` (any string starting
+  with `$2` is treated as a bcrypt digest)
+
+To generate a bcrypt hash:
+
+```sh
+bun -e "console.log(await Bun.password.hash('my-secret', { algorithm: 'bcrypt' }))"
+```
+
+Job completion callbacks (`/api/jobs/:id/complete`) are exempt — they use their
+own per-job token authentication.
 
 ## Scripts
 
