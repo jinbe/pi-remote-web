@@ -1,5 +1,12 @@
 export function timeAgo(dateStr: string): string {
-	const date = new Date(dateStr);
+	// SQLite's datetime('now') returns UTC timestamps without a timezone
+	// suffix (e.g. "2025-01-15 12:00:00"). Without a 'Z' or offset,
+	// JavaScript's Date constructor treats these as local time, causing
+	// the displayed time to be off by the local UTC offset.
+	// Append 'Z' when no timezone indicator is present so they're
+	// correctly parsed as UTC.
+	const normalised = /[Z+\-]\d{0,4}:?\d{0,2}$/.test(dateStr) ? dateStr : dateStr + 'Z';
+	const date = new Date(normalised);
 	const now = Date.now();
 	const diff = now - date.getTime();
 	const seconds = Math.floor(diff / 1000);

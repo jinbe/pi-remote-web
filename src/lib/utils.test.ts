@@ -51,6 +51,33 @@ describe('timeAgo', () => {
 		Date.now = () => new Date('2025-01-16T12:00:00Z').getTime();
 		expect(timeAgo('2025-01-15T12:00:00Z')).toBe('1d ago');
 	});
+
+	// SQLite datetime('now') returns UTC timestamps without a 'Z' suffix
+	it('handles SQLite datetime format without timezone suffix', () => {
+		Date.now = () => new Date('2025-01-15T15:00:00Z').getTime();
+		expect(timeAgo('2025-01-15 12:00:00')).toBe('3h ago');
+	});
+
+	it('handles SQLite datetime format for minutes', () => {
+		Date.now = () => new Date('2025-01-15T12:05:00Z').getTime();
+		expect(timeAgo('2025-01-15 12:00:00')).toBe('5m ago');
+	});
+
+	it('handles SQLite datetime format for days', () => {
+		Date.now = () => new Date('2025-01-18T12:00:00Z').getTime();
+		expect(timeAgo('2025-01-15 12:00:00')).toBe('3d ago');
+	});
+
+	it('handles timestamps with explicit positive offset', () => {
+		Date.now = () => new Date('2025-01-15T15:00:00Z').getTime();
+		// 17:00:00+02:00 = 15:00:00Z, so diff is 0 seconds = just now
+		expect(timeAgo('2025-01-15T17:00:00+02:00')).toBe('just now');
+	});
+
+	it('preserves existing Z suffix without doubling', () => {
+		Date.now = () => new Date('2025-01-15T12:05:00Z').getTime();
+		expect(timeAgo('2025-01-15T12:00:00Z')).toBe('5m ago');
+	});
 });
 
 describe('truncatePath', () => {
