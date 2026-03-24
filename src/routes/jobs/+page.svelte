@@ -1,0 +1,511 @@
+<script lang="ts">
+	import { invalidateAll } from '$app/navigation';
+	import { timeAgo, shortenHome } from '$lib/utils';
+	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
+	import AddJobModal from '$lib/components/AddJobModal.svelte';
+	import JobChain from '$lib/components/JobChain.svelte';
+	import { getContext } from 'svelte';
+	import logoSvg from '$lib/assets/logo.svg';
+
+	interface Job {
+		id: string;
+		type: 'task' | 'review';
+		status: string;
+		priority: number;
+		title: string;
+		description: string | null;
+		repo: string | null;
+		branch: string | null;
+		pr_url: string | null;
+		pr_number: number | null;
+		review_verdict: string | null;
+		review_skill: string | null;
+		loop_count: number;
+		max_loops: number;
+		parent_job_id: string | null;
+		session_id: string | null;
+		result_summary: string | null;
+		created_at: string;
+		updated_at: string;
+		claimed_at: string | null;
+		completed_at: string | null;
+		error: string | null;
+		retry_count: number;
+		max_retries: number;
+	}
+
+	let { data } = $props();
+
+	const { theme, toggleTheme } = getContext<{ theme: 'dark' | 'light'; toggleTheme: () => void }>('theme');
+
+	// Filter state
+	let statusFilter = $state<string>('active');
+	let typeFilter = $state<string>('all');
+	let search = $state('');
+	let showAddJob = $state(false);
+
+	// Expanded job for detail view
+	let expandedJob = $state<string | null>(null);
+	let chainJobs = $state<Job[]>([]);
+	let loadingChain = $state(false);
+
+	const STATUS_FILTERS = [
+		{ value: 'active', label: 'Active' },
+		{ value: 'queued', label: 'Queued' },
+		{ value: 'running', label: 'Running' },
+		{ value: 'done', label: 'Done' },
+		{ value: 'failed', label: 'Failed' },
+		{ value: 'all', label: 'All' },
+	] as const;
+
+	const TYPE_FILTERS = [
+		{ value: 'all', label: 'All' },
+		{ value: 'task', label: 'Tasks' },
+		{ value: 'review', label: 'Reviews' },
+	] as const;
+
+	const statusBadge: Record<string, string> = {
+		queued: 'badge-ghost',
+		claimed: 'badge-info',
+		running: 'badge-warning',
+		done: 'badge-success',
+		failed: 'badge-error',
+		cancelled: 'badge-ghost opacity-50',
+	};
+
+	const statusIcon: Record<string, string> = {
+		queued: '⏳',
+		claimed: '🔒',
+		running: '⚡',
+		done: '✓',
+		failed: '✕',
+		cancelled: '—',
+	};
+
+	// Active statuses: queued, claimed, running
+	const ACTIVE_STATUSES = new Set(['queued', 'claimed', 'running']);
+
+	const filteredJobs = $derived.by(() => {
+		let jobs = data.jobs as Job[];
+
+		// Status filter
+		if (statusFilter === 'active') {
+			jobs = jobs.filter((j) => ACTIVE_STATUSES.has(j.status));
+		} else if (statusFilter !== 'all') {
+			jobs = jobs.filter((j) => j.status === statusFilter);
+		}
+
+		// Type filter
+		if (typeFilter !== 'all') {
+			jobs = jobs.filter((j) => j.type === typeFilter);
+		}
+
+		// Search filter
+		const q = search.toLowerCase().trim();
+		if (q) {
+			jobs = jobs.filter(
+				(j) =>
+					j.title.toLowerCase().includes(q) ||
+					(j.description?.toLowerCase().includes(q) ?? false) ||
+					(j.repo?.toLowerCase().includes(q) ?? false) ||
+					(j.branch?.toLowerCase().includes(q) ?? false) ||
+					j.id.toLowerCase().includes(q)
+			);
+		}
+
+		return jobs;
+	});
+
+	// Counts for filter badges
+	const activeCount = $derived((data.jobs as Job[]).filter((j) => ACTIVE_STATUSES.has(j.status)).length);
+	const queuedCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'queued').length);
+	const runningCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'running').length);
+	const doneCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'done').length);
+	const failedCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'failed').length);
+	const totalCount = $derived((data.jobs as Job[]).length);
+
+	function countForFilter(value: string): number {
+		switch (value) {
+			case 'active': return activeCount;
+			case 'queued': return queuedCount;
+			case 'running': return runningCount;
+			case 'done': return doneCount;
+			case 'failed': return failedCount;
+			case 'all': return totalCount;
+			default: return 0;
+		}
+	}
+
+	async function toggleExpand(jobId: string) {
+		hapticLight();
+		if (expandedJob === jobId) {
+			expandedJob = null;
+			chainJobs = [];
+			return;
+		}
+
+		expandedJob = jobId;
+		loadingChain = true;
+		try {
+			const res = await fetch(`/api/jobs/${jobId}/chain`);
+			if (res.ok) {
+				const result = await res.json();
+				chainJobs = result.chain;
+			}
+		} catch {
+			chainJobs = [];
+		} finally {
+			loadingChain = false;
+		}
+	}
+
+	async function retryJob(jobId: string) {
+		hapticMedium();
+		try {
+			await fetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to retry job:', e);
+		}
+	}
+
+	async function cancelJob(jobId: string) {
+		hapticMedium();
+		try {
+			await fetch(`/api/jobs/${jobId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ status: 'cancelled' }),
+			});
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to cancel job:', e);
+		}
+	}
+
+	async function deleteJob(jobId: string) {
+		if (!confirm('Delete this job? This cannot be undone.')) return;
+		hapticHeavy();
+		try {
+			await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to delete job:', e);
+		}
+	}
+
+	async function togglePoller() {
+		hapticMedium();
+		const action = data.pollerRunning ? 'stop' : 'start';
+		try {
+			await fetch('/api/jobs/poller', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ action }),
+			});
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to toggle poller:', e);
+		}
+	}
+
+	// Auto-refresh via SSE
+	$effect(() => {
+		const es = new EventSource('/api/sessions/watch');
+		es.onmessage = () => invalidateAll();
+		return () => es.close();
+	});
+
+	// Periodic refresh for job status changes (jobs don't go through SSE)
+	$effect(() => {
+		const interval = setInterval(() => invalidateAll(), 5000);
+		return () => clearInterval(interval);
+	});
+</script>
+
+<svelte:head>
+	<title>Jobs — Pi Dashboard</title>
+</svelte:head>
+
+<div class="mx-auto max-w-4xl px-4 py-6 h-full overflow-y-auto">
+	<!-- Header -->
+	<div class="mb-6 flex items-center justify-between">
+		<div class="flex items-center gap-3">
+			<a href="/" class="btn btn-ghost btn-sm" aria-label="Back to dashboard">
+				<img src={logoSvg} alt="Pi" class="h-6 w-6 rounded" />
+			</a>
+			<h1 class="text-lg font-bold">Jobs</h1>
+		</div>
+		<div class="flex gap-2 items-center">
+			<!-- Poller toggle -->
+			<button
+				class="btn btn-sm {data.pollerRunning ? 'btn-success' : 'btn-ghost'}"
+				onclick={togglePoller}
+				title={data.pollerRunning ? 'Poller running — click to stop' : 'Poller stopped — click to start'}
+			>
+				{#if data.pollerRunning}
+					<span class="relative flex h-2 w-2">
+						<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success-content opacity-75"></span>
+						<span class="relative inline-flex rounded-full h-2 w-2 bg-success-content"></span>
+					</span>
+					<span class="hidden sm:inline">Poller On</span>
+				{:else}
+					<span class="inline-block h-2 w-2 rounded-full bg-base-content/20"></span>
+					<span class="hidden sm:inline">Poller Off</span>
+				{/if}
+			</button>
+			<button class="btn btn-sm btn-primary" onclick={() => { hapticMedium(); showAddJob = true; }}>+ New Job</button>
+			<button class="btn btn-sm btn-ghost text-base" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh">↻</button>
+			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
+				{#if theme === 'dark'}☀️{:else}🌙{/if}
+			</button>
+		</div>
+	</div>
+
+	<!-- Filters -->
+	<div class="mb-4 flex flex-col gap-3">
+		<!-- Status filter tabs -->
+		<div class="flex flex-wrap gap-1">
+			{#each STATUS_FILTERS as filter}
+				<button
+					class="btn btn-xs {statusFilter === filter.value ? 'btn-primary' : 'btn-ghost'}"
+					onclick={() => { hapticLight(); statusFilter = filter.value; }}
+				>
+					{filter.label}
+					{#if countForFilter(filter.value) > 0}
+						<span class="badge badge-xs {statusFilter === filter.value ? 'badge-primary-content bg-primary-content/20' : 'badge-ghost'}">{countForFilter(filter.value)}</span>
+					{/if}
+				</button>
+			{/each}
+		</div>
+
+		<!-- Type filter + search -->
+		<div class="flex gap-2 items-center">
+			<div class="flex gap-1">
+				{#each TYPE_FILTERS as filter}
+					<button
+						class="btn btn-xs {typeFilter === filter.value ? 'btn-secondary' : 'btn-ghost'}"
+						onclick={() => { hapticLight(); typeFilter = filter.value; }}
+					>
+						{#if filter.value === 'task'}⚒{:else if filter.value === 'review'}🔍{/if}
+						{filter.label}
+					</button>
+				{/each}
+			</div>
+			<input
+				type="text"
+				placeholder="Search jobs..."
+				class="input input-xs flex-1"
+				bind:value={search}
+			/>
+		</div>
+	</div>
+
+	<!-- Jobs list -->
+	{#if filteredJobs.length === 0}
+		<div class="py-12 text-center text-base-content/50">
+			{#if totalCount === 0}
+				<p class="text-lg">No jobs yet</p>
+				<p class="text-sm mt-1">Create a task or review job to get started.</p>
+			{:else}
+				<p class="text-sm">No jobs match the current filters.</p>
+			{/if}
+		</div>
+	{:else}
+		<div class="flex flex-col gap-2">
+			{#each filteredJobs as job (job.id)}
+				<div class="rounded-lg border border-base-300 bg-base-200/50 overflow-hidden">
+					<!-- Job header row -->
+					<div
+						class="flex items-center gap-2 px-4 py-3 hover:bg-base-300/50 transition-colors cursor-pointer"
+						role="button"
+						tabindex="0"
+						onclick={() => toggleExpand(job.id)}
+						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleExpand(job.id); }}
+					>
+						<!-- Expand arrow -->
+						<span class="text-sm opacity-50 transition-transform {expandedJob === job.id ? 'rotate-90' : ''}">▶</span>
+
+						<!-- Type icon -->
+						<span class="text-xs opacity-60">
+							{job.type === 'task' ? '⚒' : '🔍'}
+						</span>
+
+						<!-- Title -->
+						<span class="flex-1 truncate text-sm font-medium">{job.title}</span>
+
+						<!-- Loop indicator -->
+						{#if job.loop_count > 0 || job.parent_job_id}
+							<span class="badge badge-xs badge-outline" title="Loop {job.loop_count}/{job.max_loops}">
+								↻ {job.loop_count}/{job.max_loops}
+							</span>
+						{/if}
+
+						<!-- Review skill badge -->
+						{#if job.review_skill}
+							<span class="badge badge-xs badge-secondary hidden sm:inline" title="Review skill: {job.review_skill}">
+								🎯 {job.review_skill}
+							</span>
+						{/if}
+
+						<!-- Verdict badge -->
+						{#if job.review_verdict === 'approved'}
+							<span class="badge badge-xs badge-success">approved</span>
+						{:else if job.review_verdict === 'changes_requested'}
+							<span class="badge badge-xs badge-warning">changes</span>
+						{/if}
+
+						<!-- Priority -->
+						{#if job.priority > 0}
+							<span class="badge badge-xs badge-accent" title="Priority: {job.priority}">
+								P{job.priority}
+							</span>
+						{/if}
+
+						<!-- Status badge -->
+						<span class="badge badge-xs {statusBadge[job.status] ?? 'badge-ghost'}">
+							{statusIcon[job.status] ?? ''} {job.status}
+						</span>
+
+						<!-- Timestamp -->
+						<span class="text-xs text-base-content/40 hidden sm:inline">
+							{timeAgo(job.created_at)}
+						</span>
+					</div>
+
+					<!-- Expanded detail panel -->
+					{#if expandedJob === job.id}
+						<div class="border-t border-base-300 px-4 py-3 space-y-3">
+							<!-- Metadata grid -->
+							<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs">
+								<div class="flex gap-2">
+									<span class="text-base-content/50 w-20 flex-shrink-0">ID</span>
+									<span class="font-mono truncate">{job.id}</span>
+								</div>
+								<div class="flex gap-2">
+									<span class="text-base-content/50 w-20 flex-shrink-0">Type</span>
+									<span>{job.type === 'task' ? '⚒ Task' : '🔍 Review'}</span>
+								</div>
+								{#if job.repo}
+									<div class="flex gap-2 sm:col-span-2">
+										<span class="text-base-content/50 w-20 flex-shrink-0">Repo</span>
+										<span class="truncate">{shortenHome(job.repo)}</span>
+									</div>
+								{/if}
+								{#if job.branch}
+									<div class="flex gap-2">
+										<span class="text-base-content/50 w-20 flex-shrink-0">Branch</span>
+										<span class="font-mono truncate">{job.branch}</span>
+									</div>
+								{/if}
+								<div class="flex gap-2">
+									<span class="text-base-content/50 w-20 flex-shrink-0">Created</span>
+									<span>{new Date(job.created_at).toLocaleString()}</span>
+								</div>
+								{#if job.claimed_at}
+									<div class="flex gap-2">
+										<span class="text-base-content/50 w-20 flex-shrink-0">Claimed</span>
+										<span>{new Date(job.claimed_at).toLocaleString()}</span>
+									</div>
+								{/if}
+								{#if job.completed_at}
+									<div class="flex gap-2">
+										<span class="text-base-content/50 w-20 flex-shrink-0">Completed</span>
+										<span>{new Date(job.completed_at).toLocaleString()}</span>
+									</div>
+								{/if}
+								{#if job.retry_count > 0}
+									<div class="flex gap-2">
+										<span class="text-base-content/50 w-20 flex-shrink-0">Retries</span>
+										<span>{job.retry_count}/{job.max_retries}</span>
+									</div>
+								{/if}
+								{#if job.session_id}
+									<div class="flex gap-2 sm:col-span-2">
+										<span class="text-base-content/50 w-20 flex-shrink-0">Session</span>
+										<a href="/session/{job.session_id}" class="link link-primary truncate">{job.session_id}</a>
+									</div>
+								{/if}
+							</div>
+
+							<!-- Description -->
+							{#if job.description}
+								<div class="text-sm bg-base-100/50 rounded-lg p-3 whitespace-pre-wrap">{job.description}</div>
+							{/if}
+
+							<!-- Result summary -->
+							{#if job.result_summary}
+								<div class="text-sm">
+									<div class="text-xs font-semibold text-base-content/50 mb-1">Result</div>
+									<div class="bg-base-100/50 rounded-lg p-3 whitespace-pre-wrap">{job.result_summary}</div>
+								</div>
+							{/if}
+
+							<!-- Error -->
+							{#if job.error}
+								<div class="text-sm">
+									<div class="text-xs font-semibold text-error/70 mb-1">Error</div>
+									<div class="bg-error/10 rounded-lg p-3 text-error whitespace-pre-wrap">{job.error}</div>
+								</div>
+							{/if}
+
+							<!-- PR link -->
+							{#if job.pr_url}
+								<div class="text-sm">
+									<a href={job.pr_url} target="_blank" rel="noopener noreferrer" class="link link-primary">
+										{job.pr_url}
+									</a>
+								</div>
+							{/if}
+
+							<!-- Job chain visualisation -->
+							{#if loadingChain}
+								<div class="flex items-center gap-2 text-sm text-base-content/50">
+									<span class="loading loading-dots loading-xs"></span>
+									Loading chain...
+								</div>
+							{:else if chainJobs.length > 1}
+								<div>
+									<div class="text-xs font-semibold text-base-content/50 mb-2">Job Chain</div>
+									<JobChain jobs={chainJobs} />
+								</div>
+							{/if}
+
+							<!-- Action buttons -->
+							<div class="flex gap-2 pt-1">
+								{#if job.status === 'queued'}
+									<button
+										class="btn btn-xs btn-error btn-outline"
+										onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+									>Cancel</button>
+								{/if}
+								{#if job.status === 'failed'}
+									<button
+										class="btn btn-xs btn-warning btn-outline"
+										onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}
+									>↻ Retry</button>
+								{/if}
+								{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
+									<button
+										class="btn btn-xs btn-error btn-outline"
+										onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
+									>Delete</button>
+								{/if}
+								{#if job.session_id}
+									<a href="/session/{job.session_id}" class="btn btn-xs btn-ghost">
+										View Session →
+									</a>
+								{/if}
+							</div>
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	{/if}
+</div>
+
+<AddJobModal
+	open={showAddJob}
+	onclose={() => (showAddJob = false)}
+/>

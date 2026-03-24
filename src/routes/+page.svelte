@@ -332,7 +332,18 @@
 	</div>
 
 	<div class="mb-6 flex items-center justify-between">
-		<img src={logoSvg} alt="Pi" class="h-8 w-8 rounded-lg" />
+		<div class="flex items-center gap-3">
+			<img src={logoSvg} alt="Pi" class="h-8 w-8 rounded-lg" />
+			{#if data.jobs.length > 0 || data.pollerRunning}
+				<a href="/jobs" class="btn btn-sm btn-ghost gap-1" title="View all jobs">
+					<span class="opacity-60">⚒</span>
+					<span>Jobs</span>
+					{#if data.jobs.filter((j: any) => ['queued', 'claimed', 'running'].includes(j.status)).length > 0}
+						<span class="badge badge-xs badge-warning">{data.jobs.filter((j: any) => ['queued', 'claimed', 'running'].includes(j.status)).length}</span>
+					{/if}
+				</a>
+			{/if}
+		</div>
 		<div class="flex gap-2">
 			{#if hasAnythingRunning}
 				<button
