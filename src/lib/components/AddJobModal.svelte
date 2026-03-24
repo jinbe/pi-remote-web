@@ -20,6 +20,8 @@
 	let targetBranch = $state('main');
 	let maxLoops = $state(5);
 	let reviewSkill = $state('');
+	let model = $state('');
+	let skipReview = $state(false);
 	let creating = $state(false);
 	let errorMsg = $state('');
 
@@ -34,6 +36,8 @@
 			targetBranch = 'main';
 			maxLoops = 5;
 			reviewSkill = '';
+			model = '';
+			skipReview = false;
 			errorMsg = '';
 		}
 	});
@@ -56,8 +60,9 @@
 					branch: branch.trim() || undefined,
 					issue_url: issueUrl.trim() || undefined,
 					target_branch: targetBranch.trim() || undefined,
-					max_loops: maxLoops,
+					max_loops: skipReview ? 0 : maxLoops,
 					review_skill: reviewSkill.trim() || undefined,
+					model: model.trim() || undefined,
 				}),
 			});
 
@@ -151,51 +156,73 @@
 				/>
 			</div>
 
-			<!-- Target branch & max loops -->
-			<div class="flex gap-3 mt-3">
-				<div class="form-control flex-1">
-					<label class="label" for="job-target-branch">
-						<span class="label-text">Target Branch</span>
-					</label>
-					<input
-						id="job-target-branch"
-						class="input w-full"
-						placeholder="main"
-						bind:value={targetBranch}
-					/>
-				</div>
-				<div class="form-control w-24">
-					<label class="label" for="job-max-loops">
-						<span class="label-text">Max Loops</span>
-					</label>
-					<input
-						id="job-max-loops"
-						type="number"
-						class="input w-full"
-						min="1"
-						max="20"
-						bind:value={maxLoops}
-					/>
-				</div>
-			</div>
-
-			<!-- Review skill (optional — used during the auto-review phase) -->
+			<!-- Model (optional) -->
 			<div class="form-control mt-3">
-				<label class="label" for="job-review-skill">
-					<span class="label-text">Review Skill (optional)</span>
+				<label class="label" for="job-model">
+					<span class="label-text">Model (optional)</span>
 				</label>
 				<input
-					id="job-review-skill"
+					id="job-model"
 					class="input w-full"
-					placeholder="e.g. skill:review, multi-review, or /path/to/skill"
-					bind:value={reviewSkill}
+					placeholder="e.g. anthropic/claude-sonnet-4"
+					bind:value={model}
 				/>
-				<div class="label">
-					<span class="label-text-alt text-base-content/40">
-						Skill to use during the automatic review phase
-					</span>
-				</div>
 			</div>
+
+			<!-- Skip review toggle -->
+			<div class="form-control mt-3">
+				<label class="label cursor-pointer justify-start gap-3">
+					<input
+						type="checkbox"
+						class="toggle toggle-sm"
+						bind:checked={skipReview}
+					/>
+					<span class="label-text">Skip review (fire-and-forget)</span>
+				</label>
+			</div>
+
+			{#if !skipReview}
+				<!-- Target branch & max loops -->
+				<div class="flex gap-3 mt-3">
+					<div class="form-control flex-1">
+						<label class="label" for="job-target-branch">
+							<span class="label-text">Target Branch</span>
+						</label>
+						<input
+							id="job-target-branch"
+							class="input w-full"
+							placeholder="main"
+							bind:value={targetBranch}
+						/>
+					</div>
+					<div class="form-control w-24">
+						<label class="label" for="job-max-loops">
+							<span class="label-text">Max Loops</span>
+						</label>
+						<input
+							id="job-max-loops"
+							type="number"
+							class="input w-full"
+							min="1"
+							max="20"
+							bind:value={maxLoops}
+						/>
+					</div>
+				</div>
+
+				<!-- Review skill (optional — used during the auto-review phase) -->
+				<div class="form-control mt-3">
+					<label class="label" for="job-review-skill">
+						<span class="label-text">Review Skill (optional)</span>
+					</label>
+					<input
+						id="job-review-skill"
+						class="input w-full"
+						placeholder="e.g. skill:review, multi-review, or /path/to/skill"
+						bind:value={reviewSkill}
+					/>
+				</div>
+			{/if}
 
 			{#if errorMsg}
 				<div class="alert alert-error mt-4 text-sm">{errorMsg}</div>

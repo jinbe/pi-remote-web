@@ -36,6 +36,7 @@ export interface Job {
 	max_retries: number;
 	callback_token: string;
 	review_skill: string | null;
+	model: string | null;
 }
 
 export interface CreateJobInput {
@@ -52,6 +53,7 @@ export interface CreateJobInput {
 	max_loops?: number;
 	pr_url?: string;
 	review_skill?: string;
+	model?: string;
 }
 
 export interface UpdateJobInput {
@@ -75,8 +77,8 @@ export interface UpdateJobInput {
 
 function insertJobQuery() {
 	return getDb().query(`
-		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, review_skill)
-		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $review_skill)
+		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, review_skill, model)
+		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $review_skill, $model)
 		RETURNING *
 	`);
 }
@@ -123,6 +125,7 @@ export function createJob(input: CreateJobInput): Job {
 		$max_loops: input.max_loops ?? 5,
 		$pr_url: input.pr_url ?? null,
 		$review_skill: input.review_skill ?? null,
+		$model: input.model ?? null,
 	}) as Job;
 
 	log.info('job-queue', `created job ${row.id} (${row.type ?? 'task'}): ${row.title}`);

@@ -33,6 +33,7 @@
 		error: string | null;
 		retry_count: number;
 		max_retries: number;
+		model: string | null;
 	}
 
 	let { data } = $props();
@@ -391,6 +392,12 @@
 									<div class="flex gap-2 sm:col-span-2">
 										<span class="text-base-content/50 w-20 flex-shrink-0">Repo</span>
 										<span class="truncate">{shortenHome(job.repo)}</span>
+									</div>
+								{/if}
+								{#if job.model}
+									<div class="flex gap-2">
+										<span class="text-base-content/50 w-20 flex-shrink-0">Model</span>
+										<span class="font-mono truncate">{job.model}</span>
 									</div>
 								{/if}
 								{#if job.branch}

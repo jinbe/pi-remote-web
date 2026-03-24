@@ -125,8 +125,8 @@ async function dispatchJob(job: Job): Promise<void> {
 			worktree_path: worktreePath,
 		});
 
-		// Create a Pi session in the worktree
-		const sessionId = await createSession(sessionCwd);
+		// Create a Pi session in the worktree (with optional model override)
+		const sessionId = await createSession(sessionCwd, job.model ?? undefined);
 
 		// Update job with session ID
 		updateJobStatus(job.id, { session_id: sessionId });
@@ -232,9 +232,24 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 
 		// State machine transitions
 		if (job.status === 'running') {
-			// Task phase complete → transition to review
+			// Task phase complete
 			const prUrl = prUrlMatch?.[1];
-			
+
+			// Skip review if max_loops === 0 (fire-and-forget task)
+			if (job.max_loops === 0) {
+				updateJobStatus(jobId, {
+					status: 'done',
+					pr_url: prUrl,
+				});
+
+				await cleanupJobAfterCompletion(job);
+				cleanupSubscription(jobId);
+
+				log.info('job-poller', `job ${jobId} completed (no review — max_loops=0)`);
+				return;
+			}
+
+			// Transition to review
 			updateJobStatus(jobId, {
 				status: 'reviewing',
 				pr_url: prUrl,
