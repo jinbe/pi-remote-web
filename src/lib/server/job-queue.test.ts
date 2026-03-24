@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { createJob, claimNextJob, updateJobStatus, getJobs, getJob, getJobChain, deleteJob, retryJob, type Job } from './job-queue';
+import { createJob, claimNextJob, updateJobStatus, getJobs, getJob, getJobChain, deleteJob, retryJob, enqueueReview, type Job } from './job-queue';
 import { getDb } from './cache';
 
 function clearJobs() {
@@ -244,6 +244,79 @@ describe('job-queue', () => {
 			updateJobStatus(job.id, { status: 'failed' });
 
 			expect(() => retryJob(job.id)).toThrow(/exceeded maximum retries/);
+		});
+	});
+
+	describe('enqueueReview', () => {
+		it('creates a review job for a done task', () => {
+			const task = createJob({
+				type: 'task',
+				title: 'Build feature',
+				repo: '/repo',
+				branch: 'feat/thing',
+				pr_url: 'https://github.com/org/repo/pull/5',
+			});
+			updateJobStatus(task.id, { status: 'done' });
+
+			const review = enqueueReview(task.id);
+
+			expect(review.type).toBe('review');
+			expect(review.status).toBe('queued');
+			expect(review.title).toBe('Review: Build feature');
+			expect(review.parent_job_id).toBe(task.id);
+			expect(review.repo).toBe('/repo');
+			expect(review.branch).toBe('feat/thing');
+			expect(review.pr_url).toBe('https://github.com/org/repo/pull/5');
+			expect(review.target_branch).toBe('main');
+		});
+
+		it('creates a review for a done review job (re-review)', () => {
+			const original = createJob({
+				type: 'review',
+				title: 'Review: Build feature',
+				repo: '/repo',
+				branch: 'feat/thing',
+				review_skill: 'security',
+			});
+			updateJobStatus(original.id, { status: 'done' });
+
+			const review = enqueueReview(original.id);
+
+			expect(review.type).toBe('review');
+			expect(review.status).toBe('queued');
+			expect(review.title).toBe('Review: Build feature');
+			expect(review.parent_job_id).toBe(original.id);
+			expect(review.review_skill).toBe('security');
+		});
+
+		it('inherits loop_count and max_loops from the parent job', () => {
+			const task = createJob({
+				type: 'task',
+				title: 'Looped task',
+				loop_count: 2,
+				max_loops: 5,
+			});
+			updateJobStatus(task.id, { status: 'done' });
+
+			const review = enqueueReview(task.id);
+
+			expect(review.loop_count).toBe(2);
+			expect(review.max_loops).toBe(5);
+		});
+
+		it('throws for a non-existent job', () => {
+			expect(() => enqueueReview('nonexistent')).toThrow(/not found/);
+		});
+
+		it('throws for a job that is not done', () => {
+			const job = createJob({ type: 'task', title: 'Still queued' });
+			expect(() => enqueueReview(job.id)).toThrow(/only done jobs/);
+		});
+
+		it('throws for a running job', () => {
+			const job = createJob({ type: 'task', title: 'Running' });
+			updateJobStatus(job.id, { status: 'running' });
+			expect(() => enqueueReview(job.id)).toThrow(/only done jobs/);
 		});
 	});
 });
