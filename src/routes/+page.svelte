@@ -421,9 +421,9 @@
 							aria-label={group.devServerRunning ? 'Stop dev server' : 'Start dev server'}
 							>
 								{#if group.devServerRunning}
-									<span class="text-info"><Icon name="stop-square" class="w-4 h-4" /></span>
+									<span class="text-info"><Icon name="stop" class="w-4 h-4" /></span>
 								{:else}
-									<span class="opacity-50"><Icon name="play-outline" class="w-4 h-4" /></span>
+									<span class="opacity-50"><Icon name="play" class="w-4 h-4" /></span>
 								{/if}
 							</button>
 						{/if}
@@ -459,7 +459,7 @@
 								</li>
 								<li>
 									<button onclick={(e) => { e.stopPropagation(); startEditDevCommand(group.cwd, group.devCommand); }}>
-										<span class="opacity-70 inline-flex"><Icon name="settings" class="w-4 h-4" /></span>
+										<span class="opacity-70 inline-flex"><Icon name="cog" class="w-4 h-4" /></span>
 										Configure Dev
 									</button>
 								</li>
@@ -500,7 +500,7 @@
 							title={group.devCommand ? `Dev: ${group.devCommand} (click to edit)` : 'Configure dev command'}
 							aria-label="Configure dev command"
 						>
-							<span class="opacity-40"><Icon name="settings" class="w-4 h-4" /></span>
+							<span class="opacity-40"><Icon name="cog" class="w-4 h-4" /></span>
 						</button>
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
