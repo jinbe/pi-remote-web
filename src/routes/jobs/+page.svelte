@@ -56,6 +56,7 @@
 		{ value: 'active', label: 'Active' },
 		{ value: 'queued', label: 'Queued' },
 		{ value: 'running', label: 'Running' },
+		{ value: 'reviewing', label: 'Reviewing' },
 		{ value: 'done', label: 'Done' },
 		{ value: 'failed', label: 'Failed' },
 		{ value: 'all', label: 'All' },
@@ -71,6 +72,7 @@
 		queued: 'badge-ghost',
 		claimed: 'badge-info',
 		running: 'badge-warning',
+		reviewing: 'badge-info',
 		done: 'badge-success',
 		failed: 'badge-error',
 		cancelled: 'badge-ghost opacity-50',
@@ -80,13 +82,14 @@
 		queued: 'clock',
 		claimed: 'lock',
 		running: 'bolt',
+		reviewing: 'search',
 		done: 'check',
 		failed: 'close',
 		cancelled: 'dash',
 	};
 
-	// Active statuses: queued, claimed, running
-	const ACTIVE_STATUSES = new Set(['queued', 'claimed', 'running']);
+	// Active statuses: queued, claimed, running, reviewing
+	const ACTIVE_STATUSES = new Set(['queued', 'claimed', 'running', 'reviewing']);
 
 	const filteredJobs = $derived.by(() => {
 		let jobs = data.jobs as Job[];
