@@ -98,12 +98,14 @@ export function getDb(): Database {
 			retry_count INTEGER NOT NULL DEFAULT 0,
 			max_retries INTEGER NOT NULL DEFAULT 2,
 			callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
-			review_skill TEXT
+			review_skill TEXT,
+			model TEXT
 		)`);
 
 		// Migrations: add columns if missing (from older schema)
 		try { db.run('ALTER TABLE jobs ADD COLUMN callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16))))'); } catch {}
 		try { db.run('ALTER TABLE jobs ADD COLUMN review_skill TEXT'); } catch {}
+		try { db.run('ALTER TABLE jobs ADD COLUMN model TEXT'); } catch {}
 
 		// Migration: Test if 'reviewing' status is allowed by trying a test insert
 		// If it fails, we need to migrate the schema to remove CHECK constraints
@@ -147,9 +149,14 @@ export function getDb(): Database {
 				retry_count INTEGER NOT NULL DEFAULT 0,
 				max_retries INTEGER NOT NULL DEFAULT 2,
 				callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
-				review_skill TEXT
+				review_skill TEXT,
+				model TEXT
 			)`);
-			db.run(`INSERT INTO jobs_new SELECT * FROM jobs`);
+			// Copy existing columns — model may not exist in old schema
+			const oldCols = db.query("PRAGMA table_info(jobs)").all() as { name: string }[];
+			const colNames = oldCols.map(c => c.name);
+			const selectCols = colNames.join(', ') + (colNames.includes('model') ? '' : ', NULL AS model');
+			db.run(`INSERT INTO jobs_new SELECT ${selectCols} FROM jobs`);
 			db.run('DROP TABLE jobs');
 			db.run('ALTER TABLE jobs_new RENAME TO jobs');
 			// Recreate indexes

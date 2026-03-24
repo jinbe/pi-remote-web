@@ -135,5 +135,30 @@ describe('job-poller', () => {
 			const updated = getJob(job.id)!;
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/99');
 		});
+
+		it('skips review and goes straight to done when max_loops is 0', async () => {
+			const job = createJob({
+				title: 'Fire and forget task',
+				repo: '/repo',
+				max_loops: 0,
+			});
+			updateJobStatus(job.id, { status: 'running' });
+
+			await handleJobAgentEnd(job.id, 'Done!\nPR_URL: https://github.com/org/repo/pull/7');
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('done');
+			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/7');
+			// No reviewing state — went straight to done
+		});
+
+		it('stores model on job creation', () => {
+			const job = createJob({
+				title: 'Model test',
+				repo: '/repo',
+				model: 'anthropic/claude-sonnet-4',
+			});
+			expect(job.model).toBe('anthropic/claude-sonnet-4');
+		});
 	});
 });
