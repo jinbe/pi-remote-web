@@ -256,14 +256,16 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 			});
 
 			// Send review prompt to the SAME session
-			if (!job.session_id) {
-				throw new Error(`Job ${jobId} has no session_id`);
+			if (job.session_id) {
+				try {
+					const reviewPrompt = buildReviewPrompt(job);
+					await sendMessage(job.session_id, reviewPrompt);
+				} catch (err) {
+					log.warn('job-poller', `failed to send review prompt for job ${jobId}: ${err}`);
+				}
 			}
-
-			const reviewPrompt = buildReviewPrompt(job);
-			await sendMessage(job.session_id, reviewPrompt);
 			
-			log.info('job-poller', `job ${jobId} transitioned running → reviewing, sent review prompt`);
+			log.info('job-poller', `job ${jobId} transitioned running → reviewing`);
 			
 		} else if (job.status === 'reviewing') {
 			// Review phase complete → check verdict
@@ -306,15 +308,16 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 						review_verdict: 'changes_requested',
 					});
 
-					if (!job.session_id) {
-						throw new Error(`Job ${jobId} has no session_id`);
+					if (job.session_id) {
+						try {
+							const fixPrompt = buildTaskFixPrompt(job, assistantText);
+							await sendMessage(job.session_id, fixPrompt);
+						} catch (err) {
+							log.warn('job-poller', `failed to send fix prompt for job ${jobId}: ${err}`);
+						}
 					}
-
-					// Build fix prompt with review comments from the assistant text
-					const fixPrompt = buildTaskFixPrompt(job, assistantText);
-					await sendMessage(job.session_id, fixPrompt);
 					
-					log.info('job-poller', `job ${jobId} changes_requested → running (loop ${nextLoopCount}/${job.max_loops}), sent fix prompt`);
+					log.info('job-poller', `job ${jobId} changes_requested → running (loop ${nextLoopCount}/${job.max_loops})`);
 				}
 			} else {
 				// No verdict found — treat as failure

@@ -1,6 +1,9 @@
 /**
  * Job completion handler — provides cleanup utilities for worktree and session migration.
- * The main completion logic is now in job-poller.ts (handleJobAgentEnd).
+ * The main completion logic (state machine) is in job-poller.ts (handleJobAgentEnd).
+ *
+ * The extension callback delegates to handleJobAgentEnd so the review loop
+ * is respected — it never directly marks a job as done.
  */
 import { getJob, updateJobStatus, type Job } from './job-queue';
 import { log } from './logger';
@@ -23,11 +26,17 @@ export interface CompletionPayload {
 // --- Main handler ---
 
 /**
- * Handle job completion callback from the extension (fallback).
- * In the new single-job model, this is only used as a fallback — the primary
- * completion path is through handleJobAgentEnd in job-poller.ts.
+ * Handle job completion callback from the extension.
+ * Delegates to the poller's state machine so the review loop is respected.
+ *
+ * For failures, marks the job as failed directly (no state machine needed).
+ * For success, constructs the assistant text markers and lets handleJobAgentEnd
+ * drive the state transitions (running → reviewing → done).
  */
 export function handleCompletion(jobId: string, payload: CompletionPayload): Job {
+	// Lazy import to avoid circular dependency — job-poller imports from us
+	const { handleJobAgentEnd } = require('./job-poller');
+
 	const job = getJob(jobId);
 	if (!job) {
 		throw new Error(`Job not found: ${jobId}`);
@@ -39,42 +48,37 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 		return job;
 	}
 
-	// Handle failure
+	// Handle failure directly — no state machine needed
 	if (payload.status === 'failed') {
 		const updated = updateJobStatus(jobId, {
 			status: 'failed',
 			error: payload.error ?? 'Job failed without error details',
 			result_summary: payload.resultSummary,
 		});
-		cleanupJob(job);
-		log.info('job-completion', `job ${jobId} failed: ${payload.error}`);
+		log.info('job-completion', `job ${jobId} failed via callback: ${payload.error}`);
 		return updated!;
 	}
 
-	// Simple done transition — the poller handles the state machine
-	const updates: Parameters<typeof updateJobStatus>[1] = {
-		status: 'done',
-		result_summary: payload.resultSummary,
-	};
+	// Reconstruct the assistant text markers from the callback payload
+	// so handleJobAgentEnd can extract them and drive the state machine.
+	const markerLines: string[] = [];
+	if (payload.prUrl) markerLines.push(`PR_URL: ${payload.prUrl}`);
+	if (payload.verdict) markerLines.push(`VERDICT: ${payload.verdict}`);
+	if (payload.resultSummary) markerLines.push(payload.resultSummary);
+	const syntheticText = markerLines.join('\n');
 
-	if (payload.prUrl) {
-		updates.pr_url = payload.prUrl;
-	}
+	// Delegate to the state machine — this handles running → reviewing → done
+	handleJobAgentEnd(jobId, syntheticText);
 
-	if (payload.verdict) {
-		updates.review_verdict = payload.verdict;
-	}
-
-	const updatedJob = updateJobStatus(jobId, updates)!;
-	cleanupJob(job);
-
-	return updatedJob;
+	// Return the updated job (state may have changed)
+	return getJob(jobId) ?? job;
 }
 
 // --- Cleanup functions (exported for use by job-poller) ---
 
 /**
  * Clean up a job's resources: migrate sessions to repo directory, remove worktree.
+ * Only call this when the job has reached a terminal state.
  */
 export function cleanupJob(job: Job): void {
 	migrateWorktreeSessions(job);
@@ -132,15 +136,11 @@ function migrateWorktreeSessions(job: Job): void {
 // --- Worktree cleanup ---
 
 /**
- * Migrate session files to the repo's session directory, then remove the
- * git worktree using `git worktree remove` to properly unregister it from
- * git's tracking. Falls back to rmSync if git fails.
+ * Remove the git worktree using `git worktree remove` to properly unregister
+ * it from git's tracking. Falls back to rmSync if git fails.
  */
 function cleanupWorktree(job: Job): void {
 	if (!job.worktree_path) return;
-
-	// Copy session files to repo's session directory before cleanup
-	migrateWorktreeSessions(job);
 
 	// Try git worktree remove first (uses repo path if available)
 	try {
