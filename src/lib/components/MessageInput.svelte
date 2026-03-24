@@ -58,7 +58,8 @@
 
 	// Autocomplete state
 	let commands = $state<SlashCommand[]>([]);
-	let commandsLoaded = $state(false);
+	let commandsLoadedForSession = $state<string | null>(null);
+	let commandsFetching = $state(false);
 	let showAutocomplete = $state(false);
 	let selectedIndex = $state(0);
 	let menuRef: HTMLUListElement | undefined = $state();
@@ -69,19 +70,35 @@
 		return commands.filter((c) => c.name.toLowerCase().startsWith(input));
 	});
 
+	// Reset commands when sessionId changes
+	$effect(() => {
+		// Read sessionId to establish the dependency
+		const _id = sessionId;
+		commandsLoadedForSession = null;
+		commands = [];
+	});
+
 	// Fetch commands lazily on first /
+	// Re-fetches if session changed or previous fetch returned empty (session may not have been ready)
 	async function ensureCommands() {
-		if (commandsLoaded) return;
+		if (commandsFetching) return;
+		if (commandsLoadedForSession === sessionId && commands.length > 0) return;
+		commandsFetching = true;
 		try {
 			const res = await fetch(`/api/sessions/${sessionId}/commands`);
 			if (res.ok) {
 				const data = await res.json();
 				commands = Array.isArray(data.commands) ? data.commands : [];
+				// Only mark as loaded if we got commands — allows retry when session wasn't ready
+				if (commands.length > 0) {
+					commandsLoadedForSession = sessionId;
+				}
 			}
 		} catch {
-			/* ignore */
+			/* ignore — will retry on next / keystroke */
+		} finally {
+			commandsFetching = false;
 		}
-		commandsLoaded = true;
 	}
 
 	function updateAutocomplete() {
