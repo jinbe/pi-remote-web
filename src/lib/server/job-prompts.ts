@@ -14,6 +14,7 @@ function metadataHeader(job: Job): string {
 	return [
 		`JOB_ID: ${job.id}`,
 		`CALLBACK_URL: ${callbackUrl}`,
+		`CALLBACK_TOKEN: ${job.callback_token}`,
 		'',
 	].join('\n');
 }

@@ -8,8 +8,8 @@ import { createSession, sendMessage } from './rpc-manager';
 import { log } from './logger';
 import { homedir } from 'os';
 import { join } from 'path';
-import { mkdirSync, existsSync } from 'fs';
-import { execSync } from 'child_process';
+import { mkdirSync, existsSync, rmSync } from 'fs';
+import { execFileSync } from 'child_process';
 
 // --- Constants ---
 
@@ -60,9 +60,12 @@ export function isRunning(): boolean {
 	return pollTimer !== null;
 }
 
+/** Maximum number of jobs to dispatch in a single poll iteration. */
+const MAX_CONCURRENT_CLAIMS = 10;
+
 /**
- * Run a single poll iteration. Claims the next job and dispatches it.
- * Exported for testing and manual trigger.
+ * Run a single poll iteration. Claims and dispatches all available queued jobs
+ * (up to MAX_CONCURRENT_CLAIMS). Exported for testing and manual trigger.
  */
 export async function pollOnce(): Promise<void> {
 	if (isPolling) {
@@ -72,10 +75,14 @@ export async function pollOnce(): Promise<void> {
 
 	isPolling = true;
 	try {
-		const job = claimNextJob();
-		if (!job) return; // Nothing queued
+		let dispatched = 0;
+		while (dispatched < MAX_CONCURRENT_CLAIMS) {
+			const job = claimNextJob();
+			if (!job) break; // No more queued jobs
 
-		await dispatchJob(job);
+			await dispatchJob(job);
+			dispatched++;
+		}
 	} catch (err) {
 		log.error('job-poller', `poll error: ${err}`);
 	} finally {
@@ -128,46 +135,66 @@ async function dispatchJob(job: Job): Promise<void> {
 	}
 }
 
+// --- Input validation ---
+
+/** Safe pattern for git ref names (branches, tags). Rejects shell metacharacters. */
+const SAFE_GIT_REF_PATTERN = /^[a-zA-Z0-9._\-/]+$/;
+
+/**
+ * Validate that a string is safe to use as a git ref name.
+ * Prevents command injection by rejecting shell metacharacters.
+ */
+function validateGitRef(value: string, label: string): void {
+	if (!SAFE_GIT_REF_PATTERN.test(value)) {
+		throw new Error(`Invalid ${label}: "${value}" — only alphanumeric, dots, hyphens, underscores, and slashes are allowed`);
+	}
+}
+
 // --- Worktree management ---
 
 /**
  * Create a git worktree for the job. Uses the job's branch if specified,
  * otherwise creates a new branch from target_branch.
+ *
+ * Uses execFileSync (not execSync) to avoid shell injection — arguments are
+ * passed as an array, never interpolated into a shell command string.
  */
 function createWorktree(repoPath: string, job: Job): string {
 	const worktreeName = `job-${job.id}`;
 	const worktreePath = join(WORKTREE_BASE, worktreeName);
 
+	const targetBranch = job.target_branch || 'main';
+	validateGitRef(targetBranch, 'target branch');
+	if (job.branch) validateGitRef(job.branch, 'branch');
+
 	if (existsSync(worktreePath)) {
-		// Clean up stale worktree
+		// Clean up stale worktree — try git first, fall back to rmSync
 		try {
-			execSync(`git worktree remove --force "${worktreePath}"`, { cwd: repoPath, stdio: 'pipe' });
+			execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoPath, stdio: 'pipe' });
 		} catch {
-			// May not be registered as a worktree — just remove the directory
-			try { execSync(`rm -rf "${worktreePath}"`, { stdio: 'pipe' }); } catch { /* best effort */ }
+			try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
 		}
 	}
-
-	const targetBranch = job.target_branch || 'main';
 
 	if (job.branch) {
 		// Use existing branch
 		try {
-			execSync(`git worktree add "${worktreePath}" "${job.branch}"`, { cwd: repoPath, stdio: 'pipe' });
+			execFileSync('git', ['worktree', 'add', worktreePath, job.branch], { cwd: repoPath, stdio: 'pipe' });
 		} catch {
 			// Branch might not exist locally yet — try fetching and creating from remote
 			try {
-				execSync(`git fetch origin ${job.branch}`, { cwd: repoPath, stdio: 'pipe' });
-				execSync(`git worktree add "${worktreePath}" "origin/${job.branch}"`, { cwd: repoPath, stdio: 'pipe' });
+				execFileSync('git', ['fetch', 'origin', job.branch], { cwd: repoPath, stdio: 'pipe' });
+				execFileSync('git', ['worktree', 'add', worktreePath, `origin/${job.branch}`], { cwd: repoPath, stdio: 'pipe' });
 			} catch {
 				// Fall back to creating from target branch
-				execSync(`git worktree add -b "${job.branch}" "${worktreePath}" "${targetBranch}"`, { cwd: repoPath, stdio: 'pipe' });
+				execFileSync('git', ['worktree', 'add', '-b', job.branch, worktreePath, targetBranch], { cwd: repoPath, stdio: 'pipe' });
 			}
 		}
 	} else {
 		// Create a new branch for the job
 		const branchName = `job/${job.id}`;
-		execSync(`git worktree add -b "${branchName}" "${worktreePath}" "${targetBranch}"`, { cwd: repoPath, stdio: 'pipe' });
+		validateGitRef(branchName, 'auto-generated branch');
+		execFileSync('git', ['worktree', 'add', '-b', branchName, worktreePath, targetBranch], { cwd: repoPath, stdio: 'pipe' });
 		// Update job with the auto-generated branch name
 		updateJobStatus(job.id, { branch: branchName });
 	}

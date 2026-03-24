@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const JOB_ID_PATTERN = /JOB_ID:\s*(\S+)/;
 const CALLBACK_PATTERN = /CALLBACK_URL:\s*(\S+)/;
+const CALLBACK_TOKEN_PATTERN = /CALLBACK_TOKEN:\s*(\S+)/;
 const PR_URL_PATTERN = /PR_URL:\s*(\S+)/;
 const VERDICT_PATTERN = /VERDICT:\s*(approved|changes_requested)/;
 
@@ -22,11 +23,13 @@ export default function (pi: ExtensionAPI) {
 			const allText = messages.map((m: any) => extractText(m)).join("\n");
 			const jobIdMatch = allText.match(JOB_ID_PATTERN);
 			const callbackMatch = allText.match(CALLBACK_PATTERN);
+			const tokenMatch = allText.match(CALLBACK_TOKEN_PATTERN);
 
 			if (!jobIdMatch || !callbackMatch) return;
 
 			const jobId = jobIdMatch[1];
 			const callbackUrl = callbackMatch[1];
+			const callbackToken = tokenMatch?.[1];
 
 			// Extract results from assistant messages only
 			const assistantText = messages
@@ -40,6 +43,7 @@ export default function (pi: ExtensionAPI) {
 			const payload: Record<string, string | undefined> = {
 				jobId,
 				status: "done",
+				token: callbackToken,
 			};
 
 			if (prUrlMatch) payload.prUrl = prUrlMatch[1];

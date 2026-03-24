@@ -214,6 +214,6 @@
 				</button>
 			</div>
 		</div>
-		<div class="modal-backdrop" role="presentation" onclick={onclose} onkeydown={onclose}></div>
+		<div class="modal-backdrop" role="presentation" onclick={onclose} onkeydown={(e: KeyboardEvent) => { if (e.key === 'Escape') onclose(); }}></div>
 	</dialog>
 {/if}

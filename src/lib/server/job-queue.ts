@@ -34,6 +34,7 @@ export interface Job {
 	error: string | null;
 	retry_count: number;
 	max_retries: number;
+	callback_token: string;
 }
 
 export interface CreateJobInput {
@@ -63,53 +64,39 @@ export interface UpdateJobInput {
 	branch?: string;
 }
 
-// --- Prepared statements (lazy) ---
+// --- Query helpers ---
+// Statements are created fresh from getDb() each call to avoid holding stale
+// references if the Database instance is ever re-created (e.g. during tests).
+// bun:sqlite's db.query() overhead is negligible.
 
-let _insertJobStmt: ReturnType<ReturnType<typeof getDb>['query']> | null = null;
-let _claimStmt: ReturnType<ReturnType<typeof getDb>['query']> | null = null;
-let _getJobStmt: ReturnType<ReturnType<typeof getDb>['query']> | null = null;
-let _deleteJobStmt: ReturnType<ReturnType<typeof getDb>['query']> | null = null;
-
-function insertJobStmt() {
-	if (!_insertJobStmt) {
-		_insertJobStmt = getDb().query(`
-			INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url)
-			VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url)
-			RETURNING *
-		`);
-	}
-	return _insertJobStmt;
+function insertJobQuery() {
+	return getDb().query(`
+		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url)
+		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url)
+		RETURNING *
+	`);
 }
 
-function claimStmt() {
-	if (!_claimStmt) {
-		_claimStmt = getDb().query(`
-			UPDATE jobs
-			SET status = 'claimed', claimed_at = datetime('now'), updated_at = datetime('now')
-			WHERE id = (
-				SELECT id FROM jobs
-				WHERE status = 'queued'
-				ORDER BY priority DESC, created_at ASC
-				LIMIT 1
-			)
-			RETURNING *
-		`);
-	}
-	return _claimStmt;
+function claimQuery() {
+	return getDb().query(`
+		UPDATE jobs
+		SET status = 'claimed', claimed_at = datetime('now'), updated_at = datetime('now')
+		WHERE id = (
+			SELECT id FROM jobs
+			WHERE status = 'queued'
+			ORDER BY priority DESC, created_at ASC
+			LIMIT 1
+		)
+		RETURNING *
+	`);
 }
 
-function getJobStmt() {
-	if (!_getJobStmt) {
-		_getJobStmt = getDb().query('SELECT * FROM jobs WHERE id = ?');
-	}
-	return _getJobStmt;
+function getJobQuery() {
+	return getDb().query('SELECT * FROM jobs WHERE id = ?');
 }
 
-function deleteJobStmt() {
-	if (!_deleteJobStmt) {
-		_deleteJobStmt = getDb().query('DELETE FROM jobs WHERE id = ? RETURNING *');
-	}
-	return _deleteJobStmt;
+function deleteJobQuery() {
+	return getDb().query('DELETE FROM jobs WHERE id = ? RETURNING *');
 }
 
 // --- Public API ---
@@ -118,7 +105,7 @@ function deleteJobStmt() {
  * Create a new job in the queue.
  */
 export function createJob(input: CreateJobInput): Job {
-	const row = insertJobStmt().get({
+	const row = insertJobQuery().get({
 		$type: input.type,
 		$title: input.title,
 		$description: input.description ?? null,
@@ -142,7 +129,7 @@ export function createJob(input: CreateJobInput): Job {
  * Returns null if no jobs are available.
  */
 export function claimNextJob(): Job | null {
-	const row = claimStmt().get() as Job | null;
+	const row = claimQuery().get() as Job | null;
 	if (row) {
 		log.info('job-queue', `claimed job ${row.id} (${row.type}): ${row.title}`);
 	}
@@ -203,42 +190,43 @@ export function getJobs(filters?: { status?: string; type?: string; repo?: strin
  * Get a single job by ID.
  */
 export function getJob(id: string): Job | null {
-	return getJobStmt().get(id) as Job | null;
+	return getJobQuery().get(id) as Job | null;
 }
 
 /**
  * Get the full chain of jobs linked via parent_job_id, starting from any job in the chain.
+ * Uses a two-phase approach: find the root via a recursive CTE walking up,
+ * then walk down from the root via another recursive CTE.
+ * This reduces the query count to 2 regardless of chain depth.
  */
 export function getJobChain(id: string): Job[] {
-	// First, walk up to find the root job
-	let rootId = id;
-	const visited = new Set<string>();
-	while (true) {
-		if (visited.has(rootId)) break; // Prevent infinite loops
-		visited.add(rootId);
-		const job = getJob(rootId);
-		if (!job || !job.parent_job_id) break;
-		rootId = job.parent_job_id;
+	const db = getDb();
+
+	// Phase 1: Find the root job by walking up the parent chain
+	const rootRow = db.query(`
+		WITH RECURSIVE ancestors AS (
+			SELECT id, parent_job_id FROM jobs WHERE id = ?
+			UNION ALL
+			SELECT j.id, j.parent_job_id FROM jobs j JOIN ancestors a ON j.id = a.parent_job_id
+		)
+		SELECT id FROM ancestors WHERE parent_job_id IS NULL LIMIT 1
+	`).get(id) as { id: string } | null;
+
+	if (!rootRow) {
+		// Fallback: if the CTE finds nothing, just return the single job
+		const job = getJob(id);
+		return job ? [job] : [];
 	}
 
-	// Now walk down the chain from the root
-	const chain: Job[] = [];
-	let currentId: string | null = rootId;
-	const chainVisited = new Set<string>();
-
-	while (currentId) {
-		if (chainVisited.has(currentId)) break;
-		chainVisited.add(currentId);
-		const job = getJob(currentId);
-		if (!job) break;
-		chain.push(job);
-
-		// Find the child job whose parent_job_id is this job
-		const child = getDb()
-			.query('SELECT id FROM jobs WHERE parent_job_id = ? LIMIT 1')
-			.get(currentId) as { id: string } | null;
-		currentId = child?.id ?? null;
-	}
+	// Phase 2: Walk down from the root via recursive CTE
+	const chain = db.query(`
+		WITH RECURSIVE chain AS (
+			SELECT * FROM jobs WHERE id = ?
+			UNION ALL
+			SELECT j.* FROM jobs j JOIN chain c ON j.parent_job_id = c.id
+		)
+		SELECT * FROM chain ORDER BY created_at ASC
+	`).all(rootRow.id) as Job[];
 
 	return chain;
 }
@@ -255,7 +243,7 @@ export function deleteJob(id: string): Job | null {
 		throw new Error(`Cannot delete job in '${job.status}' status — only queued, done, failed, or cancelled jobs can be deleted`);
 	}
 
-	const deleted = deleteJobStmt().get(id) as Job | null;
+	const deleted = deleteJobQuery().get(id) as Job | null;
 	if (deleted) {
 		log.info('job-queue', `deleted job ${id}`);
 	}

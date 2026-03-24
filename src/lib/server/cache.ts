@@ -96,7 +96,8 @@ export function getDb(): Database {
 			result_summary TEXT,
 			error TEXT,
 			retry_count INTEGER NOT NULL DEFAULT 0,
-			max_retries INTEGER NOT NULL DEFAULT 2
+			max_retries INTEGER NOT NULL DEFAULT 2,
+			callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16))))
 		)`);
 
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)');

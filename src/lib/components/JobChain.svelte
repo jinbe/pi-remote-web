@@ -15,15 +15,6 @@
 
 	let { jobs = [] }: { jobs: Job[] } = $props();
 
-	const statusColour: Record<string, string> = {
-		queued: 'border-base-content/20',
-		claimed: 'border-info',
-		running: 'border-warning',
-		done: 'border-success',
-		failed: 'border-error',
-		cancelled: 'border-base-content/10',
-	};
-
 	const statusDot: Record<string, string> = {
 		queued: 'bg-base-content/20',
 		claimed: 'bg-info',

@@ -5,6 +5,7 @@
 import { getJob, updateJobStatus, createJob, type Job } from './job-queue';
 import { log } from './logger';
 import { rmSync } from 'fs';
+import { execFileSync } from 'child_process';
 
 // --- Types ---
 
@@ -144,14 +145,30 @@ function applyLoopLogic(job: Job, payload: CompletionPayload): void {
 // --- Worktree cleanup ---
 
 /**
- * Remove the git worktree directory if it exists.
+ * Remove the git worktree using `git worktree remove` to properly unregister
+ * it from git's tracking, then fall back to rmSync if git fails.
  */
 function cleanupWorktree(job: Job): void {
 	if (!job.worktree_path) return;
 
+	// Try git worktree remove first (uses repo path if available)
+	try {
+		if (job.repo) {
+			execFileSync('git', ['worktree', 'remove', '--force', job.worktree_path], {
+				cwd: job.repo,
+				stdio: 'pipe',
+			});
+			log.info('job-completion', `removed worktree via git: ${job.worktree_path}`);
+			return;
+		}
+	} catch (err) {
+		log.warn('job-completion', `git worktree remove failed, falling back to rmSync: ${err}`);
+	}
+
+	// Fallback: remove the directory directly
 	try {
 		rmSync(job.worktree_path, { recursive: true, force: true });
-		log.info('job-completion', `cleaned up worktree: ${job.worktree_path}`);
+		log.info('job-completion', `cleaned up worktree via rmSync: ${job.worktree_path}`);
 	} catch (err) {
 		log.warn('job-completion', `failed to clean up worktree ${job.worktree_path}: ${err}`);
 	}
