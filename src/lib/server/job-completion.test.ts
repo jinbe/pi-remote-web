@@ -20,17 +20,17 @@ describe('job-completion', () => {
 		});
 
 		it('ignores completion for job already in terminal state', () => {
-			const job = createJob({ type: 'task', title: 'Queued job' });
+			const job = createJob({ title: 'Done job' });
 			updateJobStatus(job.id, { status: 'done' });
 
 			const result = handleCompletion(job.id, { jobId: job.id, status: 'done' });
-			
+
 			// Should return the job as-is without error
 			expect(result.status).toBe('done');
 		});
 
-		it('marks a failed job and cleans up', () => {
-			const job = createJob({ type: 'task', title: 'Failing task' });
+		it('marks a failed job directly', () => {
+			const job = createJob({ title: 'Failing task' });
 			updateJobStatus(job.id, { status: 'running' });
 
 			const result = handleCompletion(job.id, {
@@ -41,33 +41,52 @@ describe('job-completion', () => {
 
 			expect(result.status).toBe('failed');
 			expect(result.error).toBe('Something went wrong');
-
-			// No follow-up jobs created in new model
-			const allJobs = getJobs();
-			expect(allJobs).toHaveLength(1);
 		});
 
-		it('marks a job as done (simple completion - loop logic is in poller now)', () => {
-			const job = createJob({
-				type: 'task',
-				title: 'Implement feature',
-				repo: '/repo',
-				branch: 'feat/test',
-			});
+		it('delegates to state machine — running job transitions to reviewing', async () => {
+			const job = createJob({ title: 'Task with review', max_loops: 5 });
 			updateJobStatus(job.id, { status: 'running' });
 
-			const result = handleCompletion(job.id, {
+			handleCompletion(job.id, {
 				jobId: job.id,
 				status: 'done',
 				prUrl: 'https://github.com/org/repo/pull/1',
 			});
 
-			expect(result.status).toBe('done');
-			expect(result.pr_url).toBe('https://github.com/org/repo/pull/1');
+			const updated = getJob(job.id)!;
+			// State machine transitions running → reviewing (not straight to done)
+			expect(updated.status).toBe('reviewing');
+			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/1');
+		});
 
-			// In the new model, handleCompletion doesn't create follow-up jobs
-			const allJobs = getJobs();
-			expect(allJobs).toHaveLength(1);
+		it('delegates to state machine — fire-and-forget goes straight to done', async () => {
+			const job = createJob({ title: 'Quick task', max_loops: 0 });
+			updateJobStatus(job.id, { status: 'running' });
+
+			handleCompletion(job.id, {
+				jobId: job.id,
+				status: 'done',
+				prUrl: 'https://github.com/org/repo/pull/2',
+			});
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('done');
+			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/2');
+		});
+
+		it('delegates to state machine — review with approved verdict marks done', async () => {
+			const job = createJob({ title: 'Reviewed task', max_loops: 5 });
+			updateJobStatus(job.id, { status: 'reviewing' });
+
+			handleCompletion(job.id, {
+				jobId: job.id,
+				status: 'done',
+				verdict: 'approved',
+			});
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('done');
+			expect(updated.review_verdict).toBe('approved');
 		});
 	});
 
