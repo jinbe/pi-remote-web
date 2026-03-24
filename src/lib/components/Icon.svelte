@@ -3,7 +3,7 @@
   Usage: <Icon name="cog" class="w-4 h-4" />
 -->
 <script lang="ts">
-	export type IconName = 'clock' | 'lock' | 'bolt' | 'hammer' | 'search' | 'target' | 'paperclip' | 'cog' | 'document' | 'pencil' | 'save' | 'sun' | 'moon' | 'circle-green' | 'circle-red' | 'check-circle' | 'play-pause' | 'stop-circle' | 'play' | 'stop' | 'compress';
+	export type IconName = 'clock' | 'lock' | 'bolt' | 'hammer' | 'search' | 'target' | 'paperclip' | 'cog' | 'document' | 'pencil' | 'save' | 'sun' | 'moon' | 'circle-green' | 'circle-red' | 'check-circle' | 'play-pause' | 'stop-circle' | 'play' | 'stop' | 'compress' | 'close' | 'check' | 'chevron-right' | 'plus' | 'arrow-left' | 'arrow-down' | 'refresh' | 'dash' | 'enter' | 'star-filled' | 'star-outline';
 	let { name, class: className = 'w-4 h-4' }: { name: IconName; class?: string } = $props();
 </script>
 
@@ -114,6 +114,62 @@
 	<!-- 🗜️ Compaction start -->
 	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 		<path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+	</svg>
+{:else if name === 'close'}
+	<!-- ✕ Close / dismiss / delete -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+	</svg>
+{:else if name === 'check'}
+	<!-- ✓ Check / success -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+	</svg>
+{:else if name === 'chevron-right'}
+	<!-- ▶ Expand / collapse chevron -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+	</svg>
+{:else if name === 'plus'}
+	<!-- + Add / new -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+	</svg>
+{:else if name === 'arrow-left'}
+	<!-- ← Back / navigate left -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M19 12H5m7-7l-7 7 7 7" />
+	</svg>
+{:else if name === 'arrow-down'}
+	<!-- ↓ Down / scroll -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+	</svg>
+{:else if name === 'refresh'}
+	<!-- ↻ Refresh / retry -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5" />
+		<path stroke-linecap="round" stroke-linejoin="round" d="M20.49 9A9 9 0 005.64 5.64L4 4m16 16l-1.64-1.64A9 9 0 013.51 15" />
+	</svg>
+{:else if name === 'dash'}
+	<!-- — Dash / cancelled -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14" />
+	</svg>
+{:else if name === 'enter'}
+	<!-- ⏎ Enter / send -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M3 10h10a4 4 0 014 4v1M3 10l4-4m-4 4l4 4" />
+	</svg>
+{:else if name === 'star-filled'}
+	<!-- ★ Filled star / favourite -->
+	<svg class={className} viewBox="0 0 24 24" fill="currentColor">
+		<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+	</svg>
+{:else if name === 'star-outline'}
+	<!-- ☆ Outline star / unfavourite -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
 	</svg>
 {:else}
 	<!-- Fallback for unrecognised icon names -->

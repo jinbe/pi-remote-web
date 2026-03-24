@@ -641,10 +641,10 @@
 {#if edgeSwipeOffset > 0}
 	<div class="fixed inset-y-0 left-0 w-12 z-50 flex items-center justify-center pointer-events-none">
 		<span
-			class="text-2xl transition-opacity duration-150"
+			class="transition-opacity duration-150 inline-flex"
 			style="opacity: {Math.min(edgeSwipeOffset / EDGE_SWIPE_THRESHOLD, 1)};"
 		>
-			←
+			<Icon name="arrow-left" class="w-6 h-6" />
 		</span>
 	</div>
 {/if}
@@ -662,7 +662,7 @@
 	<!-- Header -->
 	<div class="navbar bg-base-200 shrink-0 z-10 border-b border-base-300">
 		<div class="navbar-start">
-			<a href="/" class="btn btn-ghost btn-md text-lg" aria-label="Back to dashboard">←</a>
+			<a href="/" class="btn btn-ghost btn-md" aria-label="Back to dashboard"><Icon name="arrow-left" class="w-5 h-5" /></a>
 		</div>
 		<div class="navbar-center flex flex-col items-center">
 			<span class="text-sm font-semibold truncate max-w-[200px] flex items-center gap-1.5">
@@ -841,7 +841,7 @@
 						{#if sessionActive}
 							<p class="text-lg mb-2">Session ready</p>
 							<p class="text-sm flex items-center justify-center gap-2">
-								<span class="animate-bounce">↓</span>
+								<span class="animate-bounce inline-flex"><Icon name="arrow-down" class="w-4 h-4" /></span>
 								Type a message to get started
 							</p>
 						{:else}
@@ -857,7 +857,7 @@
 			<div class="hidden md:flex flex-col w-64 border-l border-base-300 bg-base-200/50 overflow-hidden">
 				<div class="p-3 text-sm font-semibold border-b border-base-300 flex items-center justify-between">
 					<span>Activity Log</span>
-					<button class="btn btn-ghost btn-xs" onclick={() => showEvents = false}>✕</button>
+					<button class="btn btn-ghost btn-xs" onclick={() => showEvents = false}><Icon name="close" class="w-3.5 h-3.5" /></button>
 				</div>
 				<div class="flex-1 overflow-y-auto p-2 space-y-1">
 					{#if sessionEvents.length === 0}
@@ -881,7 +881,7 @@
 	<!-- Scroll to bottom button -->
 	<div class="flex justify-center -mt-10 relative z-10 transition-all duration-300 ease-out {userScrolledUp ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}">
 		<button class="btn btn-circle btn-sm btn-ghost bg-base-300/80 shadow" onclick={() => scrollToBottom(true)} aria-label="Scroll to bottom">
-			↓
+			<Icon name="arrow-down" class="w-4 h-4" />
 		</button>
 	</div>
 

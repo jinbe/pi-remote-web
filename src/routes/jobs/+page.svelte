@@ -4,6 +4,7 @@
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import AddJobModal from '$lib/components/AddJobModal.svelte';
 	import JobChain from '$lib/components/JobChain.svelte';
+	import Icon, { type IconName } from '$lib/components/Icon.svelte';
 	import { getContext } from 'svelte';
 	import logoSvg from '$lib/assets/logo.svg';
 
@@ -73,13 +74,13 @@
 		cancelled: 'badge-ghost opacity-50',
 	};
 
-	const statusIcon: Record<string, string> = {
-		queued: '⏳',
-		claimed: '🔒',
-		running: '⚡',
-		done: '✓',
-		failed: '✕',
-		cancelled: '—',
+	const statusIconName: Record<string, IconName> = {
+		queued: 'clock',
+		claimed: 'lock',
+		running: 'bolt',
+		done: 'check',
+		failed: 'close',
+		cancelled: 'dash',
 	};
 
 	// Active statuses: queued, claimed, running
@@ -254,10 +255,10 @@
 					<span class="hidden sm:inline">Poller Off</span>
 				{/if}
 			</button>
-			<button class="btn btn-sm btn-primary" onclick={() => { hapticMedium(); showAddJob = true; }}>+ New Job</button>
-			<button class="btn btn-sm btn-ghost text-base" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh">↻</button>
+			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAddJob = true; }}><Icon name="plus" class="w-4 h-4" /> New Job</button>
+			<button class="btn btn-sm btn-ghost" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh"><Icon name="refresh" class="w-4 h-4" /></button>
 			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
-				{#if theme === 'dark'}☀️{:else}🌙{/if}
+				{#if theme === 'dark'}<Icon name="sun" class="w-5 h-5" />{:else}<Icon name="moon" class="w-5 h-5" />{/if}
 			</button>
 		</div>
 	</div>
@@ -284,10 +285,10 @@
 			<div class="flex gap-1">
 				{#each TYPE_FILTERS as filter}
 					<button
-						class="btn btn-xs {typeFilter === filter.value ? 'btn-secondary' : 'btn-ghost'}"
+						class="btn btn-xs {typeFilter === filter.value ? 'btn-secondary' : 'btn-ghost'} gap-0.5"
 						onclick={() => { hapticLight(); typeFilter = filter.value; }}
 					>
-						{#if filter.value === 'task'}⚒{:else if filter.value === 'review'}🔍{/if}
+						{#if filter.value === 'task'}<Icon name="hammer" class="w-3 h-3" />{:else if filter.value === 'review'}<Icon name="search" class="w-3 h-3" />{/if}
 						{filter.label}
 					</button>
 				{/each}
@@ -324,11 +325,11 @@
 						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleExpand(job.id); }}
 					>
 						<!-- Expand arrow -->
-						<span class="text-sm opacity-50 transition-transform {expandedJob === job.id ? 'rotate-90' : ''}">▶</span>
+						<span class="inline-flex text-sm opacity-50 transition-transform {expandedJob === job.id ? 'rotate-90' : ''}"><Icon name="chevron-right" class="w-3.5 h-3.5" /></span>
 
 						<!-- Type icon -->
-						<span class="text-xs opacity-60">
-							{job.type === 'task' ? '⚒' : '🔍'}
+						<span class="text-xs opacity-60 inline-flex">
+							{#if job.type === 'task'}<Icon name="hammer" class="w-3.5 h-3.5" />{:else}<Icon name="search" class="w-3.5 h-3.5" />{/if}
 						</span>
 
 						<!-- Title -->
@@ -336,15 +337,15 @@
 
 						<!-- Loop indicator -->
 						{#if job.loop_count > 0 || job.parent_job_id}
-							<span class="badge badge-xs badge-outline" title="Loop {job.loop_count}/{job.max_loops}">
-								↻ {job.loop_count}/{job.max_loops}
+							<span class="badge badge-xs badge-outline inline-flex items-center gap-0.5" title="Loop {job.loop_count}/{job.max_loops}">
+								<Icon name="refresh" class="w-2.5 h-2.5" /> {job.loop_count}/{job.max_loops}
 							</span>
 						{/if}
 
 						<!-- Review skill badge -->
 						{#if job.review_skill}
-							<span class="badge badge-xs badge-secondary hidden sm:inline" title="Review skill: {job.review_skill}">
-								🎯 {job.review_skill}
+							<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-0.5" title="Review skill: {job.review_skill}">
+								<Icon name="target" class="w-3 h-3" /> {job.review_skill}
 							</span>
 						{/if}
 
@@ -363,8 +364,8 @@
 						{/if}
 
 						<!-- Status badge -->
-						<span class="badge badge-xs {statusBadge[job.status] ?? 'badge-ghost'}">
-							{statusIcon[job.status] ?? ''} {job.status}
+						<span class="badge badge-xs {statusBadge[job.status] ?? 'badge-ghost'} inline-flex items-center gap-0.5">
+							{#if statusIconName[job.status]}<Icon name={statusIconName[job.status]} class="w-3 h-3" />{/if} {job.status}
 						</span>
 
 						<!-- Timestamp -->
@@ -384,7 +385,7 @@
 								</div>
 								<div class="flex gap-2">
 									<span class="text-base-content/50 w-20 flex-shrink-0">Type</span>
-									<span>{job.type === 'task' ? '⚒ Task' : '🔍 Review'}</span>
+									<span class="inline-flex items-center gap-1">{#if job.type === 'task'}<Icon name="hammer" class="w-3.5 h-3.5" /> Task{:else}<Icon name="search" class="w-3.5 h-3.5" /> Review{/if}</span>
 								</div>
 								{#if job.repo}
 									<div class="flex gap-2 sm:col-span-2">
@@ -481,9 +482,9 @@
 								{/if}
 								{#if job.status === 'failed'}
 									<button
-										class="btn btn-xs btn-warning btn-outline"
+										class="btn btn-xs btn-warning btn-outline gap-1"
 										onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}
-									>↻ Retry</button>
+									><Icon name="refresh" class="w-3 h-3" /> Retry</button>
 								{/if}
 								{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
 									<button
@@ -492,8 +493,8 @@
 									>Delete</button>
 								{/if}
 								{#if job.session_id}
-									<a href="/session/{job.session_id}" class="btn btn-xs btn-ghost">
-										View Session →
+									<a href="/session/{job.session_id}" class="btn btn-xs btn-ghost gap-1">
+										View Session <Icon name="chevron-right" class="w-3 h-3" />
 									</a>
 								{/if}
 							</div>
