@@ -7,6 +7,7 @@
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import AddJobModal from '$lib/components/AddJobModal.svelte';
 	import JobList from '$lib/components/JobList.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import { getContext } from 'svelte';
 	import { browser } from '$app/environment';
 	import logoSvg from '$lib/assets/logo.svg';
@@ -349,7 +350,7 @@
 			<button class="btn btn-sm btn-primary" onclick={() => { hapticMedium(); showNewSession = true; }}>+ New</button>
 			<button class="btn btn-sm btn-ghost text-base" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh">↻</button>
 			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
-				{#if theme === 'dark'}☀️{:else}🌙{/if}
+				{#if theme === 'dark'}<Icon name="sun" class="w-5 h-5" />{:else}<Icon name="moon" class="w-5 h-5" />{/if}
 			</button>
 		</div>
 	</div>
@@ -434,13 +435,13 @@
 								</li>
 								<li>
 									<button onclick={(e) => { e.stopPropagation(); openAddJob('task', group.cwd); }}>
-										<span class="opacity-70">⚒</span>
+										<span class="opacity-70 inline-flex"><Icon name="hammer" class="w-4 h-4" /></span>
 										New Task Job
 									</button>
 								</li>
 								<li>
 									<button onclick={(e) => { e.stopPropagation(); openAddJob('review', group.cwd); }}>
-										<span class="opacity-70">🔍</span>
+										<span class="opacity-70 inline-flex"><Icon name="search" class="w-4 h-4" /></span>
 										New Review Job
 									</button>
 								</li>
@@ -471,7 +472,7 @@
 							title="New task job for {group.shortName}"
 							aria-label="New task job"
 						>
-							<span class="opacity-50 text-xs">⚒ Task</span>
+							<span class="opacity-50 text-xs inline-flex items-center gap-0.5"><Icon name="hammer" class="w-3 h-3" /> Task</span>
 						</button>
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
@@ -479,7 +480,7 @@
 							title="New review job for {group.shortName}"
 							aria-label="New review job"
 						>
-							<span class="opacity-50 text-xs">🔍 Review</span>
+							<span class="opacity-50 text-xs inline-flex items-center gap-0.5"><Icon name="search" class="w-3 h-3" /> Review</span>
 						</button>
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"

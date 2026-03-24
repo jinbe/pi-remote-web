@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { timeAgo } from '$lib/utils';
+	import Icon from './Icon.svelte';
 
 	interface Job {
 		id: string;
@@ -39,8 +40,8 @@
 			<!-- Job info -->
 			<div class="flex-1 pb-3 min-w-0">
 				<div class="flex items-center gap-2 flex-wrap">
-					<span class="text-xs font-mono opacity-50">
-						{job.type === 'task' ? '⚒' : '🔍'}
+					<span class="text-xs font-mono opacity-50 inline-flex">
+						{#if job.type === 'task'}<Icon name="hammer" class="w-3.5 h-3.5" />{:else}<Icon name="search" class="w-3.5 h-3.5" />{/if}
 					</span>
 					<span class="text-sm font-medium truncate">{job.title}</span>
 					{#if job.review_verdict === 'approved'}

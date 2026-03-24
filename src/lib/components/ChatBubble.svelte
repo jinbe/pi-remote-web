@@ -3,6 +3,7 @@
 	import { getArgs, toolSummary, buildDiffLines } from '$lib/tool-display';
 	import { renderMarkdown } from '$lib/markdown';
 	import { hapticLight } from '$lib/haptics';
+	import Icon from './Icon.svelte';
 
 	let { entry }: { entry: AgentMessage } = $props();
 
@@ -183,7 +184,7 @@
 				<!-- Tool results: collapsed by default, show truncated preview -->
 				<details class="group">
 					<summary class="cursor-pointer text-xs font-mono opacity-80">
-						🔧 {entry.message?.toolName || 'tool'}
+						<Icon name="cog" class="w-3.5 h-3.5 inline-block align-text-bottom" /> {entry.message?.toolName || 'tool'}
 						{#if entry.message?.isError}
 							<span class="badge badge-xs badge-error ml-1">error</span>
 						{/if}
@@ -235,7 +236,7 @@
 						<details class="mt-2 -mx-1 rounded bg-base-300/30">
 							<summary class="cursor-pointer text-xs py-1 px-2 flex items-center gap-1.5 min-w-0">
 								<span class="flex-shrink-0">
-									{#if name === 'bash'}⚡{:else if name === 'read'}📄{:else if name === 'edit'}✏️{:else if name === 'write'}💾{:else if name === 'lsp'}🔍{:else}🔧{/if}
+									{#if name === 'bash'}<Icon name="bolt" class="w-3.5 h-3.5" />{:else if name === 'read'}<Icon name="document" class="w-3.5 h-3.5" />{:else if name === 'edit'}<Icon name="pencil" class="w-3.5 h-3.5" />{:else if name === 'write'}<Icon name="save" class="w-3.5 h-3.5" />{:else if name === 'lsp'}<Icon name="search" class="w-3.5 h-3.5" />{:else}<Icon name="cog" class="w-3.5 h-3.5" />{/if}
 								</span>
 								<span class="font-semibold flex-shrink-0">{tc.name}</span>
 								<span class="opacity-60 truncate">{toolSummary(tc)}</span>
