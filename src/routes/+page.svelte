@@ -402,7 +402,7 @@
 	{:else}
 		<div class="flex flex-col gap-4">
 			{#each projectGroups as group (group.cwd)}
-				<div class="rounded-lg border border-base-300 bg-base-200/50 overflow-hidden">
+				<div class="project-card rounded-lg border border-base-300 bg-base-200/50">
 					<!-- Project header -->
 					<div
 						class="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-base-300/50 transition-colors cursor-pointer"
@@ -625,3 +625,14 @@
 	defaultRepo={addJobRepo}
 	onclose={() => (showAddJob = false)}
 />
+
+<style>
+	/* Clip child content to rounded corners by default, but allow overflow
+	   when the kebab dropdown is focused so the menu isn't clipped */
+	.project-card {
+		overflow: hidden;
+	}
+	.project-card:has(.dropdown:focus-within) {
+		overflow: visible;
+	}
+</style>
