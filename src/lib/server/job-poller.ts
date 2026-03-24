@@ -6,7 +6,6 @@ import { claimNextJob, updateJobStatus, type Job } from './job-queue';
 import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt } from './job-prompts';
 import { createSession, sendMessage } from './rpc-manager';
 import { log } from './logger';
-import { homedir } from 'os';
 import { join } from 'path';
 import { mkdirSync, existsSync, rmSync } from 'fs';
 import { execFileSync } from 'child_process';
@@ -14,7 +13,7 @@ import { execFileSync } from 'child_process';
 // --- Constants ---
 
 const POLL_INTERVAL_MS = 30_000;
-const WORKTREE_BASE = process.env.PI_WORKTREE_DIR || join(homedir(), '.pi', 'worktrees');
+const WORKTREE_BASE = process.env.PI_WORKTREE_DIR || join(process.cwd(), '.worktrees');
 
 // --- State ---
 
