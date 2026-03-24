@@ -15,6 +15,9 @@ export function encodeSessionId(filePath: string): string {
 }
 
 export function decodeSessionId(id: string): string {
+	if (!id || id === 'undefined' || id === 'null') {
+		throw new Error('Invalid session ID: missing or empty');
+	}
 	const filePath = Buffer.from(id, 'base64url').toString();
 	const resolved = resolve(filePath);
 	if (!resolved.startsWith(SESSIONS_DIR)) {
