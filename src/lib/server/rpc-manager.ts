@@ -29,6 +29,8 @@ interface ManagedSession {
 	// Write queue for handling socket backpressure on large payloads
 	writeQueue: Uint8Array[];
 	writing: boolean;
+	// Cached commands — fetched once after connect, served instantly thereafter
+	cachedCommands: any[] | null;
 }
 
 interface ActiveSessionRow {
@@ -419,6 +421,7 @@ export async function resumeSession(
 			autoStopTimer: null,
 			writeQueue: [],
 			writing: false,
+			cachedCommands: null,
 		};
 
 		await connectToRelay(managed);
@@ -438,6 +441,9 @@ export async function resumeSession(
 		} catch {
 			/* process may not be ready yet */
 		}
+
+		// Pre-fetch commands in background so they're ready for slash completion
+		prefetchCommands(managed);
 	} catch (err) {
 		deleteActiveStmt.run(sessionId);
 		throw err;
@@ -472,6 +478,7 @@ export async function createSession(cwd: string, model?: string): Promise<string
 		autoStopTimer: null,
 		writeQueue: [],
 		writing: false,
+			cachedCommands: null,
 	};
 
 	await connectToRelay(managed);
@@ -514,6 +521,9 @@ export async function createSession(cwd: string, model?: string): Promise<string
 
 	// Record session created event
 	insertSessionEvent(sessionId, 'session_created');
+
+	// Pre-fetch commands in background so they're ready for slash completion
+	prefetchCommands(managed);
 
 	return sessionId;
 }
@@ -670,7 +680,32 @@ export async function getSessionStats(sessionId: string): Promise<any> {
 export async function getCommands(sessionId: string): Promise<any> {
 	const managed = activeSessions.get(sessionId);
 	if (!managed) throw new Error('Session not active');
-	return sendCommand(managed, { type: 'get_commands' }, COMMANDS_QUERY_TIMEOUT_MS);
+
+	// Return cached commands instantly — commands don't change during a session
+	if (managed.cachedCommands) {
+		return { commands: managed.cachedCommands };
+	}
+
+	// If not cached yet, trigger a background fetch and return empty
+	// The prefetch will populate the cache for the next request
+	prefetchCommands(managed);
+	return { commands: [] };
+}
+
+/**
+ * Pre-fetch and cache commands for a session in the background.
+ * Called after session connect when the agent is idle.
+ */
+function prefetchCommands(managed: ManagedSession): void {
+	if (managed.cachedCommands || managed.isStreaming) return;
+	sendCommand(managed, { type: 'get_commands' }, COMMANDS_QUERY_TIMEOUT_MS)
+		.then((result: any) => {
+			const commands = Array.isArray(result) ? result : (result?.commands ?? []);
+			if (commands.length > 0) {
+				managed.cachedCommands = commands;
+			}
+		})
+		.catch(() => { /* best effort — will retry on next request */ });
 }
 
 // --- Relay lifecycle helpers ---
@@ -752,6 +787,7 @@ export async function recoverActiveSessions() {
 					autoStopTimer: null,
 					writeQueue: [],
 					writing: false,
+			cachedCommands: null,
 				};
 
 				await connectToRelay(managed);
@@ -767,6 +803,7 @@ export async function recoverActiveSessions() {
 					}
 				} catch {}
 
+				prefetchCommands(managed);
 				reconnected++;
 				continue;
 			} catch (err) {
