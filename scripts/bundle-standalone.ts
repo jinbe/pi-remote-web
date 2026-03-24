@@ -34,7 +34,7 @@ for (const a of assetsJson) {
 	assets.set(a.path, Buffer.from(a.content, 'base64'));
 }
 
-const PORT = parseInt(process.env.PORT || '3000');
+const PORT = parseInt(process.env.PORT || '4020');
 const HOST = process.env.HOST || '0.0.0.0';
 
 Bun.serve({

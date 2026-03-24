@@ -4,13 +4,12 @@
  * job-callback extension can report results back.
  */
 import type { Job } from './job-queue';
-
-const DEFAULT_HOST = process.env.PI_REMOTE_HOST || 'http://localhost:5173';
+import { getOrigin } from './origin';
 
 // --- Metadata header injected at the top of every job prompt ---
 
 function metadataHeader(job: Job): string {
-	const callbackUrl = `${DEFAULT_HOST}/api/jobs/${job.id}/complete`;
+	const callbackUrl = `${getOrigin()}/api/jobs/${job.id}/complete`;
 	return [
 		`JOB_ID: ${job.id}`,
 		`CALLBACK_URL: ${callbackUrl}`,
