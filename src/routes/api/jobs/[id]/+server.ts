@@ -5,6 +5,9 @@
  */
 import { json, error } from '@sveltejs/kit';
 import { getJob, updateJobStatus, deleteJob } from '$lib/server/job-queue';
+import { cleanupJob } from '$lib/server/job-completion';
+import { stopSession } from '$lib/server/rpc-manager';
+import { log } from '$lib/server/logger';
 import type { RequestHandler } from './$types';
 
 /** Allowed status transitions — maps current status to valid next statuses. */
@@ -53,6 +56,19 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 
 		const job = updateJobStatus(params.id, updates);
 		if (!job) throw error(404, 'Job not found');
+
+		// Run cleanup when transitioning to a terminal state via PATCH
+		if (updates.status === 'done' || updates.status === 'failed' || updates.status === 'cancelled') {
+			try {
+				cleanupJob(currentJob);
+				if (currentJob.session_id) {
+					await stopSession(currentJob.session_id);
+				}
+			} catch (err) {
+				log.warn('jobs-api', `cleanup after PATCH to ${updates.status} failed for job ${params.id}: ${err}`);
+			}
+		}
+
 		return json({ job });
 	} catch (e: any) {
 		if (e.status) throw e;
