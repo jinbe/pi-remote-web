@@ -679,15 +679,20 @@ export async function getSessionStats(sessionId: string): Promise<any> {
 
 export async function getCommands(sessionId: string): Promise<any> {
 	const managed = activeSessions.get(sessionId);
-	if (!managed) throw new Error('Session not active');
+	if (!managed) {
+		log.warn('commands', `getCommands called for inactive session ${sessionId}`);
+		throw new Error('Session not active');
+	}
 
 	// Return cached commands instantly — commands don't change during a session
 	if (managed.cachedCommands) {
+		log.info('commands', `getCommands cache hit for ${sessionId}: ${managed.cachedCommands.length} commands`);
 		return { commands: managed.cachedCommands };
 	}
 
 	// If not cached yet, trigger a background fetch and return empty
 	// The prefetch will populate the cache for the next request
+	log.info('commands', `getCommands cache miss for ${sessionId} — triggering prefetch`);
 	prefetchCommands(managed);
 	return { commands: [] };
 }
@@ -697,15 +702,26 @@ export async function getCommands(sessionId: string): Promise<any> {
  * Called after session connect when the agent is idle.
  */
 function prefetchCommands(managed: ManagedSession): void {
-	if (managed.cachedCommands || managed.isStreaming) return;
+	if (managed.cachedCommands) {
+		log.info('commands', `prefetch skipped for ${managed.sessionId} — already cached (${managed.cachedCommands.length} commands)`);
+		return;
+	}
+	if (managed.isStreaming) {
+		log.info('commands', `prefetch skipped for ${managed.sessionId} — session is streaming`);
+		return;
+	}
+	log.info('commands', `prefetching commands for ${managed.sessionId}...`);
 	sendCommand(managed, { type: 'get_commands' }, COMMANDS_QUERY_TIMEOUT_MS)
 		.then((result: any) => {
 			const commands = Array.isArray(result) ? result : (result?.commands ?? []);
+			log.info('commands', `prefetch result for ${managed.sessionId}: ${commands.length} commands`);
 			if (commands.length > 0) {
 				managed.cachedCommands = commands;
 			}
 		})
-		.catch(() => { /* best effort — will retry on next request */ });
+		.catch((err: any) => {
+			log.warn('commands', `prefetch failed for ${managed.sessionId}: ${err.message ?? err}`);
+		});
 }
 
 // --- Relay lifecycle helpers ---
