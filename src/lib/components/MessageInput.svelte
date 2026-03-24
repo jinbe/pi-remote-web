@@ -60,9 +60,14 @@
 	let commands = $state<SlashCommand[]>([]);
 	let commandsLoadedForSession = $state<string | null>(null);
 	let commandsFetching = $state(false);
+	let commandsRetryCount = $state(0);
 	let showAutocomplete = $state(false);
 	let selectedIndex = $state(0);
 	let menuRef: HTMLUListElement | undefined = $state();
+
+	const COMMANDS_FETCH_TIMEOUT_MS = 5_000; // short timeout — metadata query, not a long operation
+	const COMMANDS_RETRY_DELAY_MS = 1_500; // auto-retry delay when session wasn't ready
+	const MAX_COMMANDS_RETRIES = 3;
 
 	const filtered = $derived.by(() => {
 		if (!showAutocomplete) return [];
@@ -76,6 +81,7 @@
 		const _id = sessionId;
 		commandsLoadedForSession = null;
 		commands = [];
+		commandsRetryCount = 0;
 	});
 
 	// Fetch commands lazily on first /
@@ -85,17 +91,32 @@
 		if (commandsLoadedForSession === sessionId && commands.length > 0) return;
 		commandsFetching = true;
 		try {
-			const res = await fetch(`/api/sessions/${sessionId}/commands`);
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), COMMANDS_FETCH_TIMEOUT_MS);
+			const res = await fetch(`/api/sessions/${sessionId}/commands`, { signal: controller.signal });
+			clearTimeout(timeoutId);
 			if (res.ok) {
 				const data = await res.json();
-				commands = Array.isArray(data.commands) ? data.commands : [];
-				// Only mark as loaded if we got commands — allows retry when session wasn't ready
-				if (commands.length > 0) {
+				const fetched = Array.isArray(data.commands) ? data.commands : [];
+				commands = fetched;
+				if (fetched.length > 0) {
 					commandsLoadedForSession = sessionId;
+					commandsRetryCount = 0;
+					// Refresh autocomplete now that commands arrived
+					updateAutocomplete();
+				} else if (commandsRetryCount < MAX_COMMANDS_RETRIES) {
+					// Session may not be ready — schedule an automatic retry
+					commandsRetryCount++;
+					setTimeout(() => {
+						// Only retry if still on the same session and still no commands
+						if (commandsLoadedForSession !== sessionId) {
+							ensureCommands();
+						}
+					}, COMMANDS_RETRY_DELAY_MS);
 				}
 			}
 		} catch {
-			/* ignore — will retry on next / keystroke */
+			/* ignore — will retry on next / keystroke or via auto-retry */
 		} finally {
 			commandsFetching = false;
 		}
@@ -550,13 +571,17 @@
 		}
 	}
 
-	async function handleInput() {
+	function handleInput() {
 		// Clear error when user starts typing again
 		if (sendError) sendError = null;
-		if (message.startsWith('/')) {
-			await ensureCommands();
-		}
+		// Update autocomplete state synchronously so the dropdown appears instantly
+		// when commands are already cached
 		updateAutocomplete();
+		// Fire-and-forget: fetch commands in the background if needed.
+		// When they arrive, ensureCommands calls updateAutocomplete() again.
+		if (message.startsWith('/')) {
+			ensureCommands();
+		}
 	}
 
 	function scrollSelectedIntoView() {

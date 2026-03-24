@@ -23,6 +23,27 @@ function normaliseClientResponse(data: any): any[] {
 	return Array.isArray(data.commands) ? data.commands : [];
 }
 
+/**
+ * Simulates the autocomplete visibility logic from MessageInput.svelte.
+ * Returns true when the dropdown should be visible.
+ */
+function shouldShowAutocomplete(message: string): boolean {
+	return message.startsWith('/') && !message.includes(' ') && message.length >= 1;
+}
+
+/**
+ * Simulates the filtered commands derivation from MessageInput.svelte.
+ */
+function filterCommands(
+	showAutocomplete: boolean,
+	message: string,
+	commands: Array<{ name: string }>
+): Array<{ name: string }> {
+	if (!showAutocomplete) return [];
+	const input = message.slice(1).toLowerCase();
+	return commands.filter((c) => c.name.toLowerCase().startsWith(input));
+}
+
 describe('commands API normalisation', () => {
 	describe('server-side (RPC result → response)', () => {
 		it('handles an array result directly', () => {
@@ -141,6 +162,86 @@ describe('commands API normalisation', () => {
 
 		it('returns empty array for unexpected RPC result', () => {
 			expect(roundTrip('error')).toEqual([]);
+		});
+	});
+
+	describe('autocomplete visibility logic', () => {
+		it('shows autocomplete for bare slash', () => {
+			expect(shouldShowAutocomplete('/')).toBe(true);
+		});
+
+		it('shows autocomplete for partial command', () => {
+			expect(shouldShowAutocomplete('/pl')).toBe(true);
+		});
+
+		it('shows autocomplete for full command without space', () => {
+			expect(shouldShowAutocomplete('/plan')).toBe(true);
+		});
+
+		it('hides autocomplete after space (command accepted)', () => {
+			expect(shouldShowAutocomplete('/plan ')).toBe(false);
+		});
+
+		it('hides autocomplete for command with arguments', () => {
+			expect(shouldShowAutocomplete('/plan something')).toBe(false);
+		});
+
+		it('hides autocomplete for empty message', () => {
+			expect(shouldShowAutocomplete('')).toBe(false);
+		});
+
+		it('hides autocomplete for non-slash message', () => {
+			expect(shouldShowAutocomplete('hello')).toBe(false);
+		});
+
+		it('hides autocomplete for message with slash mid-text', () => {
+			expect(shouldShowAutocomplete('hello /plan')).toBe(false);
+		});
+	});
+
+	describe('command filtering', () => {
+		const commands = [
+			{ name: 'plan' },
+			{ name: 'compact' },
+			{ name: 'help' },
+			{ name: 'prompt' },
+		];
+
+		it('returns all commands for bare slash', () => {
+			const result = filterCommands(true, '/', commands);
+			expect(result).toHaveLength(4);
+		});
+
+		it('filters by prefix', () => {
+			const result = filterCommands(true, '/p', commands);
+			expect(result).toHaveLength(2);
+			expect(result.map(c => c.name)).toEqual(['plan', 'prompt']);
+		});
+
+		it('filters case-insensitively', () => {
+			const result = filterCommands(true, '/P', commands);
+			expect(result).toHaveLength(2);
+		});
+
+		it('returns empty when no match', () => {
+			const result = filterCommands(true, '/xyz', commands);
+			expect(result).toHaveLength(0);
+		});
+
+		it('returns empty when autocomplete is hidden', () => {
+			const result = filterCommands(false, '/', commands);
+			expect(result).toHaveLength(0);
+		});
+
+		it('returns empty when commands list is empty', () => {
+			const result = filterCommands(true, '/', []);
+			expect(result).toHaveLength(0);
+		});
+
+		it('matches exact command name', () => {
+			const result = filterCommands(true, '/plan', commands);
+			expect(result).toHaveLength(1);
+			expect(result[0].name).toBe('plan');
 		});
 	});
 });

@@ -47,6 +47,7 @@ interface ActiveSessionRow {
 
 const MAX_STREAMING_TEXT = 100 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
+const COMMANDS_QUERY_TIMEOUT_MS = 5_000; // shorter timeout for metadata queries like get_commands
 const STATE_CHECK_TIMEOUT_MS = 5_000; // shorter timeout for pre-send state checks
 // prompt responds immediately in pi's RPC mode (fire-and-forget), so use a
 // shorter timeout. If the command doesn't reach pi within 10s something is wrong.
@@ -669,7 +670,7 @@ export async function getSessionStats(sessionId: string): Promise<any> {
 export async function getCommands(sessionId: string): Promise<any> {
 	const managed = activeSessions.get(sessionId);
 	if (!managed) throw new Error('Session not active');
-	return sendCommand(managed, { type: 'get_commands' });
+	return sendCommand(managed, { type: 'get_commands' }, COMMANDS_QUERY_TIMEOUT_MS);
 }
 
 // --- Relay lifecycle helpers ---
