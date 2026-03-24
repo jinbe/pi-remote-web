@@ -63,6 +63,27 @@ bun run package
 ./dist/pi-dashboard
 ```
 
+## Job Queue & Autonomous Workflow
+
+pi-remote-web includes a job queue that dispatches tasks to Pi sessions and
+runs an autonomous **task → review → fix** loop until the work is approved.
+
+See [`sample-pi-config/`](sample-pi-config/) for the Pi configuration files
+(AGENTS.md, review skill, extension) that make this workflow tick. Copy and
+adapt them to your own projects.
+
+### Quick Setup
+
+```sh
+# Install the job callback extension (symlinks into ~/.pi/agent/extensions/)
+./scripts/setup-hooks.sh
+
+# Copy the sample review skill
+cp -r sample-pi-config/skills/review ~/.pi/agent/skills/review
+```
+
+Then create jobs via the dashboard or the API — the poller handles the rest.
+
 ## Project Structure
 
 ```
