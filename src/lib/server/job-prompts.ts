@@ -24,6 +24,13 @@ export function buildTaskPrompt(job: Job): string {
 	const header = metadataHeader(job);
 	const parts = [header];
 
+	// When max_loops === 0, the task runs autonomously without an external
+	// review loop. Include full end-to-end instructions so the agent
+	// self-reviews before creating the PR.
+	if (job.max_loops === 0) {
+		return buildAutonomousTaskPrompt(job, header);
+	}
+
 	parts.push(`# Task: ${job.title}`);
 	parts.push('');
 
@@ -52,6 +59,63 @@ export function buildTaskPrompt(job: Job): string {
 	parts.push('PR_URL: <the full PR URL>');
 	parts.push('');
 	parts.push('Commit with conventional commits. Run tests and typecheck before pushing.');
+
+	return parts.join('\n');
+}
+
+// --- Autonomous task prompt (no review loop — agent self-reviews) ---
+
+function buildAutonomousTaskPrompt(job: Job, header: string): string {
+	const parts = [header];
+
+	parts.push(`# Task: ${job.title}`);
+	parts.push('');
+
+	if (job.description) {
+		parts.push(job.description);
+		parts.push('');
+	}
+
+	if (job.issue_url) {
+		parts.push(`Issue: ${job.issue_url}`);
+		parts.push('');
+	}
+
+	parts.push('## Process');
+	parts.push('');
+	parts.push('1. **Understand** — read the task, relevant code, and project conventions (AGENTS.md, CLAUDE.md, etc.)');
+
+	if (job.branch) {
+		parts.push(`2. **Branch** — check out the branch: \`${job.branch}\``);
+	} else {
+		parts.push('2. **Branch** — create a feature branch: `git checkout -b <type>/<short-description>` (e.g. `feat/add-caching`, `fix/auth-redirect`)');
+	}
+
+	if (job.target_branch) {
+		parts.push(`   Target branch: ${job.target_branch}`);
+	}
+
+	parts.push('3. **Implement** — make the changes, following existing patterns and conventions');
+	parts.push('4. **Test** — write tests for your changes, then run the full test suite. Fix any failures.');
+	parts.push('5. **Typecheck** — run the project\'s type checker if available. Fix all errors.');
+	parts.push('6. **Self-review** — carefully review your own changes. Check for:');
+	parts.push('   - Correctness and edge cases');
+	parts.push('   - Test coverage and quality');
+	parts.push('   - Security concerns');
+	parts.push('   - Code style and naming consistency');
+	parts.push('   - No leftover debug code or TODOs');
+	parts.push('7. **Commit** — use conventional commit format: `feat: ...`, `fix: ...`, `refactor: ...`');
+	parts.push('8. **Push** — `git push -u origin <branch>`');
+	parts.push('9. **PR** — create a pull request with `gh pr create --fill`');
+	parts.push('');
+	parts.push('## Rules');
+	parts.push('');
+	parts.push('- Never commit to main — always work on a feature branch');
+	parts.push('- All tests must pass before creating the PR');
+	parts.push('- Use Australian English in code comments and PR descriptions');
+	parts.push('');
+	parts.push('When done, output exactly:');
+	parts.push('PR_URL: <the full PR URL>');
 
 	return parts.join('\n');
 }
