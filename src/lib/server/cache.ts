@@ -70,6 +70,47 @@ export function getDb(): Database {
 			FOREIGN KEY (session_id) REFERENCES active_sessions(session_id)
 		)`);
 
+		db.run(`CREATE TABLE IF NOT EXISTS jobs (
+			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+			type TEXT NOT NULL CHECK (type IN ('task', 'review')),
+			status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'claimed', 'running', 'done', 'failed', 'cancelled')),
+			priority INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+			claimed_at TEXT,
+			completed_at TEXT,
+			title TEXT NOT NULL,
+			description TEXT,
+			repo TEXT,
+			branch TEXT,
+			issue_url TEXT,
+			target_branch TEXT DEFAULT 'main',
+			pr_url TEXT,
+			pr_number INTEGER,
+			review_verdict TEXT CHECK (review_verdict IS NULL OR review_verdict IN ('approved', 'changes_requested')),
+			parent_job_id TEXT REFERENCES jobs(id),
+			loop_count INTEGER NOT NULL DEFAULT 0,
+			max_loops INTEGER NOT NULL DEFAULT 5,
+			session_id TEXT,
+			worktree_path TEXT,
+			result_summary TEXT,
+			error TEXT,
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			max_retries INTEGER NOT NULL DEFAULT 2,
+			callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+			review_skill TEXT
+		)`);
+
+		// Migrations: add columns if missing (from older schema)
+		try { db.run('ALTER TABLE jobs ADD COLUMN callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16))))'); } catch {}
+		try { db.run('ALTER TABLE jobs ADD COLUMN review_skill TEXT'); } catch {}
+
+		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_parent ON jobs(parent_job_id)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_repo ON jobs(repo)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at)');
+
 		db.run('CREATE INDEX IF NOT EXISTS idx_meta_mtime ON session_meta(mtime_ms)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_meta_last_modified ON session_meta(last_modified)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_active_status ON active_sessions(status)');

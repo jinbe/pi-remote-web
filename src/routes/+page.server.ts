@@ -2,6 +2,8 @@ import { listSessions } from '$lib/server/session-scanner';
 import { getActiveSessionIds, getStreamingState } from '$lib/server/rpc-manager';
 import { getFavoriteProjects, getAllDevCommands } from '$lib/server/cache';
 import { getRunningDevServerCwds } from '$lib/server/dev-server-manager';
+import { getJobs } from '$lib/server/job-queue';
+import { isRunning as isPollerRunning } from '$lib/server/job-poller';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async () => {
@@ -13,6 +15,8 @@ export const load: PageServerLoad = async () => {
 	const favoriteProjects = [...getFavoriteProjects()];
 	const devCommands = Object.fromEntries(getAllDevCommands());
 	const runningDevServers = getRunningDevServerCwds();
+	const jobs = getJobs();
+	const pollerRunning = isPollerRunning();
 
 	return {
 		sessions: sessions.map((s) => ({
@@ -23,6 +27,8 @@ export const load: PageServerLoad = async () => {
 		streamingSessionIds,
 		favoriteProjects,
 		devCommands,
-		runningDevServers
+		runningDevServers,
+		jobs,
+		pollerRunning,
 	};
 };
