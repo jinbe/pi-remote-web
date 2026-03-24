@@ -59,7 +59,7 @@ describe('job-completion', () => {
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/1');
 		});
 
-		it('delegates to state machine — fire-and-forget goes straight to done', async () => {
+		it('delegates to state machine — fire-and-forget goes to reviewing (not done)', async () => {
 			const job = createJob({ title: 'Quick task', max_loops: 0 });
 			updateJobStatus(job.id, { status: 'running' });
 
@@ -70,7 +70,7 @@ describe('job-completion', () => {
 			});
 
 			const updated = getJob(job.id)!;
-			expect(updated.status).toBe('done');
+			expect(updated.status).toBe('reviewing');
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/2');
 		});
 

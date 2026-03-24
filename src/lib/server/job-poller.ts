@@ -232,31 +232,16 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 
 		// State machine transitions
 		if (job.status === 'running') {
-			// Task phase complete
+			// Task phase complete — always transition to reviewing
 			const prUrl = prUrlMatch?.[1];
 
-			// Skip review if max_loops === 0 (fire-and-forget task)
-			if (job.max_loops === 0) {
-				updateJobStatus(jobId, {
-					status: 'done',
-					pr_url: prUrl,
-				});
-
-				await cleanupJobAfterCompletion(job);
-				cleanupSubscription(jobId);
-
-				log.info('job-poller', `job ${jobId} completed (no review — max_loops=0)`);
-				return;
-			}
-
-			// Transition to review
 			updateJobStatus(jobId, {
 				status: 'reviewing',
 				pr_url: prUrl,
 			});
 
-			// Send review prompt to the SAME session
-			if (job.session_id) {
+			// Send review prompt if review loop is enabled (max_loops > 0)
+			if (job.max_loops > 0 && job.session_id) {
 				try {
 					const reviewPrompt = buildReviewPrompt(job);
 					await sendMessage(job.session_id, reviewPrompt);
@@ -265,7 +250,7 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 				}
 			}
 			
-			log.info('job-poller', `job ${jobId} transitioned running → reviewing`);
+			log.info('job-poller', `job ${jobId} transitioned running → reviewing${job.max_loops === 0 ? ' (awaiting manual review)' : ''}`);
 			
 		} else if (job.status === 'reviewing') {
 			// Review phase complete → check verdict
