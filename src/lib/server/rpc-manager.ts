@@ -58,10 +58,15 @@ const STEER_TIMEOUT_MS = 60_000;
 const RELAY_SCRIPT = join(__dirname, 'pi-relay.ts');
 const SOCKET_DIR = join(tmpdir(), 'pi-remote-web');
 
-// --- State ---
+// --- State (stored on globalThis to survive Vite HMR module re-evaluation) ---
 
-const activeSessions = new Map<string, ManagedSession>();
-const resumingSessionIds = new Set<string>();
+const g = globalThis as any;
+if (!g.__piActiveSessions) g.__piActiveSessions = new Map<string, ManagedSession>();
+if (!g.__piResumingSessionIds) g.__piResumingSessionIds = new Set<string>();
+if (!g.__piLastEventUpdate) g.__piLastEventUpdate = new Map<string, number>();
+
+const activeSessions: Map<string, ManagedSession> = g.__piActiveSessions;
+const resumingSessionIds: Set<string> = g.__piResumingSessionIds;
 
 // --- SQLite persistence ---
 
@@ -88,7 +93,7 @@ try { mkdirSync(SOCKET_DIR, { recursive: true }); } catch {}
 
 // --- Throttled heartbeat ---
 
-const lastEventUpdate = new Map<string, number>();
+const lastEventUpdate: Map<string, number> = g.__piLastEventUpdate;
 function updateEventThrottled(sessionId: string) {
 	const now = Date.now();
 	if (now - (lastEventUpdate.get(sessionId) ?? 0) > 5000) {
