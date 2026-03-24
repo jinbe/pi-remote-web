@@ -33,6 +33,9 @@ vite.config.ts.timestamp-*
 *.db
 *.sqlite
 
+# Job worktrees
+.worktrees/
+
 # Test artifacts
 test-results/
 playwright-report/
