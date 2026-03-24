@@ -1,14 +1,16 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import { getContext } from 'svelte';
 	import logoSvg from '$lib/assets/logo.svg';
 
 	let { data, form } = $props();
 
-	const { theme } = getContext<{ theme: 'dark' | 'light'; toggleTheme: () => void }>('theme');
-	const daisyTheme = $derived(theme === 'dark' ? 'pi-dark' : 'pi-light');
-
 	let submitting = $state(false);
+	let passwordInput = $state<HTMLInputElement | undefined>();
+
+	// Focus the password field on mount without using the autofocus attribute
+	$effect(() => {
+		passwordInput?.focus();
+	});
 </script>
 
 <svelte:head>
@@ -43,12 +45,12 @@
 
 				<label class="form-control w-full">
 					<input
+						bind:this={passwordInput}
 						type="password"
 						name="password"
 						placeholder="Password"
 						class="input input-bordered w-full"
 						required
-						autofocus
 					/>
 				</label>
 
