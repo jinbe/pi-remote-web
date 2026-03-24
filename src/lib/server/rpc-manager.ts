@@ -221,6 +221,9 @@ function processData(managed: ManagedSession, raw: Buffer | Uint8Array) {
 				}
 			}
 			if (parsed.type === 'agent_end') {
+				// Capture accumulated text before clearing — subscribers may need it
+				// (e.g. job-poller extracting PR_URL / VERDICT from the final message)
+				parsed._lastAssistantText = managed.streamingAssistantText;
 				managed.isStreaming = false;
 				managed.lastAgentStartTime = null;
 				managed.streamingAssistantText = '';

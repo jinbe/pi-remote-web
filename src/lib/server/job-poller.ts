@@ -2,9 +2,10 @@
  * Background poller that claims queued jobs and dispatches them to Pi sessions.
  * Creates git worktrees for isolation and spawns sessions via rpc-manager.
  */
-import { claimNextJob, updateJobStatus, type Job } from './job-queue';
+import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
 import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt } from './job-prompts';
-import { createSession, sendMessage } from './rpc-manager';
+import { handleCompletion } from './job-completion';
+import { createSession, sendMessage, subscribe } from './rpc-manager';
 import { log } from './logger';
 import { join } from 'path';
 import { mkdirSync, existsSync, rmSync } from 'fs';
@@ -15,10 +16,17 @@ import { execFileSync } from 'child_process';
 const POLL_INTERVAL_MS = 30_000;
 const WORKTREE_BASE = process.env.PI_WORKTREE_DIR || join(process.cwd(), '.worktrees');
 
+/** Patterns for extracting result markers from assistant text. */
+const PR_URL_PATTERN = /PR_URL:\s*(\S+)/;
+const VERDICT_PATTERN = /VERDICT:\s*(approved|changes_requested)/;
+
 // --- State ---
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let isPolling = false;
+
+/** Active session subscriptions keyed by job ID — used to unsubscribe on cleanup. */
+const sessionUnsubscribers = new Map<string, () => void>();
 
 // --- Public API ---
 
@@ -128,6 +136,10 @@ async function dispatchJob(job: Job): Promise<void> {
 		// Update job with session ID
 		updateJobStatus(job.id, { session_id: sessionId });
 
+		// Subscribe to session events so we can detect agent_end and trigger
+		// job completion server-side — the extension callback is a fallback.
+		subscribeToJobSession(job.id, sessionId);
+
 		// Build and send the appropriate prompt
 		const prompt = buildPromptForJob(job);
 		await sendMessage(sessionId, prompt);
@@ -140,6 +152,95 @@ async function dispatchJob(job: Job): Promise<void> {
 			error: `Dispatch failed: ${err.message}`,
 			worktree_path: worktreePath ?? undefined,
 		});
+	}
+}
+
+// --- Session subscription for server-side job completion ---
+
+/**
+ * Subscribe to a job's Pi session to detect agent_end events.
+ * When the agent finishes, we extract result markers from the last assistant
+ * message and call handleCompletion directly — no reliance on the extension.
+ */
+function subscribeToJobSession(jobId: string, sessionId: string): void {
+	// Accumulated assistant text across all messages in the session
+	let fullAssistantText = '';
+
+	const unsubscribe = subscribe(sessionId, (event: any) => {
+		// Accumulate assistant text deltas so we have the full conversation
+		if (event.type === 'message_update') {
+			const ame = event.assistantMessageEvent;
+			if (ame?.type === 'text_delta') {
+				fullAssistantText += ame.delta;
+			}
+		}
+
+		if (event.type === 'agent_end') {
+			// Include any text captured in _lastAssistantText (the final message)
+			const lastText = event._lastAssistantText ?? '';
+			const combinedText = fullAssistantText + '\n' + lastText;
+
+			handleJobAgentEnd(jobId, combinedText);
+			cleanupSubscription(jobId);
+		}
+
+		if (event.type === 'session_ended') {
+			// Session ended without agent_end — treat as completion
+			handleJobAgentEnd(jobId, fullAssistantText);
+			cleanupSubscription(jobId);
+		}
+	});
+
+	sessionUnsubscribers.set(jobId, unsubscribe);
+}
+
+/**
+ * Remove the session subscription for a job.
+ */
+function cleanupSubscription(jobId: string): void {
+	const unsubscribe = sessionUnsubscribers.get(jobId);
+	if (unsubscribe) {
+		unsubscribe();
+		sessionUnsubscribers.delete(jobId);
+	}
+}
+
+/**
+ * Handle agent_end for a job session. Extracts PR_URL and VERDICT from the
+ * accumulated assistant text and calls handleCompletion.
+ *
+ * Guards against double-completion — if the extension callback already
+ * completed the job, this is a no-op.
+ */
+export function handleJobAgentEnd(jobId: string, assistantText: string): void {
+	try {
+		// Re-fetch the job to check current status — the extension callback
+		// may have already completed it.
+		const job = getJob(jobId);
+		if (!job) {
+			log.warn('job-poller', `agent_end for unknown job ${jobId}`);
+			return;
+		}
+
+		if (job.status !== 'running' && job.status !== 'claimed') {
+			log.info('job-poller', `agent_end for job ${jobId} but status is already '${job.status}' — skipping (likely handled by extension callback)`);
+			return;
+		}
+
+		// Extract result markers from assistant text
+		const prUrlMatch = assistantText.match(PR_URL_PATTERN);
+		const verdictMatch = assistantText.match(VERDICT_PATTERN);
+
+		log.info('job-poller', `agent_end for job ${jobId} — prUrl=${prUrlMatch?.[1] ?? 'none'}, verdict=${verdictMatch?.[1] ?? 'none'}`);
+
+		handleCompletion(jobId, {
+			jobId,
+			status: 'done',
+			prUrl: prUrlMatch?.[1],
+			verdict: verdictMatch?.[1] as 'approved' | 'changes_requested' | undefined,
+		});
+	} catch (err) {
+		log.error('job-poller', `failed to handle agent_end for job ${jobId}: ${err}`);
 	}
 }
 
