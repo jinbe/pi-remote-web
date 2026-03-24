@@ -92,7 +92,9 @@ export async function pollOnce(): Promise<void> {
 // --- Job dispatch ---
 
 /**
- * Set up a worktree, create a Pi session, and send the appropriate prompt.
+ * Set up a worktree (for task jobs), create a Pi session, and send the
+ * appropriate prompt. Review jobs run in the repo's main cwd — they only
+ * need to read the PR diff, not modify files.
  */
 async function dispatchJob(job: Job): Promise<void> {
 	let worktreePath: string | null = null;
@@ -104,17 +106,24 @@ async function dispatchJob(job: Job): Promise<void> {
 			throw new Error(`Repository path not found: ${repoPath}`);
 		}
 
-		// Create a worktree for isolation
-		worktreePath = createWorktree(repoPath, job);
+		let sessionCwd: string;
 
-		// Update job with worktree path and mark as running
-		updateJobStatus(job.id, {
-			status: 'running',
-			worktree_path: worktreePath,
-		});
+		if (job.type === 'review') {
+			// Reviews run in the repo's main cwd — no worktree needed
+			sessionCwd = repoPath;
+			updateJobStatus(job.id, { status: 'running' });
+		} else {
+			// Task jobs get an isolated worktree
+			worktreePath = createWorktree(repoPath, job);
+			sessionCwd = worktreePath;
+			updateJobStatus(job.id, {
+				status: 'running',
+				worktree_path: worktreePath,
+			});
+		}
 
-		// Create a Pi session in the worktree directory
-		const sessionId = await createSession(worktreePath);
+		// Create a Pi session in the appropriate directory
+		const sessionId = await createSession(sessionCwd);
 
 		// Update job with session ID
 		updateJobStatus(job.id, { session_id: sessionId });
