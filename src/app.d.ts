@@ -3,7 +3,10 @@
 declare global {
 	namespace App {
 		// interface Error {}
-		// interface Locals {}
+		interface Locals {
+			/** Whether the current request has a valid auth session. */
+			authenticated?: boolean;
+		}
 		// interface PageData {}
 		// interface PageState {}
 		// interface Platform {}
