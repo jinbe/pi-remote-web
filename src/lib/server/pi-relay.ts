@@ -39,9 +39,48 @@ const proc = Bun.spawn([piBin, '--mode', 'rpc', ...piArgs], {
 	stderr: 'pipe',
 });
 
-// Track connected clients
-const clients = new Set<Socket<undefined>>();
+// --- Per-client write queue to handle backpressure ---
+
+interface ClientState {
+	socket: Socket<undefined>;
+	writeQueue: Uint8Array[];
+	writing: boolean;
+}
+
+const clients = new Map<Socket<undefined>, ClientState>();
 let dead = false;
+
+function drainClient(state: ClientState): void {
+	if (!state.writeQueue.length) {
+		state.writing = false;
+		return;
+	}
+	state.writing = true;
+
+	while (state.writeQueue.length > 0) {
+		const chunk = state.writeQueue[0];
+		const written = state.socket.write(chunk);
+		if (written === 0) {
+			// Buffer full — wait for drain callback
+			return;
+		}
+		if (written < chunk.length) {
+			// Partial write — re-queue remainder
+			state.writeQueue[0] = chunk.slice(written);
+			return;
+		}
+		// Full chunk written
+		state.writeQueue.shift();
+	}
+	state.writing = false;
+}
+
+function writeToClient(state: ClientState, data: Uint8Array): void {
+	state.writeQueue.push(data);
+	if (!state.writing) {
+		drainClient(state);
+	}
+}
 
 // Read pi stdout and broadcast to all clients
 const reader = (proc.stdout as ReadableStream).getReader();
@@ -53,11 +92,11 @@ async function pumpStdout() {
 		if (done) break;
 		const chunk = decoder.decode(value, { stream: true });
 		const encoded = new TextEncoder().encode(chunk);
-		for (const client of [...clients]) {
+		for (const [, state] of clients) {
 			try {
-				client.write(encoded);
+				writeToClient(state, encoded);
 			} catch {
-				clients.delete(client);
+				clients.delete(state.socket);
 			}
 		}
 	}
@@ -133,8 +172,14 @@ const server = Bun.listen({
 			}
 		},
 		open(socket) {
-			clients.add(socket);
+			const state: ClientState = { socket, writeQueue: [], writing: false };
+			clients.set(socket, state);
 			clientBuffers.set(socket, '');
+		},
+		drain(socket) {
+			// Socket ready for more data — continue draining the write queue
+			const state = clients.get(socket);
+			if (state) drainClient(state);
 		},
 		close(socket) {
 			clients.delete(socket);
@@ -156,10 +201,10 @@ proc.exited.then((code) => {
 	dead = true;
 	const msg = JSON.stringify({ type: 'session_ended', exitCode: code, signal: signalCode }) + '\n';
 	const encoded = new TextEncoder().encode(msg);
-	for (const client of [...clients]) {
+	for (const [, state] of clients) {
 		try {
-			client.write(encoded);
-			client.end();
+			state.socket.write(encoded);
+			state.socket.end();
 		} catch {}
 	}
 	server.stop();

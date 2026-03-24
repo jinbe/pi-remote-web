@@ -94,6 +94,39 @@ const getAllActiveStmt = db.query('SELECT * FROM active_sessions');
 import { mkdirSync } from 'fs';
 try { mkdirSync(SOCKET_DIR, { recursive: true }); } catch {}
 
+// --- HMR socket recovery ---
+// When Vite HMR reloads this module, the globalThis map survives but the
+// Bun socket objects in ManagedSession become stale (closures from the old
+// module are garbage collected). Reconnect any sessions with dead sockets.
+
+if (activeSessions.size > 0) {
+	log.info('hmr', `module reloaded — checking ${activeSessions.size} active session(s) for stale sockets`);
+	(async () => {
+		for (const [sessionId, managed] of activeSessions) {
+			// Test the socket by trying a quick get_state
+			try {
+				if (!managed.socket) throw new Error('no socket');
+				await sendCommand(managed, { type: 'get_state' }, 2_000);
+			} catch {
+				log.info('hmr', `reconnecting stale socket for session ${sessionId}`);
+				try {
+					managed.socket = null;
+					managed.buffer = '';
+					managed.pendingCommands = new Map();
+					managed.writeQueue = [];
+					managed.writing = false;
+					managed.cachedCommands = null;
+					await connectToRelay(managed);
+					prefetchCommands(managed);
+					log.info('hmr', `reconnected session ${sessionId}`);
+				} catch (err) {
+					log.error('hmr', `failed to reconnect session ${sessionId}: ${err}`);
+				}
+			}
+		}
+	})();
+}
+
 // --- Throttled heartbeat ---
 
 const lastEventUpdate: Map<string, number> = g.__piLastEventUpdate;
