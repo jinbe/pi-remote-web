@@ -300,7 +300,8 @@ function extractVerdict(
 /**
  * Handle agent_end for a job session. Implements the state machine:
  * - running (review job) → done: extract verdict directly
- * - running (task job) → reviewing: extract PR_URL, send review prompt
+ * - running (task job) → reviewing: extract PR_URL, stop session, wait for manual done
+ * - running (task job, max_loops > 0) → reviewing: extract PR_URL, send review prompt
  * - reviewing → done (approved): cleanup
  * - reviewing → running (changes_requested): send fix prompt or done if loop cap reached
  */
@@ -355,28 +356,15 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 			// Task jobs below
 			const prUrl = prUrlMatch?.[1];
 
-			// Fire-and-forget jobs (max_loops=0): having a PR is as good as done —
-			// skip the reviewing phase entirely since no verdict check will follow.
-			if (job.max_loops === 0 && prUrl) {
-				updateJobStatus(jobId, {
-					status: 'done',
-					pr_url: prUrl,
-				});
-
-				await cleanupJobAfterCompletion(job);
-				cleanupSubscription(jobId);
-
-				log.info('job-poller', `job ${jobId} fire-and-forget with PR → done, cleaned up`);
-				return;
-			}
-
-			// Jobs with review loops: transition to reviewing
+			// All task jobs transition to reviewing when the agent ends.
+			// Worktrees are kept until the job is manually marked as done.
 			updateJobStatus(jobId, {
 				status: 'reviewing',
 				pr_url: prUrl,
 			});
 
-			// Send review prompt if review loop is enabled (max_loops > 0)
+			// Jobs with review loops (max_loops > 0): send the review prompt
+			// to continue the automated review cycle in the same session.
 			if (job.max_loops > 0 && job.session_id) {
 				try {
 					const reviewPrompt = buildReviewPrompt(job);
@@ -384,9 +372,21 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 				} catch (err) {
 					log.warn('job-poller', `failed to send review prompt for job ${jobId}: ${err}`);
 				}
+				log.info('job-poller', `job ${jobId} running → reviewing (review loop active)`);
+			} else {
+				// Fire-and-forget (max_loops=0): stop session, keep worktree.
+				// The user will manually review the PR and mark the job as done.
+				cleanupSubscription(jobId);
+				if (job.session_id) {
+					try {
+						await stopSession(job.session_id);
+						log.info('job-poller', `stopped session ${job.session_id} for fire-and-forget job ${jobId}`);
+					} catch (err) {
+						log.warn('job-poller', `failed to stop session for job ${jobId}: ${err}`);
+					}
+				}
+				log.info('job-poller', `job ${jobId} running → reviewing (fire-and-forget, awaiting manual done)`);
 			}
-			
-			log.info('job-poller', `job ${jobId} transitioned running → reviewing`);
 			
 		} else if (job.status === 'reviewing') {
 			// Review phase complete → check verdict (exact match first, then fuzzy fallback)

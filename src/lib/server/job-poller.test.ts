@@ -108,7 +108,7 @@ describe('job-poller', () => {
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/99');
 		});
 
-		it('goes straight to done when max_loops is 0 and PR exists (fire-and-forget)', async () => {
+		it('transitions to reviewing when max_loops is 0 and PR exists (fire-and-forget)', async () => {
 			const job = createTestJob({
 				title: 'Fire and forget task',
 				repo: '/repo',
@@ -119,7 +119,7 @@ describe('job-poller', () => {
 			await handleJobAgentEnd(job.id, 'Done!\nPR_URL: https://github.com/org/repo/pull/7');
 
 			const updated = getJob(job.id)!;
-			expect(updated.status).toBe('done');
+			expect(updated.status).toBe('reviewing');
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/7');
 		});
 
