@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { hapticLight, hapticMedium } from '$lib/haptics';
 	import { uniqueId } from '$lib/utils';
+	import Icon from './Icon.svelte';
 
 	interface SlashCommand {
 		name: string;
@@ -683,7 +684,7 @@
 						/>
 					{:else}
 						<div class="h-16 w-16 rounded-lg border border-base-300 bg-base-300 flex items-center justify-center text-xs text-base-content-subtle">
-							📎
+							<Icon name="paperclip" class="w-5 h-5" />
 						</div>
 					{/if}
 					<button
@@ -767,7 +768,7 @@
 						{#if streaming}
 							<li>
 								<button onclick={handleSteer} disabled={!canSend}>
-									<span>⚡ Steer</span>
+									<span class="inline-flex items-center gap-1"><Icon name="bolt" class="w-3.5 h-3.5" /> Steer</span>
 									<span class="text-[10px] opacity-50">interrupt</span>
 								</button>
 							</li>

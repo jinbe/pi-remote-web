@@ -2,6 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { hapticLight, hapticMedium } from '$lib/haptics';
 	import { timeAgo } from '$lib/utils';
+	import Icon from './Icon.svelte';
 	import JobChain from './JobChain.svelte';
 
 	interface Job {
@@ -37,10 +38,16 @@
 		cancelled: 'badge-ghost opacity-50',
 	};
 
-	const statusIcon: Record<string, string> = {
-		queued: '⏳',
-		claimed: '🔒',
-		running: '⚡',
+	const statusIconName: Record<string, string> = {
+		queued: 'hourglass',
+		claimed: 'lock',
+		running: 'bolt',
+		done: '',
+		failed: '',
+		cancelled: '',
+	};
+
+	const statusIconFallback: Record<string, string> = {
 		done: '✓',
 		failed: '✕',
 		cancelled: '—',
@@ -113,8 +120,8 @@
 					onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleChain(job.id); }}
 				>
 					<!-- Type icon -->
-					<span class="text-xs font-mono opacity-60">
-						{job.type === 'task' ? '⚒' : '🔍'}
+					<span class="text-xs font-mono opacity-60 inline-flex">
+						{#if job.type === 'task'}<Icon name="hammer" class="w-3.5 h-3.5" />{:else}<Icon name="search" class="w-3.5 h-3.5" />{/if}
 					</span>
 
 					<!-- Title -->
@@ -129,8 +136,8 @@
 
 					<!-- Review skill badge -->
 					{#if job.review_skill}
-						<span class="badge badge-xs badge-secondary hidden sm:inline" title="Review skill: {job.review_skill}">
-							🎯 {job.review_skill}
+						<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-1" title="Review skill: {job.review_skill}">
+							<Icon name="target" class="w-3 h-3" /> {job.review_skill}
 						</span>
 					{/if}
 
@@ -142,8 +149,8 @@
 					{/if}
 
 					<!-- Status badge -->
-					<span class="badge badge-xs {statusBadge[job.status] ?? 'badge-ghost'}">
-						{statusIcon[job.status] ?? ''} {job.status}
+					<span class="badge badge-xs {statusBadge[job.status] ?? 'badge-ghost'} inline-flex items-center gap-0.5">
+						{#if statusIconName[job.status]}<Icon name={statusIconName[job.status]} class="w-3 h-3" />{:else}{statusIconFallback[job.status] ?? ''}{/if} {job.status}
 					</span>
 
 					<!-- Timestamp -->
