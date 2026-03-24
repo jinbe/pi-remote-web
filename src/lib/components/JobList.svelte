@@ -162,7 +162,7 @@
 							title="Retry"
 						>↻</button>
 					{/if}
-					{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
+					{#if ['queued', 'failed', 'cancelled'].includes(job.status)}
 						<button
 							class="btn btn-ghost btn-xs text-error/60"
 							onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
