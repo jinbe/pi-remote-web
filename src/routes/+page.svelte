@@ -559,7 +559,7 @@
 
 					<!-- Sessions list -->
 					{#if expandedProjects.has(group.cwd)}
-						<div class="border-t border-base-300">
+						<div class="session-list border-t border-base-300">
 							{#each group.sessions as session, i (session.id)}
 								<SwipeToDelete
 									ondelete={() => deleteSession(session.id)}
@@ -627,12 +627,11 @@
 />
 
 <style>
-	/* Clip child content to rounded corners by default, but allow overflow
-	   when the kebab dropdown is focused so the menu isn't clipped */
 	.project-card {
-		overflow: hidden;
-	}
-	.project-card:has(.dropdown:focus-within) {
 		overflow: visible;
+	}
+	/* Clip session list inside the card but not the header */
+	.project-card .session-list {
+		overflow: hidden;
 	}
 </style>
