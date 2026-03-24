@@ -96,6 +96,7 @@
 	let loadingFull = $state(false);
 
 	async function loadTail() {
+		if (!data.sessionId) return;
 		loadingMessages = true;
 		try {
 			const res = await fetch(`/api/sessions/${data.sessionId}/messages/tail?count=20`);
@@ -116,6 +117,7 @@
 	}
 
 	async function loadFullHistory() {
+		if (!data.sessionId) return;
 		loadingFull = true;
 		try {
 			const res = await fetch(`/api/sessions/${data.sessionId}/messages`);
@@ -138,6 +140,7 @@
 
 	// Load session events
 	async function loadEvents() {
+		if (!data.sessionId) return;
 		try {
 			const res = await fetch(`/api/sessions/${data.sessionId}/events-log`);
 			if (res.ok) {
@@ -151,6 +154,7 @@
 
 	// Reload just the full messages (used after agent_end)
 	async function reloadMessages() {
+		if (!data.sessionId) return;
 		try {
 			const res = await fetch(`/api/sessions/${data.sessionId}/messages`);
 			if (res.ok) {
@@ -172,6 +176,7 @@
 
 	// Load on mount and when session changes
 	$effect(() => {
+		if (!data.sessionId) return;
 		data.sessionId;
 		loadTail();
 		loadEvents();
