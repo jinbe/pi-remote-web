@@ -4,6 +4,7 @@
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import AddJobModal from '$lib/components/AddJobModal.svelte';
 	import JobChain from '$lib/components/JobChain.svelte';
+	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
 	import { getContext } from 'svelte';
 	import logoSvg from '$lib/assets/logo.svg';
@@ -196,6 +197,31 @@
 		}
 	}
 
+	/** Delete a job without confirmation — used by swipe-to-delete. */
+	async function deleteJobDirect(jobId: string) {
+		hapticHeavy();
+		try {
+			await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to delete job:', e);
+		}
+	}
+
+	/** Clear all completed (done) jobs. */
+	async function clearCompletedJobs() {
+		const doneJobs = (data.jobs as Job[]).filter((j) => j.status === 'done');
+		if (doneJobs.length === 0) return;
+		if (!confirm(`Delete ${doneJobs.length} completed job${doneJobs.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+		hapticHeavy();
+		try {
+			await Promise.all(doneJobs.map((j) => fetch(`/api/jobs/${j.id}`, { method: 'DELETE' })));
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to clear completed jobs:', e);
+		}
+	}
+
 	async function togglePoller() {
 		hapticMedium();
 		const action = data.pollerRunning ? 'stop' : 'start';
@@ -237,6 +263,215 @@
 <svelte:head>
 	<title>Jobs — Pi Dashboard</title>
 </svelte:head>
+
+{#snippet jobCard(job: Job)}
+	<div class="rounded-lg border border-base-300 bg-base-200/50 overflow-hidden">
+		<!-- Job header row -->
+		<div
+			class="flex items-center gap-2 px-4 py-3 hover:bg-base-300/50 transition-colors cursor-pointer"
+			role="button"
+			tabindex="0"
+			onclick={() => toggleExpand(job.id)}
+			onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleExpand(job.id); }}
+		>
+			<!-- Expand arrow -->
+			<span class="inline-flex text-sm opacity-50 transition-transform {expandedJob === job.id ? 'rotate-90' : ''}"><Icon name="chevron-right" class="w-3.5 h-3.5" /></span>
+
+			<!-- Type icon -->
+			<span class="text-xs opacity-60 inline-flex">
+				{#if job.type === 'task'}<Icon name="hammer" class="w-3.5 h-3.5" />{:else}<Icon name="search" class="w-3.5 h-3.5" />{/if}
+			</span>
+
+			<!-- Title -->
+			<span class="flex-1 truncate text-sm font-medium">{job.title}</span>
+
+			<!-- PR link (inline when done) -->
+			{#if job.pr_url && job.status === 'done'}
+				<a
+					href={job.pr_url}
+					target="_blank"
+					rel="noopener noreferrer"
+					class="btn btn-xs btn-success btn-outline gap-1"
+					onclick={(e) => e.stopPropagation()}
+					title={job.pr_url}
+				>
+					PR <Icon name="chevron-right" class="w-3 h-3" />
+				</a>
+			{/if}
+
+			<!-- Loop indicator -->
+			{#if job.loop_count > 0 || job.parent_job_id}
+				<span class="badge badge-xs badge-outline inline-flex items-center gap-0.5" title="Loop {job.loop_count}/{job.max_loops}">
+					<Icon name="refresh" class="w-2.5 h-2.5" /> {job.loop_count}/{job.max_loops}
+				</span>
+			{/if}
+
+			<!-- Review skill badge -->
+			{#if job.review_skill}
+				<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-0.5" title="Review skill: {job.review_skill}">
+					<Icon name="target" class="w-3 h-3" /> {job.review_skill}
+				</span>
+			{/if}
+
+			<!-- Verdict badge -->
+			{#if job.review_verdict === 'approved'}
+				<span class="badge badge-xs badge-success">approved</span>
+			{:else if job.review_verdict === 'changes_requested'}
+				<span class="badge badge-xs badge-warning">changes</span>
+			{/if}
+
+			<!-- Priority -->
+			{#if job.priority > 0}
+				<span class="badge badge-xs badge-accent" title="Priority: {job.priority}">
+					P{job.priority}
+				</span>
+			{/if}
+
+			<!-- Status badge -->
+			<span class="badge badge-xs {statusBadge[job.status] ?? 'badge-ghost'} inline-flex items-center gap-0.5">
+				{#if statusIconName[job.status]}<Icon name={statusIconName[job.status]} class="w-3 h-3" />{/if} {job.status}
+			</span>
+
+			<!-- Timestamp -->
+			<span class="text-xs text-base-content/40 hidden sm:inline">
+				{timeAgo(job.created_at)}
+			</span>
+		</div>
+
+		<!-- Expanded detail panel -->
+		{#if expandedJob === job.id}
+			<div class="border-t border-base-300 px-4 py-3 space-y-3">
+				<!-- Metadata grid -->
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs">
+					<div class="flex gap-2">
+						<span class="text-base-content/50 w-20 flex-shrink-0">ID</span>
+						<span class="font-mono truncate">{job.id}</span>
+					</div>
+					<div class="flex gap-2">
+						<span class="text-base-content/50 w-20 flex-shrink-0">Type</span>
+						<span class="inline-flex items-center gap-1">{#if job.type === 'task'}<Icon name="hammer" class="w-3.5 h-3.5" /> Task{:else}<Icon name="search" class="w-3.5 h-3.5" /> Review{/if}</span>
+					</div>
+					{#if job.repo}
+						<div class="flex gap-2 sm:col-span-2">
+							<span class="text-base-content/50 w-20 flex-shrink-0">Repo</span>
+							<span class="truncate">{shortenHome(job.repo)}</span>
+						</div>
+					{/if}
+					{#if job.model}
+						<div class="flex gap-2">
+							<span class="text-base-content/50 w-20 flex-shrink-0">Model</span>
+							<span class="font-mono truncate">{job.model}</span>
+						</div>
+					{/if}
+					{#if job.branch}
+						<div class="flex gap-2">
+							<span class="text-base-content/50 w-20 flex-shrink-0">Branch</span>
+							<span class="font-mono truncate">{job.branch}</span>
+						</div>
+					{/if}
+					<div class="flex gap-2">
+						<span class="text-base-content/50 w-20 flex-shrink-0">Created</span>
+						<span>{new Date(job.created_at).toLocaleString()}</span>
+					</div>
+					{#if job.claimed_at}
+						<div class="flex gap-2">
+							<span class="text-base-content/50 w-20 flex-shrink-0">Claimed</span>
+							<span>{new Date(job.claimed_at).toLocaleString()}</span>
+						</div>
+					{/if}
+					{#if job.completed_at}
+						<div class="flex gap-2">
+							<span class="text-base-content/50 w-20 flex-shrink-0">Completed</span>
+							<span>{new Date(job.completed_at).toLocaleString()}</span>
+						</div>
+					{/if}
+					{#if job.retry_count > 0}
+						<div class="flex gap-2">
+							<span class="text-base-content/50 w-20 flex-shrink-0">Retries</span>
+							<span>{job.retry_count}/{job.max_retries}</span>
+						</div>
+					{/if}
+					{#if job.session_id}
+						<div class="flex gap-2 sm:col-span-2">
+							<span class="text-base-content/50 w-20 flex-shrink-0">Session</span>
+							<a href="/session/{job.session_id}" class="link link-primary truncate">{job.session_id}</a>
+						</div>
+					{/if}
+				</div>
+
+				<!-- Description -->
+				{#if job.description}
+					<div class="text-sm bg-base-100/50 rounded-lg p-3 whitespace-pre-wrap">{job.description}</div>
+				{/if}
+
+				<!-- Result summary -->
+				{#if job.result_summary}
+					<div class="text-sm">
+						<div class="text-xs font-semibold text-base-content/50 mb-1">Result</div>
+						<div class="bg-base-100/50 rounded-lg p-3 whitespace-pre-wrap">{job.result_summary}</div>
+					</div>
+				{/if}
+
+				<!-- Error -->
+				{#if job.error}
+					<div class="text-sm">
+						<div class="text-xs font-semibold text-error/70 mb-1">Error</div>
+						<div class="bg-error/10 rounded-lg p-3 text-error whitespace-pre-wrap">{job.error}</div>
+					</div>
+				{/if}
+
+				<!-- PR link -->
+				{#if job.pr_url}
+					<div class="text-sm">
+						<a href={job.pr_url} target="_blank" rel="noopener noreferrer" class="link link-primary">
+							{job.pr_url}
+						</a>
+					</div>
+				{/if}
+
+				<!-- Job chain visualisation -->
+				{#if loadingChain}
+					<div class="flex items-center gap-2 text-sm text-base-content/50">
+						<span class="loading loading-dots loading-xs"></span>
+						Loading chain...
+					</div>
+				{:else if chainJobs.length > 1}
+					<div>
+						<div class="text-xs font-semibold text-base-content/50 mb-2">Job Chain</div>
+						<JobChain jobs={chainJobs} />
+					</div>
+				{/if}
+
+				<!-- Action buttons -->
+				<div class="flex gap-2 pt-1">
+					{#if job.status === 'queued'}
+						<button
+							class="btn btn-xs btn-error btn-outline"
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+						>Cancel</button>
+					{/if}
+					{#if job.status === 'failed'}
+						<button
+							class="btn btn-xs btn-warning btn-outline gap-1"
+							onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}
+						><Icon name="refresh" class="w-3 h-3" /> Retry</button>
+					{/if}
+					{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
+						<button
+							class="btn btn-xs btn-error btn-outline"
+							onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
+						>Delete</button>
+					{/if}
+					{#if job.session_id}
+						<a href="/session/{job.session_id}" class="btn btn-xs btn-ghost gap-1">
+							View Session <Icon name="chevron-right" class="w-3 h-3" />
+						</a>
+					{/if}
+				</div>
+			</div>
+		{/if}
+	</div>
+{/snippet}
 
 <div class="mx-auto max-w-4xl px-4 py-6 h-full overflow-y-auto">
 	<!-- Header -->
@@ -290,7 +525,7 @@
 			{/each}
 		</div>
 
-		<!-- Type filter + search -->
+		<!-- Type filter + search + clear completed -->
 		<div class="flex gap-2 items-center">
 			<div class="flex gap-1">
 				{#each TYPE_FILTERS as filter}
@@ -309,6 +544,15 @@
 				class="input input-xs flex-1"
 				bind:value={search}
 			/>
+			{#if doneCount > 0}
+				<button
+					class="btn btn-xs btn-error btn-outline gap-1"
+					onclick={clearCompletedJobs}
+					title="Delete all completed jobs"
+				>
+					<Icon name="close" class="w-3 h-3" /> Clear done
+				</button>
+			{/if}
 		</div>
 	</div>
 
@@ -325,198 +569,14 @@
 	{:else}
 		<div class="flex flex-col gap-2">
 			{#each filteredJobs as job (job.id)}
-				<div class="rounded-lg border border-base-300 bg-base-200/50 overflow-hidden">
-					<!-- Job header row -->
-					<div
-						class="flex items-center gap-2 px-4 py-3 hover:bg-base-300/50 transition-colors cursor-pointer"
-						role="button"
-						tabindex="0"
-						onclick={() => toggleExpand(job.id)}
-						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleExpand(job.id); }}
-					>
-						<!-- Expand arrow -->
-						<span class="inline-flex text-sm opacity-50 transition-transform {expandedJob === job.id ? 'rotate-90' : ''}"><Icon name="chevron-right" class="w-3.5 h-3.5" /></span>
-
-						<!-- Type icon -->
-						<span class="text-xs opacity-60 inline-flex">
-							{#if job.type === 'task'}<Icon name="hammer" class="w-3.5 h-3.5" />{:else}<Icon name="search" class="w-3.5 h-3.5" />{/if}
-						</span>
-
-						<!-- Title -->
-						<span class="flex-1 truncate text-sm font-medium">{job.title}</span>
-
-						<!-- Loop indicator -->
-						{#if job.loop_count > 0 || job.parent_job_id}
-							<span class="badge badge-xs badge-outline inline-flex items-center gap-0.5" title="Loop {job.loop_count}/{job.max_loops}">
-								<Icon name="refresh" class="w-2.5 h-2.5" /> {job.loop_count}/{job.max_loops}
-							</span>
-						{/if}
-
-						<!-- Review skill badge -->
-						{#if job.review_skill}
-							<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-0.5" title="Review skill: {job.review_skill}">
-								<Icon name="target" class="w-3 h-3" /> {job.review_skill}
-							</span>
-						{/if}
-
-						<!-- Verdict badge -->
-						{#if job.review_verdict === 'approved'}
-							<span class="badge badge-xs badge-success">approved</span>
-						{:else if job.review_verdict === 'changes_requested'}
-							<span class="badge badge-xs badge-warning">changes</span>
-						{/if}
-
-						<!-- Priority -->
-						{#if job.priority > 0}
-							<span class="badge badge-xs badge-accent" title="Priority: {job.priority}">
-								P{job.priority}
-							</span>
-						{/if}
-
-						<!-- Status badge -->
-						<span class="badge badge-xs {statusBadge[job.status] ?? 'badge-ghost'} inline-flex items-center gap-0.5">
-							{#if statusIconName[job.status]}<Icon name={statusIconName[job.status]} class="w-3 h-3" />{/if} {job.status}
-						</span>
-
-						<!-- Timestamp -->
-						<span class="text-xs text-base-content/40 hidden sm:inline">
-							{timeAgo(job.created_at)}
-						</span>
-					</div>
-
-					<!-- Expanded detail panel -->
-					{#if expandedJob === job.id}
-						<div class="border-t border-base-300 px-4 py-3 space-y-3">
-							<!-- Metadata grid -->
-							<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs">
-								<div class="flex gap-2">
-									<span class="text-base-content/50 w-20 flex-shrink-0">ID</span>
-									<span class="font-mono truncate">{job.id}</span>
-								</div>
-								<div class="flex gap-2">
-									<span class="text-base-content/50 w-20 flex-shrink-0">Type</span>
-									<span class="inline-flex items-center gap-1">{#if job.type === 'task'}<Icon name="hammer" class="w-3.5 h-3.5" /> Task{:else}<Icon name="search" class="w-3.5 h-3.5" /> Review{/if}</span>
-								</div>
-								{#if job.repo}
-									<div class="flex gap-2 sm:col-span-2">
-										<span class="text-base-content/50 w-20 flex-shrink-0">Repo</span>
-										<span class="truncate">{shortenHome(job.repo)}</span>
-									</div>
-								{/if}
-								{#if job.model}
-									<div class="flex gap-2">
-										<span class="text-base-content/50 w-20 flex-shrink-0">Model</span>
-										<span class="font-mono truncate">{job.model}</span>
-									</div>
-								{/if}
-								{#if job.branch}
-									<div class="flex gap-2">
-										<span class="text-base-content/50 w-20 flex-shrink-0">Branch</span>
-										<span class="font-mono truncate">{job.branch}</span>
-									</div>
-								{/if}
-								<div class="flex gap-2">
-									<span class="text-base-content/50 w-20 flex-shrink-0">Created</span>
-									<span>{new Date(job.created_at).toLocaleString()}</span>
-								</div>
-								{#if job.claimed_at}
-									<div class="flex gap-2">
-										<span class="text-base-content/50 w-20 flex-shrink-0">Claimed</span>
-										<span>{new Date(job.claimed_at).toLocaleString()}</span>
-									</div>
-								{/if}
-								{#if job.completed_at}
-									<div class="flex gap-2">
-										<span class="text-base-content/50 w-20 flex-shrink-0">Completed</span>
-										<span>{new Date(job.completed_at).toLocaleString()}</span>
-									</div>
-								{/if}
-								{#if job.retry_count > 0}
-									<div class="flex gap-2">
-										<span class="text-base-content/50 w-20 flex-shrink-0">Retries</span>
-										<span>{job.retry_count}/{job.max_retries}</span>
-									</div>
-								{/if}
-								{#if job.session_id}
-									<div class="flex gap-2 sm:col-span-2">
-										<span class="text-base-content/50 w-20 flex-shrink-0">Session</span>
-										<a href="/session/{job.session_id}" class="link link-primary truncate">{job.session_id}</a>
-									</div>
-								{/if}
-							</div>
-
-							<!-- Description -->
-							{#if job.description}
-								<div class="text-sm bg-base-100/50 rounded-lg p-3 whitespace-pre-wrap">{job.description}</div>
-							{/if}
-
-							<!-- Result summary -->
-							{#if job.result_summary}
-								<div class="text-sm">
-									<div class="text-xs font-semibold text-base-content/50 mb-1">Result</div>
-									<div class="bg-base-100/50 rounded-lg p-3 whitespace-pre-wrap">{job.result_summary}</div>
-								</div>
-							{/if}
-
-							<!-- Error -->
-							{#if job.error}
-								<div class="text-sm">
-									<div class="text-xs font-semibold text-error/70 mb-1">Error</div>
-									<div class="bg-error/10 rounded-lg p-3 text-error whitespace-pre-wrap">{job.error}</div>
-								</div>
-							{/if}
-
-							<!-- PR link -->
-							{#if job.pr_url}
-								<div class="text-sm">
-									<a href={job.pr_url} target="_blank" rel="noopener noreferrer" class="link link-primary">
-										{job.pr_url}
-									</a>
-								</div>
-							{/if}
-
-							<!-- Job chain visualisation -->
-							{#if loadingChain}
-								<div class="flex items-center gap-2 text-sm text-base-content/50">
-									<span class="loading loading-dots loading-xs"></span>
-									Loading chain...
-								</div>
-							{:else if chainJobs.length > 1}
-								<div>
-									<div class="text-xs font-semibold text-base-content/50 mb-2">Job Chain</div>
-									<JobChain jobs={chainJobs} />
-								</div>
-							{/if}
-
-							<!-- Action buttons -->
-							<div class="flex gap-2 pt-1">
-								{#if job.status === 'queued'}
-									<button
-										class="btn btn-xs btn-error btn-outline"
-										onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
-									>Cancel</button>
-								{/if}
-								{#if job.status === 'failed'}
-									<button
-										class="btn btn-xs btn-warning btn-outline gap-1"
-										onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}
-									><Icon name="refresh" class="w-3 h-3" /> Retry</button>
-								{/if}
-								{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
-									<button
-										class="btn btn-xs btn-error btn-outline"
-										onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
-									>Delete</button>
-								{/if}
-								{#if job.session_id}
-									<a href="/session/{job.session_id}" class="btn btn-xs btn-ghost gap-1">
-										View Session <Icon name="chevron-right" class="w-3 h-3" />
-									</a>
-								{/if}
-							</div>
-						</div>
-					{/if}
-				</div>
+				{@const isDeletable = ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
+				{#if isDeletable}
+					<SwipeToDelete ondelete={() => deleteJobDirect(job.id)}>
+						{@render jobCard(job)}
+					</SwipeToDelete>
+				{:else}
+					{@render jobCard(job)}
+				{/if}
 			{/each}
 		</div>
 	{/if}
