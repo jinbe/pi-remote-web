@@ -207,6 +207,13 @@ describe('job-queue', () => {
 			expect(() => deleteJob(job.id)).toThrow(/Cannot delete/);
 		});
 
+		it('throws when trying to delete a done job — completed jobs are preserved for recovery', () => {
+			const job = createJob({ type: 'task', title: 'Completed' });
+			updateJobStatus(job.id, { status: 'done' });
+			expect(() => deleteJob(job.id)).toThrow(/Cannot delete/);
+			expect(getJob(job.id)).not.toBeNull();
+		});
+
 		it('returns null for non-existent job', () => {
 			expect(deleteJob('nonexistent')).toBeNull();
 		});
