@@ -4,6 +4,7 @@
  */
 import { getDb } from './cache';
 import { log } from './logger';
+import { emitJobEvent } from './job-events';
 
 // --- Types ---
 
@@ -129,6 +130,7 @@ export function createJob(input: CreateJobInput): Job {
 	}) as Job;
 
 	log.info('job-queue', `created job ${row.id} (${row.type ?? 'task'}): ${row.title}`);
+	emitJobEvent({ type: 'job_created', jobId: row.id, status: row.status });
 	return row;
 }
 
@@ -140,6 +142,7 @@ export function claimNextJob(): Job | null {
 	const row = claimQuery().get() as Job | null;
 	if (row) {
 		log.info('job-queue', `claimed job ${row.id} (${row.type}): ${row.title}`);
+		emitJobEvent({ type: 'job_updated', jobId: row.id, status: row.status });
 	}
 	return row;
 }
@@ -177,6 +180,7 @@ export function updateJobStatus(id: string, updates: UpdateJobInput): Job | null
 
 	if (row) {
 		log.info('job-queue', `updated job ${id}: status=${row.status}`);
+		emitJobEvent({ type: 'job_updated', jobId: id, status: row.status });
 	}
 	return row;
 }
@@ -256,6 +260,7 @@ export function deleteJob(id: string): Job | null {
 	const deleted = deleteJobQuery().get(id) as Job | null;
 	if (deleted) {
 		log.info('job-queue', `deleted job ${id}`);
+		emitJobEvent({ type: 'job_deleted', jobId: id });
 	}
 	return deleted;
 }
@@ -284,6 +289,7 @@ export function retryJob(id: string): Job | null {
 
 	if (row) {
 		log.info('job-queue', `retried job ${id} (attempt ${row.retry_count}/${row.max_retries})`);
+		emitJobEvent({ type: 'job_updated', jobId: id, status: row.status });
 	}
 	return row;
 }
