@@ -19,7 +19,6 @@
 	let issueUrl = $state('');
 	let targetBranch = $state('main');
 	let maxLoops = $state(5);
-	let reviewSkill = $state('');
 	let model = $state('');
 	let skipReview = $state(true);
 	let creating = $state(false);
@@ -35,7 +34,6 @@
 			issueUrl = '';
 			targetBranch = 'main';
 			maxLoops = 5;
-			reviewSkill = '';
 			model = '';
 			skipReview = true;
 			errorMsg = '';
@@ -53,7 +51,6 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					// No type — defaults to 'task' in the backend
 					title: title.trim(),
 					description: description.trim() || undefined,
 					repo: repo.trim() || undefined,
@@ -61,7 +58,6 @@
 					issue_url: issueUrl.trim() || undefined,
 					target_branch: targetBranch.trim() || undefined,
 					max_loops: skipReview ? 0 : maxLoops,
-					review_skill: reviewSkill.trim() || undefined,
 					model: model.trim() || undefined,
 				}),
 			});
@@ -86,9 +82,6 @@
 	<dialog class="modal" {open}>
 		<div class="modal-box max-w-lg">
 			<h3 class="font-bold text-lg">New Job</h3>
-			<p class="text-sm mt-1 text-base-content/60">
-				Jobs automatically run task → review → fix loops until approved or max loops reached.
-			</p>
 
 			<!-- Title -->
 			<div class="form-control mt-4">
@@ -112,7 +105,7 @@
 					id="job-description"
 					class="textarea textarea-bordered w-full"
 					rows="3"
-					placeholder="Detailed requirements or review instructions..."
+					placeholder="Detailed requirements..."
 					bind:value={description}
 				></textarea>
 			</div>
@@ -130,18 +123,20 @@
 				/>
 			</div>
 
-			<!-- Branch -->
-			<div class="form-control mt-3">
-				<label class="label" for="job-branch">
-					<span class="label-text">Branch (optional — auto-created if empty)</span>
-				</label>
-				<input
-					id="job-branch"
-					class="input w-full"
-					placeholder="e.g. feat/my-feature"
-					bind:value={branch}
-				/>
-			</div>
+			<!-- Branch (only for review loop mode — auto-created for fire-and-forget) -->
+			{#if !skipReview}
+				<div class="form-control mt-3">
+					<label class="label" for="job-branch">
+						<span class="label-text">Branch (optional — auto-created if empty)</span>
+					</label>
+					<input
+						id="job-branch"
+						class="input w-full"
+						placeholder="e.g. feat/my-feature"
+						bind:value={branch}
+					/>
+				</div>
+			{/if}
 
 			<!-- Issue URL -->
 			<div class="form-control mt-3">
@@ -169,21 +164,31 @@
 				/>
 			</div>
 
-			<!-- Skip review toggle -->
+			<!-- Review loop toggle -->
 			<div class="form-control mt-3">
 				<label class="label cursor-pointer justify-start gap-3">
 					<input
 						type="checkbox"
 						class="toggle toggle-sm"
-						bind:checked={skipReview}
+						checked={!skipReview}
+						onchange={() => { hapticLight(); skipReview = !skipReview; }}
 					/>
-					<span class="label-text">Skip review (fire-and-forget)</span>
+					<span class="label-text">Enable review loop</span>
 				</label>
+				<div class="label pt-0">
+					<span class="label-text-alt text-base-content/40">
+						{#if skipReview}
+							Task runs once with self-review, then completes
+						{:else}
+							Task → auto-review → fix loop until approved or max loops reached
+						{/if}
+					</span>
+				</div>
 			</div>
 
 			{#if !skipReview}
 				<!-- Target branch & max loops -->
-				<div class="flex gap-3 mt-3">
+				<div class="flex gap-3 mt-1">
 					<div class="form-control flex-1">
 						<label class="label" for="job-target-branch">
 							<span class="label-text">Target Branch</span>
@@ -208,19 +213,6 @@
 							bind:value={maxLoops}
 						/>
 					</div>
-				</div>
-
-				<!-- Review skill (optional — used during the auto-review phase) -->
-				<div class="form-control mt-3">
-					<label class="label" for="job-review-skill">
-						<span class="label-text">Review Skill (optional)</span>
-					</label>
-					<input
-						id="job-review-skill"
-						class="input w-full"
-						placeholder="e.g. skill:review, multi-review, or /path/to/skill"
-						bind:value={reviewSkill}
-					/>
 				</div>
 			{/if}
 

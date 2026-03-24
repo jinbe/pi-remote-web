@@ -2,9 +2,23 @@
  * Prompt builders for autonomous job execution.
  * Each prompt type injects JOB_ID + CALLBACK_URL metadata so the
  * job-callback extension can report results back.
+ *
+ * When PI_JOB_TASK_SKILL, PI_JOB_LOOP_TASK_SKILL, or PI_JOB_REVIEW_SKILL
+ * env vars are set, the prompts invoke the named skill. Otherwise the agent
+ * receives only the bare task context and output markers — it decides how
+ * to approach the work using its own system prompt and tools.
  */
 import type { Job } from './job-queue';
 import { getOrigin } from './origin';
+
+// --- Skill configuration from environment ---
+
+/** Skill for fire-and-forget tasks (max_loops=0). e.g. 'issue-worker' */
+export const TASK_SKILL = process.env.PI_JOB_TASK_SKILL || '';
+/** Skill for the task/fix phase inside a review loop (max_loops>0). e.g. 'issue-worker' */
+export const LOOP_TASK_SKILL = process.env.PI_JOB_LOOP_TASK_SKILL || '';
+/** Skill for the review phase inside a review loop. e.g. 'review' */
+export const REVIEW_SKILL = process.env.PI_JOB_REVIEW_SKILL || '';
 
 // --- Metadata header injected at the top of every job prompt ---
 
@@ -14,105 +28,34 @@ function metadataHeader(job: Job): string {
 		`JOB_ID: ${job.id}`,
 		`CALLBACK_URL: ${callbackUrl}`,
 		`CALLBACK_TOKEN: ${job.callback_token}`,
-		'',
 	].join('\n');
 }
 
-// --- Task prompt: new work ---
+/** Build the common task context lines (title, description, issue, branch). */
+function taskContext(job: Job): string[] {
+	const lines: string[] = [];
+	lines.push(job.title);
+	if (job.description) lines.push(job.description);
+	if (job.issue_url) lines.push(`Issue: ${job.issue_url}`);
+	if (job.branch) lines.push(`Branch: ${job.branch}`);
+	if (job.target_branch) lines.push(`Target branch: ${job.target_branch}`);
+	return lines;
+}
+
+// --- Task prompt ---
 
 export function buildTaskPrompt(job: Job): string {
 	const header = metadataHeader(job);
-	const parts = [header];
+	const skill = job.max_loops === 0 ? TASK_SKILL : LOOP_TASK_SKILL;
+	const context = taskContext(job);
+	const parts = [header, ''];
 
-	// When max_loops === 0, the task runs autonomously without an external
-	// review loop. Include full end-to-end instructions so the agent
-	// self-reviews before creating the PR.
-	if (job.max_loops === 0) {
-		return buildAutonomousTaskPrompt(job, header);
-	}
-
-	parts.push(`# Task: ${job.title}`);
-	parts.push('');
-
-	if (job.description) {
-		parts.push(job.description);
-		parts.push('');
-	}
-
-	if (job.issue_url) {
-		parts.push(`Issue: ${job.issue_url}`);
-		parts.push('');
-	}
-
-	if (job.branch) {
-		parts.push(`Work on branch: ${job.branch}`);
+	if (skill) {
+		parts.push(`/skill:${skill} ${context.join('\n')}`);
 	} else {
-		parts.push('Create a feature branch from the target branch for this work.');
+		parts.push(...context);
 	}
 
-	if (job.target_branch) {
-		parts.push(`Target branch: ${job.target_branch}`);
-	}
-
-	parts.push('');
-	parts.push('When finished, create a pull request and output exactly:');
-	parts.push('PR_URL: <the full PR URL>');
-	parts.push('');
-	parts.push('Commit with conventional commits. Run tests and typecheck before pushing.');
-
-	return parts.join('\n');
-}
-
-// --- Autonomous task prompt (no review loop — agent self-reviews) ---
-
-function buildAutonomousTaskPrompt(job: Job, header: string): string {
-	const parts = [header];
-
-	parts.push(`# Task: ${job.title}`);
-	parts.push('');
-
-	if (job.description) {
-		parts.push(job.description);
-		parts.push('');
-	}
-
-	if (job.issue_url) {
-		parts.push(`Issue: ${job.issue_url}`);
-		parts.push('');
-	}
-
-	parts.push('## Process');
-	parts.push('');
-	parts.push('1. **Understand** — read the task, relevant code, and project conventions (AGENTS.md, CLAUDE.md, etc.)');
-
-	if (job.branch) {
-		parts.push(`2. **Branch** — check out the branch: \`${job.branch}\``);
-	} else {
-		parts.push('2. **Branch** — create a feature branch: `git checkout -b <type>/<short-description>` (e.g. `feat/add-caching`, `fix/auth-redirect`)');
-	}
-
-	if (job.target_branch) {
-		parts.push(`   Target branch: ${job.target_branch}`);
-	}
-
-	parts.push('3. **Implement** — make the changes, following existing patterns and conventions');
-	parts.push('4. **Test** — write tests for your changes, then run the full test suite. Fix any failures.');
-	parts.push('5. **Typecheck** — run the project\'s type checker if available. Fix all errors.');
-	parts.push('6. **Self-review** — carefully review your own changes. Check for:');
-	parts.push('   - Correctness and edge cases');
-	parts.push('   - Test coverage and quality');
-	parts.push('   - Security concerns');
-	parts.push('   - Code style and naming consistency');
-	parts.push('   - No leftover debug code or TODOs');
-	parts.push('7. **Commit** — use conventional commit format: `feat: ...`, `fix: ...`, `refactor: ...`');
-	parts.push('8. **Push** — `git push -u origin <branch>`');
-	parts.push('9. **PR** — create a pull request with `gh pr create --fill`');
-	parts.push('');
-	parts.push('## Rules');
-	parts.push('');
-	parts.push('- Never commit to main — always work on a feature branch');
-	parts.push('- All tests must pass before creating the PR');
-	parts.push('- Use Australian English in code comments and PR descriptions');
 	parts.push('');
 	parts.push('When done, output exactly:');
 	parts.push('PR_URL: <the full PR URL>');
@@ -120,33 +63,17 @@ function buildAutonomousTaskPrompt(job: Job, header: string): string {
 	return parts.join('\n');
 }
 
-// --- Task prompt: fix review comments ---
+// --- Fix prompt (sent after review requests changes) ---
 
-export function buildTaskFixPrompt(job: Job, reviewComments: string): string {
+export function buildTaskFixPrompt(job: Job, _reviewComments: string): string {
 	const header = metadataHeader(job);
-	const parts = [header];
+	const parts = [header, ''];
 
-	parts.push(`# Fix Review Comments: ${job.title}`);
-	parts.push('');
-	parts.push(`This is loop iteration ${job.loop_count} of ${job.max_loops}.`);
-	parts.push('');
+	parts.push(`Fix the review comments above. (Loop ${job.loop_count}/${job.max_loops})`);
+	if (job.pr_url) parts.push(`PR: ${job.pr_url}`);
 
-	if (job.pr_url) {
-		parts.push(`Existing PR: ${job.pr_url}`);
-		parts.push('');
-	}
-
-	if (job.branch) {
-		parts.push(`Branch: ${job.branch}`);
-		parts.push('');
-	}
-
-	parts.push('The review comments are in the conversation above. Address all the feedback.');
 	parts.push('');
-	parts.push('Push the fixes to the existing branch.');
-	parts.push('Run tests and typecheck before pushing.');
-	parts.push('');
-	parts.push('When finished, output exactly:');
+	parts.push('When done, output exactly:');
 	parts.push('PR_URL: <the full PR URL>');
 
 	return parts.join('\n');
@@ -156,46 +83,27 @@ export function buildTaskFixPrompt(job: Job, reviewComments: string): string {
 
 export function buildReviewPrompt(job: Job): string {
 	const header = metadataHeader(job);
-	const parts = [header];
+	const parts = [header, ''];
 
-	parts.push(`# Review: ${job.title}`);
-	parts.push('');
-	parts.push(`This is loop iteration ${job.loop_count} of ${job.max_loops}.`);
-	parts.push('');
+	if (REVIEW_SKILL) {
+		const context: string[] = [];
+		context.push(`Review: ${job.title}`);
+		context.push(`Loop ${job.loop_count}/${job.max_loops}`);
+		if (job.pr_url) context.push(`PR: ${job.pr_url}`);
+		if (job.branch) context.push(`Branch: ${job.branch}`);
+		if (job.target_branch) context.push(`Target branch: ${job.target_branch}`);
 
-	if (job.pr_url) {
-		parts.push(`PR to review: ${job.pr_url}`);
-		parts.push('');
+		parts.push(`/skill:${REVIEW_SKILL} ${context.join('\n')}`);
+	} else {
+		parts.push(`Review the changes for: ${job.title}`);
+		parts.push(`Loop ${job.loop_count}/${job.max_loops}`);
+		if (job.pr_url) parts.push(`PR: ${job.pr_url}`);
 	}
 
-	if (job.branch) {
-		parts.push(`Branch: ${job.branch}`);
-	}
-
-	if (job.target_branch) {
-		parts.push(`Target branch: ${job.target_branch}`);
-	}
-
-	if (job.review_skill) {
-		parts.push('');
-		parts.push(`Use the skill: ${job.review_skill}`);
-	}
-
-	parts.push('');
-	parts.push('Review the changes you just made. You have full context of the code in this session.');
-	parts.push('');
-	parts.push('Check for:');
-	parts.push('- Correctness and logic errors');
-	parts.push('- Test coverage');
-	parts.push('- Code style and conventions');
-	parts.push('- Security concerns');
-	parts.push('- Performance issues');
 	parts.push('');
 	parts.push('When finished, output exactly one of:');
 	parts.push('VERDICT: approved');
 	parts.push('VERDICT: changes_requested');
-	parts.push('');
-	parts.push('If changes are requested, provide detailed feedback explaining what needs to be fixed.');
 
 	return parts.join('\n');
 }
