@@ -199,7 +199,45 @@ function createWorktree(repoPath: string, job: Job): string {
 	}
 
 	log.info('job-poller', `created worktree for job ${job.id}: ${worktreePath}`);
+
+	// Install dependencies if a lockfile is present
+	installDependencies(worktreePath, job.id);
+
 	return worktreePath;
+}
+
+// --- Dependency installation ---
+
+/** Lockfile → installer command mapping (checked in priority order). */
+const LOCKFILE_INSTALLERS: Array<{ lockfile: string; command: string; args: string[] }> = [
+	{ lockfile: 'bun.lockb', command: 'bun', args: ['install', '--frozen-lockfile'] },
+	{ lockfile: 'bun.lock', command: 'bun', args: ['install', '--frozen-lockfile'] },
+	{ lockfile: 'pnpm-lock.yaml', command: 'pnpm', args: ['install', '--frozen-lockfile'] },
+	{ lockfile: 'yarn.lock', command: 'yarn', args: ['install', '--frozen-lockfile'] },
+	{ lockfile: 'package-lock.json', command: 'npm', args: ['ci'] },
+];
+
+/**
+ * Detect the package manager from lockfiles and run the installer.
+ * Skips silently if no lockfile is found.
+ */
+function installDependencies(worktreePath: string, jobId: string): void {
+	for (const { lockfile, command, args } of LOCKFILE_INSTALLERS) {
+		if (existsSync(join(worktreePath, lockfile))) {
+			try {
+				log.info('job-poller', `installing dependencies for job ${jobId}: ${command} ${args.join(' ')}`);
+				execFileSync(command, args, {
+					cwd: worktreePath,
+					stdio: 'pipe',
+					timeout: 120_000,
+				});
+				log.info('job-poller', `dependencies installed for job ${jobId}`);
+			} catch (err: any) {
+				log.warn('job-poller', `dependency install failed for job ${jobId}: ${err.message}`);
+			}
+			return; // Only run the first matching installer
+		}
+	}
 }
 
 // --- Prompt building ---
