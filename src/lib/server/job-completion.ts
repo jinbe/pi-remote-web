@@ -103,6 +103,7 @@ function applyLoopLogic(job: Job, payload: CompletionPayload): void {
 			max_loops: job.max_loops,
 			pr_url: payload.prUrl ?? job.pr_url ?? undefined,
 			priority: job.priority,
+			review_skill: job.review_skill ?? undefined,
 		});
 
 		log.info('job-completion', `enqueued review job ${reviewJob.id} for task ${job.id}`);
@@ -135,6 +136,7 @@ function applyLoopLogic(job: Job, payload: CompletionPayload): void {
 				max_loops: job.max_loops,
 				pr_url: job.pr_url ?? undefined,
 				priority: job.priority,
+				review_skill: job.review_skill ?? undefined,
 			});
 
 			log.info('job-completion', `enqueued fix job ${fixJob.id} for review ${job.id} (loop ${nextLoopCount}/${job.max_loops})`);

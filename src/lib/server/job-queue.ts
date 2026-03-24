@@ -35,6 +35,7 @@ export interface Job {
 	retry_count: number;
 	max_retries: number;
 	callback_token: string;
+	review_skill: string | null;
 }
 
 export interface CreateJobInput {
@@ -50,6 +51,7 @@ export interface CreateJobInput {
 	loop_count?: number;
 	max_loops?: number;
 	pr_url?: string;
+	review_skill?: string;
 }
 
 export interface UpdateJobInput {
@@ -62,6 +64,7 @@ export interface UpdateJobInput {
 	result_summary?: string;
 	error?: string;
 	branch?: string;
+	review_skill?: string;
 }
 
 // --- Query helpers ---
@@ -71,8 +74,8 @@ export interface UpdateJobInput {
 
 function insertJobQuery() {
 	return getDb().query(`
-		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url)
-		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url)
+		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, review_skill)
+		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $review_skill)
 		RETURNING *
 	`);
 }
@@ -118,6 +121,7 @@ export function createJob(input: CreateJobInput): Job {
 		$loop_count: input.loop_count ?? 0,
 		$max_loops: input.max_loops ?? 5,
 		$pr_url: input.pr_url ?? null,
+		$review_skill: input.review_skill ?? null,
 	}) as Job;
 
 	log.info('job-queue', `created job ${row.id} (${row.type}): ${row.title}`);
@@ -161,6 +165,7 @@ export function updateJobStatus(id: string, updates: UpdateJobInput): Job | null
 	if (updates.result_summary !== undefined) { setClauses.push('result_summary = $result_summary'); params.$result_summary = updates.result_summary; }
 	if (updates.error !== undefined) { setClauses.push('error = $error'); params.$error = updates.error; }
 	if (updates.branch !== undefined) { setClauses.push('branch = $branch'); params.$branch = updates.branch; }
+	if (updates.review_skill !== undefined) { setClauses.push('review_skill = $review_skill'); params.$review_skill = updates.review_skill; }
 
 	const sql = `UPDATE jobs SET ${setClauses.join(', ')} WHERE id = $id RETURNING *`;
 	const row = getDb().query(sql).get(params) as Job | null;

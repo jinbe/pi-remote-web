@@ -13,6 +13,7 @@
 		branch: string | null;
 		pr_url: string | null;
 		review_verdict: string | null;
+		review_skill: string | null;
 		loop_count: number;
 		max_loops: number;
 		parent_job_id: string | null;
@@ -123,6 +124,13 @@
 					{#if job.loop_count > 0 || job.parent_job_id}
 						<span class="badge badge-xs badge-outline" title="Loop {job.loop_count}/{job.max_loops}">
 							↻ {job.loop_count}/{job.max_loops}
+						</span>
+					{/if}
+
+					<!-- Review skill badge -->
+					{#if job.review_skill}
+						<span class="badge badge-xs badge-secondary hidden sm:inline" title="Review skill: {job.review_skill}">
+							🎯 {job.review_skill}
 						</span>
 					{/if}
 

@@ -97,8 +97,13 @@ export function getDb(): Database {
 			error TEXT,
 			retry_count INTEGER NOT NULL DEFAULT 0,
 			max_retries INTEGER NOT NULL DEFAULT 2,
-			callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16))))
+			callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+			review_skill TEXT
 		)`);
+
+		// Migrations: add columns if missing (from older schema)
+		try { db.run('ALTER TABLE jobs ADD COLUMN callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16))))'); } catch {}
+		try { db.run('ALTER TABLE jobs ADD COLUMN review_skill TEXT'); } catch {}
 
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type)');

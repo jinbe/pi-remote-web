@@ -115,6 +115,11 @@ export function buildReviewPrompt(job: Job): string {
 		parts.push(`Target branch: ${job.target_branch}`);
 	}
 
+	if (job.review_skill) {
+		parts.push('');
+		parts.push(`Use the skill: ${job.review_skill}`);
+	}
+
 	parts.push('');
 	parts.push('Review the changes in the PR thoroughly. Check for:');
 	parts.push('- Correctness and logic errors');

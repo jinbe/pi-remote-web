@@ -22,6 +22,7 @@
 	let issueUrl = $state('');
 	let targetBranch = $state('main');
 	let maxLoops = $state(5);
+	let reviewSkill = $state('');
 	let creating = $state(false);
 	let errorMsg = $state('');
 
@@ -36,6 +37,7 @@
 			issueUrl = '';
 			targetBranch = 'main';
 			maxLoops = 5;
+			reviewSkill = '';
 			errorMsg = '';
 		}
 	});
@@ -59,6 +61,7 @@
 					issue_url: issueUrl.trim() || undefined,
 					target_branch: targetBranch.trim() || undefined,
 					max_loops: maxLoops,
+					review_skill: reviewSkill.trim() || undefined,
 				}),
 			});
 
@@ -192,6 +195,28 @@
 						max="20"
 						bind:value={maxLoops}
 					/>
+				</div>
+			</div>
+
+			<!-- Review skill (optional — used for review jobs or auto-queued reviews from tasks) -->
+			<div class="form-control mt-3">
+				<label class="label" for="job-review-skill">
+					<span class="label-text">Review Skill (optional)</span>
+				</label>
+				<input
+					id="job-review-skill"
+					class="input w-full"
+					placeholder="e.g. skill:review, multi-review, or /path/to/skill"
+					bind:value={reviewSkill}
+				/>
+				<div class="label">
+					<span class="label-text-alt text-base-content/40">
+						{#if type === 'review'}
+							Skill to use when reviewing
+						{:else}
+							Skill to use when auto-queued reviews run
+						{/if}
+					</span>
 				</div>
 			</div>
 

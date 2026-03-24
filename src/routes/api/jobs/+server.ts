@@ -18,7 +18,7 @@ export const GET: RequestHandler = async ({ url }) => {
 export const POST: RequestHandler = async ({ request }) => {
 	try {
 		const body = await request.json();
-		const { type, title, description, repo, branch, issue_url, target_branch, priority, max_loops } = body;
+		const { type, title, description, repo, branch, issue_url, target_branch, priority, max_loops, review_skill } = body;
 
 		if (!type || !['task', 'review'].includes(type)) {
 			throw error(400, 'Invalid job type — must be "task" or "review"');
@@ -37,6 +37,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			target_branch: target_branch?.trim() || undefined,
 			priority: typeof priority === 'number' ? priority : undefined,
 			max_loops: typeof max_loops === 'number' ? max_loops : undefined,
+			review_skill: review_skill?.trim() || undefined,
 		});
 
 		return json({ job }, { status: 201 });
