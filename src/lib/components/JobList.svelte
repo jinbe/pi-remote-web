@@ -2,7 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { hapticLight, hapticMedium } from '$lib/haptics';
 	import { timeAgo } from '$lib/utils';
-	import Icon from './Icon.svelte';
+	import Icon, { type IconName } from "./Icon.svelte";
 	import JobChain from './JobChain.svelte';
 
 	interface Job {
@@ -37,14 +37,10 @@
 		failed: 'badge-error',
 		cancelled: 'badge-ghost opacity-50',
 	};
-
-	const statusIconName: Record<string, string> = {
-		queued: 'hourglass',
+	const statusIconName: Record<string, IconName> = {
+		queued: 'clock',
 		claimed: 'lock',
 		running: 'bolt',
-		done: '',
-		failed: '',
-		cancelled: '',
 	};
 
 	const statusIconFallback: Record<string, string> = {

@@ -6,7 +6,7 @@
 	import DiffModal from '$lib/components/DiffModal.svelte';
 	import SessionTabs from '$lib/components/SessionTabs.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
-	import Icon from '$lib/components/Icon.svelte';
+	import Icon, { type IconName } from '$lib/components/Icon.svelte';
 	import { timeAgo, shortenHome, uniqueId } from '$lib/utils';
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import { getPathToNode, isAncestorOf, findLeafFrom, getBranchPoints } from '$lib/session-tree';
@@ -524,7 +524,7 @@
 	}
 
 	// Event display helpers
-	function eventIconName(eventType: string): string {
+	function eventIconName(eventType: string): IconName | '' {
 		switch (eventType) {
 			case 'session_created': return 'circle-green';
 			case 'session_resumed': return 'play-pause';
@@ -535,6 +535,14 @@
 			case 'compaction_start': return 'compress';
 			case 'compaction_end': return 'check-circle';
 			default: return '';
+		}
+	}
+
+	function eventIconClass(eventType: string): string {
+		switch (eventType) {
+			case 'session_created': return 'w-4 h-4 text-success';
+			case 'session_ended': return 'w-4 h-4 text-error';
+			default: return 'w-4 h-4';
 		}
 	}
 
@@ -852,7 +860,7 @@
 					{:else}
 						{#each sessionEvents as event (event.id)}
 							<div class="text-xs flex items-start gap-2 py-1.5 px-2 rounded hover:bg-base-300/50">
-								<span class="text-base inline-flex items-center">{#if eventIconName(event.event_type)}<Icon name={eventIconName(event.event_type)} class="w-4 h-4" />{:else}•{/if}</span>
+								<span class="text-base inline-flex items-center">{#if eventIconName(event.event_type)}<Icon name={eventIconName(event.event_type) as IconName} class={eventIconClass(event.event_type)} />{:else}•{/if}</span>
 								<div class="flex-1 min-w-0">
 									<div class="font-medium">{eventLabel(event.event_type)}</div>
 									<div class="text-base-content-faint">{timeAgo(event.timestamp)}</div>
