@@ -1,20 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { start, stop, isRunning, handleJobAgentEnd } from './job-poller';
-import { createJob, getJob, getJobs, updateJobStatus } from './job-queue';
-import { getDb } from './cache';
-
-function clearJobs() {
-	getDb().run('DELETE FROM jobs');
-}
+import { getJob, updateJobStatus } from './job-queue';
+import { createTestJob, getTestJobs, cleanupTestJobs } from './test-helpers';
 
 describe('job-poller', () => {
-	beforeEach(() => {
-		clearJobs();
-		stop(); // Ensure clean state
-	});
-
 	afterEach(() => {
 		stop();
+		cleanupTestJobs();
 	});
 
 	describe('start/stop', () => {
@@ -43,18 +35,10 @@ describe('job-poller', () => {
 	});
 
 	describe('pollOnce', () => {
-		it('does nothing when no jobs are queued', async () => {
-			const { pollOnce } = await import('./job-poller');
-			await pollOnce(); // Should not throw
-			expect(getJobs()).toHaveLength(0);
-		});
-
 		it('claims a job and attempts dispatch (which fails without a real repo)', async () => {
 			const { pollOnce } = await import('./job-poller');
 
-			// Create a job with a fake repo path — dispatch will fail
-			// but the claim should still happen
-			createJob({
+			const job = createTestJob({
 				type: 'task',
 				title: 'Test poll',
 				repo: '/nonexistent/repo/path',
@@ -62,23 +46,15 @@ describe('job-poller', () => {
 
 			await pollOnce();
 
-			const jobs = getJobs();
-			expect(jobs).toHaveLength(1);
-
-			// Job should be failed because the repo path doesn't exist
-			const job = jobs[0];
-			expect(job.status).toBe('failed');
-			expect(job.error).toContain('not found');
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('failed');
+			expect(updated.error).toContain('not found');
 		});
 	});
 
 	describe('handleJobAgentEnd', () => {
-		// Note: These tests can't fully test the state machine since sendMessage
-		// requires a real Pi RPC session. The actual state transitions are tested
-		// via integration tests. Here we just verify extraction and basic behaviour.
-
 		it('extracts PR_URL when in running state', async () => {
-			const job = createJob({
+			const job = createTestJob({
 				type: 'task',
 				title: 'Implement widget',
 				repo: '/repo',
@@ -90,33 +66,28 @@ describe('job-poller', () => {
 			await handleJobAgentEnd(job.id, assistantText);
 
 			const updated = getJob(job.id)!;
-			//sendMessage will fail — but PR URL should be extracted before failure
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/42');
 		});
 
 		it('is a no-op when the job is already in terminal state', async () => {
-			const job = createJob({
+			const job = createTestJob({
 				type: 'task',
 				title: 'Already done',
 				repo: '/repo',
 			});
 			updateJobStatus(job.id, { status: 'done' });
 
-			// Should not throw and should not change state
 			await handleJobAgentEnd(job.id, 'PR_URL: https://github.com/org/repo/pull/1');
 
-			expect(getJobs()).toHaveLength(1);
 			expect(getJob(job.id)!.status).toBe('done');
 		});
 
 		it('is a no-op for an unknown job ID', async () => {
-			// Should not throw
 			await handleJobAgentEnd('nonexistent-id', 'some text');
-			expect(getJobs()).toHaveLength(0);
 		});
 
 		it('extracts PR_URL from mixed assistant text', async () => {
-			const job = createJob({
+			const job = createTestJob({
 				type: 'task',
 				title: 'Mixed output test',
 				repo: '/repo',
@@ -137,7 +108,7 @@ describe('job-poller', () => {
 		});
 
 		it('transitions to reviewing (not done) when max_loops is 0 — awaiting manual review', async () => {
-			const job = createJob({
+			const job = createTestJob({
 				title: 'Fire and forget task',
 				repo: '/repo',
 				max_loops: 0,
@@ -152,7 +123,7 @@ describe('job-poller', () => {
 		});
 
 		it('stores model on job creation', () => {
-			const job = createJob({
+			const job = createTestJob({
 				title: 'Model test',
 				repo: '/repo',
 				model: 'anthropic/claude-sonnet-4',

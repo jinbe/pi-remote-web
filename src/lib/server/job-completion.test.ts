@@ -1,15 +1,11 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, afterEach } from 'bun:test';
 import { handleCompletion, cwdToSessionDirName } from './job-completion';
-import { createJob, getJob, getJobs, updateJobStatus } from './job-queue';
-import { getDb } from './cache';
-
-function clearJobs() {
-	getDb().run('DELETE FROM jobs');
-}
+import { getJob, updateJobStatus } from './job-queue';
+import { createTestJob, cleanupTestJobs } from './test-helpers';
 
 describe('job-completion', () => {
-	beforeEach(() => {
-		clearJobs();
+	afterEach(() => {
+		cleanupTestJobs();
 	});
 
 	describe('handleCompletion', () => {
@@ -20,17 +16,16 @@ describe('job-completion', () => {
 		});
 
 		it('ignores completion for job already in terminal state', () => {
-			const job = createJob({ title: 'Done job' });
+			const job = createTestJob({ title: 'Done job' });
 			updateJobStatus(job.id, { status: 'done' });
 
 			const result = handleCompletion(job.id, { jobId: job.id, status: 'done' });
 
-			// Should return the job as-is without error
 			expect(result.status).toBe('done');
 		});
 
 		it('marks a failed job directly', () => {
-			const job = createJob({ title: 'Failing task' });
+			const job = createTestJob({ title: 'Failing task' });
 			updateJobStatus(job.id, { status: 'running' });
 
 			const result = handleCompletion(job.id, {
@@ -43,8 +38,8 @@ describe('job-completion', () => {
 			expect(result.error).toBe('Something went wrong');
 		});
 
-		it('delegates to state machine — running job transitions to reviewing', async () => {
-			const job = createJob({ title: 'Task with review', max_loops: 5 });
+		it('delegates to state machine — running job transitions to reviewing', () => {
+			const job = createTestJob({ title: 'Task with review', max_loops: 5 });
 			updateJobStatus(job.id, { status: 'running' });
 
 			handleCompletion(job.id, {
@@ -54,13 +49,12 @@ describe('job-completion', () => {
 			});
 
 			const updated = getJob(job.id)!;
-			// State machine transitions running → reviewing (not straight to done)
 			expect(updated.status).toBe('reviewing');
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/1');
 		});
 
-		it('delegates to state machine — fire-and-forget goes to reviewing (not done)', async () => {
-			const job = createJob({ title: 'Quick task', max_loops: 0 });
+		it('delegates to state machine — fire-and-forget goes to reviewing (not done)', () => {
+			const job = createTestJob({ title: 'Quick task', max_loops: 0 });
 			updateJobStatus(job.id, { status: 'running' });
 
 			handleCompletion(job.id, {
@@ -74,8 +68,8 @@ describe('job-completion', () => {
 			expect(updated.pr_url).toBe('https://github.com/org/repo/pull/2');
 		});
 
-		it('delegates to state machine — review with approved verdict marks done', async () => {
-			const job = createJob({ title: 'Reviewed task', max_loops: 5 });
+		it('delegates to state machine — review with approved verdict marks done', () => {
+			const job = createTestJob({ title: 'Reviewed task', max_loops: 5 });
 			updateJobStatus(job.id, { status: 'reviewing' });
 
 			handleCompletion(job.id, {

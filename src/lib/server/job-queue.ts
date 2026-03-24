@@ -252,9 +252,9 @@ export function deleteJob(id: string): Job | null {
 	const job = getJob(id);
 	if (!job) return null;
 
-	const deletableStatuses = ['queued', 'done', 'failed', 'cancelled'];
+	const deletableStatuses = ['queued', 'reviewing', 'done', 'failed', 'cancelled'];
 	if (!deletableStatuses.includes(job.status)) {
-		throw new Error(`Cannot delete job in '${job.status}' status — only queued, done, failed, or cancelled jobs can be deleted`);
+		throw new Error(`Cannot delete job in '${job.status}' status — only queued, reviewing, done, failed, or cancelled jobs can be deleted`);
 	}
 
 	const deleted = deleteJobQuery().get(id) as Job | null;
