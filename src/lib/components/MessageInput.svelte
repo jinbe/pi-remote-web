@@ -659,7 +659,7 @@
 	{#if sendError}
 		<div class="mx-1 mb-2 px-3 py-2 rounded-lg bg-error/15 text-error text-xs flex items-center gap-2">
 			<span class="flex-1">{sendError}</span>
-			<button class="btn btn-ghost btn-xs btn-circle" onclick={() => (sendError = null)} aria-label="Dismiss error">✕</button>
+			<button class="btn btn-ghost btn-xs btn-circle" onclick={() => (sendError = null)} aria-label="Dismiss error"><Icon name="close" class="w-3.5 h-3.5" /></button>
 		</div>
 	{/if}
 
@@ -692,7 +692,7 @@
 						onclick={() => removeFile(file.id)}
 						aria-label="Remove {file.name}"
 					>
-						✕
+						<Icon name="close" class="w-3 h-3" />
 					</button>
 					<div class="absolute bottom-0 left-0 right-0 bg-base-300/80 text-[9px] text-center truncate rounded-b-lg px-1">
 						{formatBytes(file.compressedSize)}
@@ -748,7 +748,7 @@
 					{#if sending}
 						<span class="loading loading-spinner loading-xs"></span>
 					{:else}
-						⏎
+						<Icon name="enter" class="w-4 h-4" />
 					{/if}
 				</button>
 				<button

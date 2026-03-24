@@ -43,10 +43,10 @@
 		running: 'bolt',
 	};
 
-	const statusIconFallback: Record<string, string> = {
-		done: '✓',
-		failed: '✕',
-		cancelled: '—',
+	const statusIconFallback: Record<string, IconName> = {
+		done: 'check',
+		failed: 'close',
+		cancelled: 'dash',
 	};
 
 	// Filter jobs for the given repo (if provided)
@@ -125,8 +125,8 @@
 
 					<!-- Loop indicator -->
 					{#if job.loop_count > 0 || job.parent_job_id}
-						<span class="badge badge-xs badge-outline" title="Loop {job.loop_count}/{job.max_loops}">
-							↻ {job.loop_count}/{job.max_loops}
+						<span class="badge badge-xs badge-outline inline-flex items-center gap-0.5" title="Loop {job.loop_count}/{job.max_loops}">
+							<Icon name="refresh" class="w-2.5 h-2.5" /> {job.loop_count}/{job.max_loops}
 						</span>
 					{/if}
 
@@ -146,7 +146,7 @@
 
 					<!-- Status badge -->
 					<span class="badge badge-xs {statusBadge[job.status] ?? 'badge-ghost'} inline-flex items-center gap-0.5">
-						{#if statusIconName[job.status]}<Icon name={statusIconName[job.status]} class="w-3 h-3" />{:else}{statusIconFallback[job.status] ?? ''}{/if} {job.status}
+						{#if statusIconName[job.status]}<Icon name={statusIconName[job.status]} class="w-3 h-3" />{:else if statusIconFallback[job.status]}<Icon name={statusIconFallback[job.status]} class="w-3 h-3" />{/if} {job.status}
 					</span>
 
 					<!-- Timestamp -->
@@ -160,14 +160,14 @@
 							class="btn btn-ghost btn-xs"
 							onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}
 							title="Retry"
-						>↻</button>
+						><Icon name="refresh" class="w-3.5 h-3.5" /></button>
 					{/if}
 					{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
 						<button
 							class="btn btn-ghost btn-xs text-error/60"
 							onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
 							title="Delete"
-						>✕</button>
+						><Icon name="close" class="w-3.5 h-3.5" /></button>
 					{/if}
 				</div>
 

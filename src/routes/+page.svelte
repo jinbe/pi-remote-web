@@ -323,10 +323,10 @@
 			<span class="loading loading-spinner loading-sm text-primary"></span>
 		{:else if pullDistance > 0}
 			<span
-				class="text-base-content/40 text-sm transition-transform duration-150"
+				class="text-base-content/40 text-sm transition-transform duration-150 inline-flex"
 				style="transform: rotate({Math.min(pullDistance / PULL_THRESHOLD, 1) * 180}deg);"
 			>
-				↓
+				<Icon name="arrow-down" class="w-4 h-4" />
 			</span>
 		{/if}
 	</div>
@@ -336,7 +336,7 @@
 			<img src={logoSvg} alt="Pi" class="h-8 w-8 rounded-lg" />
 			{#if data.jobs.length > 0 || data.pollerRunning}
 				<a href="/jobs" class="btn btn-sm btn-ghost gap-1" title="View all jobs">
-					<span class="opacity-60">⚒</span>
+					<span class="opacity-60 inline-flex"><Icon name="hammer" class="w-4 h-4" /></span>
 					<span>Jobs</span>
 					{#if data.jobs.filter((j: any) => ['queued', 'claimed', 'running'].includes(j.status)).length > 0}
 						<span class="badge badge-xs badge-warning">{data.jobs.filter((j: any) => ['queued', 'claimed', 'running'].includes(j.status)).length}</span>
@@ -358,8 +358,8 @@
 					<span class="sm:hidden">Stop</span>
 				</button>
 			{/if}
-			<button class="btn btn-sm btn-primary" onclick={() => { hapticMedium(); showNewSession = true; }}>+ New</button>
-			<button class="btn btn-sm btn-ghost text-base" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh">↻</button>
+			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showNewSession = true; }}><Icon name="plus" class="w-4 h-4" /> New</button>
+			<button class="btn btn-sm btn-ghost" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh"><Icon name="refresh" class="w-4 h-4" /></button>
 			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
 				{#if theme === 'dark'}<Icon name="sun" class="w-5 h-5" />{:else}<Icon name="moon" class="w-5 h-5" />{/if}
 			</button>
@@ -399,7 +399,7 @@
 						aria-label="Toggle project {group.shortName}"
 						onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') toggleCollapse(group.cwd); }}
 					>
-						<span class="text-sm opacity-50 transition-transform {expandedProjects.has(group.cwd) ? 'rotate-90' : ''}">▶</span>
+						<span class="inline-flex text-sm opacity-50 transition-transform {expandedProjects.has(group.cwd) ? 'rotate-90' : ''}"><Icon name="chevron-right" class="w-3.5 h-3.5" /></span>
 						<span class="font-semibold flex-1 truncate">{group.shortName}</span>
 						{#if group.hasStreaming}
 							<span class="hidden sm:inline badge badge-warning badge-xs">streaming</span>
@@ -421,9 +421,9 @@
 							aria-label={group.devServerRunning ? 'Stop dev server' : 'Start dev server'}
 							>
 								{#if group.devServerRunning}
-									<span class="text-info text-base">⏹</span>
+									<span class="text-info"><Icon name="stop-square" class="w-4 h-4" /></span>
 								{:else}
-									<span class="opacity-50 text-base">▷</span>
+									<span class="opacity-50"><Icon name="play-outline" class="w-4 h-4" /></span>
 								{/if}
 							</button>
 						{/if}
@@ -440,7 +440,8 @@
 											<span class="loading loading-spinner loading-sm"></span>
 											New Session
 										{:else}
-											+ New Session
+											<span class="opacity-70 inline-flex"><Icon name="plus" class="w-4 h-4" /></span>
+											New Session
 										{/if}
 									</button>
 								</li>
@@ -458,17 +459,17 @@
 								</li>
 								<li>
 									<button onclick={(e) => { e.stopPropagation(); startEditDevCommand(group.cwd, group.devCommand); }}>
-										<span class="opacity-70">⚙</span>
+										<span class="opacity-70 inline-flex"><Icon name="settings" class="w-4 h-4" /></span>
 										Configure Dev
 									</button>
 								</li>
 								<li>
 									<button onclick={(e) => { e.stopPropagation(); toggleFavorite(group.cwd); }}>
 										{#if group.isFavorite}
-											<span class="text-warning">★</span>
+											<span class="text-warning inline-flex"><Icon name="star-filled" class="w-4 h-4" /></span>
 											Unfavorite
 										{:else}
-											<span class="opacity-50">☆</span>
+											<span class="opacity-50 inline-flex"><Icon name="star-outline" class="w-4 h-4" /></span>
 											Favourite
 										{/if}
 									</button>
@@ -499,7 +500,7 @@
 							title={group.devCommand ? `Dev: ${group.devCommand} (click to edit)` : 'Configure dev command'}
 							aria-label="Configure dev command"
 						>
-							<span class="opacity-40 text-base">⚙</span>
+							<span class="opacity-40"><Icon name="settings" class="w-4 h-4" /></span>
 						</button>
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
@@ -511,7 +512,7 @@
 							{#if creatingForProject === group.cwd}
 								<span class="loading loading-spinner loading-sm"></span>
 							{:else}
-								<span class="opacity-50 text-base">+</span>
+								<span class="opacity-50"><Icon name="plus" class="w-4 h-4" /></span>
 							{/if}
 						</button>
 						<button
@@ -520,9 +521,9 @@
 							title={group.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
 						>
 							{#if group.isFavorite}
-								<span class="text-warning text-base">★</span>
+								<span class="text-warning"><Icon name="star-filled" class="w-4 h-4" /></span>
 							{:else}
-								<span class="opacity-30 text-base">☆</span>
+								<span class="opacity-30"><Icon name="star-outline" class="w-4 h-4" /></span>
 							{/if}
 						</button>
 					</div>
@@ -552,7 +553,7 @@
 								Save
 							</button>
 							<button class="btn btn-xs btn-ghost" onclick={() => editingDevCommand = null}>
-								✕
+								<Icon name="close" class="w-3.5 h-3.5" />
 							</button>
 						</div>
 					{/if}
@@ -592,7 +593,7 @@
 											onclick={(e: MouseEvent) => deleteSession(session.id, e)}
 											title="Delete session"
 										>
-											✕
+											<Icon name="close" class="w-3.5 h-3.5" />
 										</button>
 									</a>
 								</SwipeToDelete>

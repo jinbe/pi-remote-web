@@ -1,4 +1,6 @@
 <script lang="ts">
+	import Icon from './Icon.svelte';
+
 	let {
 		open = false,
 		sessionId,
@@ -145,7 +147,7 @@
 						</span>
 					{/if}
 				</div>
-				<button class="btn btn-ghost btn-sm btn-circle" onclick={onclose}>✕</button>
+				<button class="btn btn-ghost btn-sm btn-circle" onclick={onclose}><Icon name="close" class="w-4 h-4" /></button>
 			</div>
 
 			{#if loading}
@@ -163,7 +165,7 @@
 			{:else if data && data.files.length === 0}
 				<div class="flex-1 flex items-center justify-center text-base-content/50">
 					<div class="text-center">
-						<div class="text-3xl mb-2">✓</div>
+						<div class="text-3xl mb-2"><Icon name="check" class="w-8 h-8 mx-auto" /></div>
 						<div>Working tree clean</div>
 					</div>
 				</div>
