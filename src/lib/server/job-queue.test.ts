@@ -21,7 +21,7 @@ describe('job-queue', () => {
 			expect(job.title).toBe('Test task');
 			expect(job.priority).toBe(0);
 			expect(job.loop_count).toBe(0);
-			expect(job.max_loops).toBe(5);
+			expect(job.max_loops).toBe(0);
 			expect(job.retry_count).toBe(0);
 			expect(job.max_retries).toBe(2);
 			expect(job.target_branch).toBe('main');

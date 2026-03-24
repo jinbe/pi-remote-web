@@ -21,7 +21,7 @@
 	let maxLoops = $state(5);
 	let reviewSkill = $state('');
 	let model = $state('');
-	let skipReview = $state(false);
+	let skipReview = $state(true);
 	let creating = $state(false);
 	let errorMsg = $state('');
 
@@ -37,7 +37,7 @@
 			maxLoops = 5;
 			reviewSkill = '';
 			model = '';
-			skipReview = false;
+			skipReview = true;
 			errorMsg = '';
 		}
 	});

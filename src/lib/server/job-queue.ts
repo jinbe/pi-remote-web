@@ -122,7 +122,7 @@ export function createJob(input: CreateJobInput): Job {
 		$priority: input.priority ?? 0,
 		$parent_job_id: input.parent_job_id ?? null,
 		$loop_count: input.loop_count ?? 0,
-		$max_loops: input.max_loops ?? 5,
+		$max_loops: input.max_loops ?? 0,
 		$pr_url: input.pr_url ?? null,
 		$review_skill: input.review_skill ?? null,
 		$model: input.model ?? null,
