@@ -18,13 +18,18 @@
 		loop_count: number;
 		max_loops: number;
 		parent_job_id: string | null;
+		session_id: string | null;
 		created_at: string;
 		updated_at: string;
 		error: string | null;
 	}
 
-	let { jobs = [], repo = '' }: { jobs: Job[]; repo?: string } = $props();
+	/** Statuses considered active (in-progress). */
+	const ACTIVE_STATUSES = new Set(['queued', 'claimed', 'running', 'reviewing']);
 
+	let { jobs = [], repo = '', showAllByDefault = false }: { jobs: Job[]; repo?: string; showAllByDefault?: boolean } = $props();
+
+	let showAll = $state(showAllByDefault);
 	let expandedJob = $state<string | null>(null);
 	let chainJobs = $state<Job[]>([]);
 	let loadingChain = $state(false);
@@ -51,10 +56,13 @@
 		cancelled: 'dash',
 	};
 
-	// Filter jobs for the given repo (if provided)
-	const filteredJobs = $derived(
+	// Filter jobs: by repo (if provided) and by active status (unless showAll)
+	const repoJobs = $derived(
 		repo ? jobs.filter((j) => j.repo === repo) : jobs
 	);
+	const activeJobs = $derived(repoJobs.filter((j) => ACTIVE_STATUSES.has(j.status)));
+	const filteredJobs = $derived(showAll ? repoJobs : activeJobs);
+	const hiddenCount = $derived(repoJobs.length - activeJobs.length);
 
 	async function toggleChain(jobId: string) {
 		hapticLight();
@@ -115,9 +123,19 @@
 	}
 </script>
 
-{#if filteredJobs.length === 0}
+{#if repoJobs.length === 0}
 	<div class="py-4 text-center text-sm text-base-content/50">
 		No jobs yet
+	</div>
+{:else if filteredJobs.length === 0}
+	<div class="py-2 text-center text-sm text-base-content/50">
+		No active jobs
+		{#if hiddenCount > 0}
+			<span class="mx-1">·</span>
+			<button class="link link-primary text-sm" onclick={() => { hapticLight(); showAll = true; }}>
+				Show {hiddenCount} completed
+			</button>
+		{/if}
 	</div>
 {:else}
 	<div class="flex flex-col gap-2">
@@ -208,6 +226,19 @@
 					</div>
 				{/if}
 
+				<!-- Go to session link (only for running/reviewing jobs with a session) -->
+				{#if expandedJob === job.id && job.session_id && ['running', 'reviewing', 'claimed'].includes(job.status)}
+					<div class="px-3 pb-2">
+						<a
+							href="/session/{job.session_id}"
+							class="btn btn-xs btn-outline btn-primary gap-1"
+						>
+							<Icon name="chevron-right" class="w-3 h-3" />
+							Go to session
+						</a>
+					</div>
+				{/if}
+
 				<!-- Chain visualisation -->
 				{#if expandedJob === job.id}
 					{#if loadingChain}
@@ -222,5 +253,21 @@
 				{/if}
 			</div>
 		{/each}
+
+		<!-- Show all / Show active toggle -->
+		{#if hiddenCount > 0}
+			<div class="text-center pt-1">
+				<button
+					class="link text-xs text-base-content/40 hover:text-base-content/60"
+					onclick={() => { hapticLight(); showAll = !showAll; }}
+				>
+					{#if showAll}
+						Hide {hiddenCount} completed
+					{:else}
+						Show {hiddenCount} completed
+					{/if}
+				</button>
+			</div>
+		{/if}
 	</div>
 {/if}

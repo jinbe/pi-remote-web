@@ -6,8 +6,13 @@ import { getJobs } from '$lib/server/job-queue';
 import { isRunning as isPollerRunning } from '$lib/server/job-poller';
 import type { PageServerLoad } from './$types';
 
+/** Pattern matching worktree directories created by the job poller. */
+const WORKTREE_CWD_PATTERN = /\/\.worktrees\/job-/;
+
 export const load: PageServerLoad = async () => {
-	const sessions = await listSessions();
+	const allSessions = await listSessions();
+	// Hide sessions running inside job worktrees — they clutter the dashboard
+	const sessions = allSessions.filter((s) => !WORKTREE_CWD_PATTERN.test(s.cwd));
 	const activeSessionIds = [...getActiveSessionIds()];
 	const streamingSessionIds = activeSessionIds.filter(
 		(id) => getStreamingState(id).isStreaming
