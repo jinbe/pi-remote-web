@@ -128,6 +128,7 @@
 	const activeCount = $derived((data.jobs as Job[]).filter((j) => ACTIVE_STATUSES.has(j.status)).length);
 	const queuedCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'queued').length);
 	const runningCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'running').length);
+	const reviewingCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'reviewing').length);
 	const doneCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'done').length);
 	const failedCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'failed').length);
 	const totalCount = $derived((data.jobs as Job[]).length);
@@ -137,6 +138,7 @@
 			case 'active': return activeCount;
 			case 'queued': return queuedCount;
 			case 'running': return runningCount;
+			case 'reviewing': return reviewingCount;
 			case 'done': return doneCount;
 			case 'failed': return failedCount;
 			case 'all': return totalCount;
@@ -188,6 +190,20 @@
 			invalidateAll();
 		} catch (e) {
 			console.error('Failed to cancel job:', e);
+		}
+	}
+
+	async function markJobDone(jobId: string) {
+		hapticMedium();
+		try {
+			await fetch(`/api/jobs/${jobId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ status: 'done' }),
+			});
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to mark job as done:', e);
 		}
 	}
 
@@ -291,7 +307,7 @@
 			<span class="flex-1 truncate text-sm font-medium">{job.title}</span>
 
 			<!-- PR link (inline when done) -->
-			{#if job.pr_url && job.status === 'done'}
+			{#if job.pr_url && (job.status === 'done' || job.status === 'reviewing')}
 				<a
 					href={job.pr_url}
 					target="_blank"
@@ -455,13 +471,19 @@
 							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
 						>Cancel</button>
 					{/if}
+					{#if job.status === 'reviewing'}
+						<button
+							class="btn btn-xs btn-success btn-outline gap-1"
+							onclick={(e) => { e.stopPropagation(); markJobDone(job.id); }}
+						><Icon name="check" class="w-3 h-3" /> Done</button>
+					{/if}
 					{#if job.status === 'failed'}
 						<button
 							class="btn btn-xs btn-warning btn-outline gap-1"
 							onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}
 						><Icon name="refresh" class="w-3 h-3" /> Retry</button>
 					{/if}
-					{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
+					{#if ['queued', 'reviewing', 'done', 'failed', 'cancelled'].includes(job.status)}
 						<button
 							class="btn btn-xs btn-error btn-outline"
 							onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
@@ -575,7 +597,7 @@
 	{:else}
 		<div class="flex flex-col gap-2">
 			{#each filteredJobs as job (job.id)}
-				{@const isDeletable = ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
+				{@const isDeletable = ['queued', 'reviewing', 'done', 'failed', 'cancelled'].includes(job.status)}
 				{#if isDeletable}
 					<SwipeToDelete ondelete={() => deleteJobDirect(job.id)}>
 						{@render jobCard(job)}

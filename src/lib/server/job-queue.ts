@@ -246,7 +246,7 @@ export function getJobChain(id: string): Job[] {
 }
 
 /**
- * Delete a job. Only allows deletion of queued, done, failed, or cancelled jobs.
+ * Delete a job. Only allows deletion of queued, reviewing, done, failed, or cancelled jobs.
  */
 export function deleteJob(id: string): Job | null {
 	const job = getJob(id);

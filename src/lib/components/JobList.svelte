@@ -89,6 +89,20 @@
 		}
 	}
 
+	async function markJobDone(jobId: string) {
+		hapticMedium();
+		try {
+			await fetch(`/api/jobs/${jobId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ status: 'done' }),
+			});
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to mark job as done:', e);
+		}
+	}
+
 	async function deleteJob(jobId: string) {
 		if (!confirm('Delete this job?')) return;
 		hapticMedium();
@@ -157,6 +171,13 @@
 					</span>
 
 					<!-- Actions -->
+					{#if job.status === 'reviewing'}
+						<button
+							class="btn btn-ghost btn-xs text-success"
+							onclick={(e) => { e.stopPropagation(); markJobDone(job.id); }}
+							title="Mark as done"
+						><Icon name="check" class="w-3.5 h-3.5" /></button>
+					{/if}
 					{#if job.status === 'failed'}
 						<button
 							class="btn btn-ghost btn-xs"
@@ -164,7 +185,7 @@
 							title="Retry"
 						><Icon name="refresh" class="w-3.5 h-3.5" /></button>
 					{/if}
-					{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
+					{#if ['queued', 'reviewing', 'done', 'failed', 'cancelled'].includes(job.status)}
 						<button
 							class="btn btn-ghost btn-xs text-error/60"
 							onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
