@@ -7,6 +7,7 @@
 import { json, error } from '@sveltejs/kit';
 import { getJobs, createJob } from '$lib/server/job-queue';
 import { fetchPrMetadata, fallbackTitle } from '$lib/server/pr-metadata';
+import { fetchIssueMetadata, fallbackIssueTitle } from '$lib/server/issue-metadata';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url }) => {
@@ -30,7 +31,9 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		const isReview = type === 'review';
 		const trimmedPrUrl = pr_url?.trim() || undefined;
+		const trimmedIssueUrl = issue_url?.trim() || undefined;
 		let resolvedTitle = title?.trim() || undefined;
+		let resolvedDescription = description?.trim() || undefined;
 		let resolvedBranch = branch?.trim() || undefined;
 		let resolvedTargetBranch = target_branch?.trim() || undefined;
 
@@ -47,6 +50,17 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		}
 
+		// Infer title/description from issue URL when not provided
+		if (trimmedIssueUrl && (!resolvedTitle || !resolvedDescription)) {
+			const issueMeta = fetchIssueMetadata(trimmedIssueUrl);
+			if (issueMeta) {
+				if (!resolvedTitle) resolvedTitle = issueMeta.title;
+				if (!resolvedDescription) resolvedDescription = issueMeta.description || undefined;
+			} else if (!resolvedTitle) {
+				resolvedTitle = fallbackIssueTitle(trimmedIssueUrl);
+			}
+		}
+
 		// Title is required for non-review jobs; review jobs must have a PR URL at minimum
 		if (isReview && !trimmedPrUrl) {
 			throw error(400, 'PR URL is required for review jobs');
@@ -58,7 +72,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		const job = createJob({
 			type: type || undefined, // Let createJob apply default
 			title: resolvedTitle,
-			description: description?.trim() || undefined,
+			description: resolvedDescription,
 			repo: repo?.trim() || undefined,
 			branch: resolvedBranch,
 			issue_url: issue_url?.trim() || undefined,

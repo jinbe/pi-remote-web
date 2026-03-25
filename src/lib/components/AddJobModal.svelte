@@ -41,7 +41,7 @@
 	});
 
 	async function handleCreate() {
-		if (!title.trim() || creating) return;
+		if ((!title.trim() && !issueUrl.trim()) || creating) return;
 		hapticMedium();
 		creating = true;
 		errorMsg = '';
@@ -83,15 +83,33 @@
 		<div class="modal-box max-w-lg">
 			<h3 class="font-bold text-lg">New Job</h3>
 
-			<!-- Title -->
+			<!-- Issue URL -->
 			<div class="form-control mt-4">
+				<label class="label" for="job-issue">
+					<span class="label-text">Issue URL (optional)</span>
+				</label>
+				<input
+					id="job-issue"
+					class="input w-full"
+					placeholder="https://github.com/org/repo/issues/123"
+					bind:value={issueUrl}
+				/>
+				{#if issueUrl.trim()}
+					<div class="label pb-0">
+						<span class="label-text-alt text-base-content/40">Title and description will be fetched from the issue if left empty</span>
+					</div>
+				{/if}
+			</div>
+
+			<!-- Title -->
+			<div class="form-control mt-3">
 				<label class="label" for="job-title">
-					<span class="label-text">Title</span>
+					<span class="label-text">Title{issueUrl.trim() ? '' : ' *'}</span>
 				</label>
 				<input
 					id="job-title"
 					class="input w-full"
-					placeholder="e.g. Add user authentication"
+					placeholder={issueUrl.trim() ? 'Auto-filled from issue if empty' : 'e.g. Add user authentication'}
 					bind:value={title}
 				/>
 			</div>
@@ -99,7 +117,7 @@
 			<!-- Description -->
 			<div class="form-control mt-3">
 				<label class="label" for="job-description">
-					<span class="label-text">Description (optional)</span>
+					<span class="label-text">Description{issueUrl.trim() ? ' (optional — fetched from issue)' : ' (optional)'}</span>
 				</label>
 				<textarea
 					id="job-description"
@@ -137,19 +155,6 @@
 					/>
 				</div>
 			{/if}
-
-			<!-- Issue URL -->
-			<div class="form-control mt-3">
-				<label class="label" for="job-issue">
-					<span class="label-text">Issue URL (optional)</span>
-				</label>
-				<input
-					id="job-issue"
-					class="input w-full"
-					placeholder="https://github.com/org/repo/issues/123"
-					bind:value={issueUrl}
-				/>
-			</div>
 
 			<!-- Model (optional) -->
 			<div class="form-control mt-3">
@@ -225,7 +230,7 @@
 				<button
 					class="btn btn-primary"
 					onclick={handleCreate}
-					disabled={!title.trim() || creating}
+					disabled={(!title.trim() && !issueUrl.trim()) || creating}
 				>
 					{#if creating}
 						<span class="loading loading-spinner loading-xs"></span>
