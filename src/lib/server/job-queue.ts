@@ -63,7 +63,7 @@ export interface UpdateJobInput {
 	pr_number?: number;
 	review_verdict?: Job['review_verdict'];
 	session_id?: string;
-	worktree_path?: string;
+	worktree_path?: string | null;
 	result_summary?: string;
 	error?: string;
 	branch?: string;

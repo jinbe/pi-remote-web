@@ -87,6 +87,11 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 export function cleanupJob(job: Job): void {
 	migrateWorktreeSessions(job);
 	cleanupWorktree(job);
+
+	// Clear worktree_path in the DB so the cache doesn't reference a removed directory
+	if (job.worktree_path) {
+		updateJobStatus(job.id, { worktree_path: null });
+	}
 }
 
 // --- Session migration ---
