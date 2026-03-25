@@ -389,6 +389,13 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 			}
 			
 		} else if (job.status === 'reviewing') {
+			// Fire-and-forget jobs (max_loops=0) never have automated reviewing → done transitions.
+			// The user manually reviews the PR and marks the job done via the dashboard.
+			if (job.max_loops === 0) {
+				log.info('job-poller', `agent_end for fire-and-forget job ${jobId} in reviewing — ignoring (manual review only)`);
+				return;
+			}
+
 			// Review phase complete → check verdict (exact match first, then fuzzy fallback)
 			const verdict = extractVerdict(assistantText, verdictMatch);
 			

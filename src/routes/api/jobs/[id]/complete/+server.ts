@@ -21,8 +21,8 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			throw error(403, 'Invalid or missing callback token');
 		}
 
-		if (!status || !['done', 'failed'].includes(status)) {
-			throw error(400, 'Invalid status — must be "done" or "failed"');
+		if (!status || !['done', 'failed', 'reviewing'].includes(status)) {
+			throw error(400, 'Invalid status — must be "done", "failed", or "reviewing"');
 		}
 
 		const updated = handleCompletion(params.id, {

@@ -16,7 +16,7 @@ import { homedir } from 'os';
 
 export interface CompletionPayload {
 	jobId: string;
-	status: 'done' | 'failed';
+	status: 'done' | 'failed' | 'reviewing';
 	prUrl?: string;
 	verdict?: 'approved' | 'changes_requested';
 	error?: string;

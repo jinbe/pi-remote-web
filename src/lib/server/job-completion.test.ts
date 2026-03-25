@@ -57,9 +57,10 @@ describe('job-completion', () => {
 			const job = createTestJob({ title: 'Quick task', max_loops: 0 });
 			updateJobStatus(job.id, { status: 'running' });
 
+			// Extension callback sends 'reviewing' (not 'done') for task completions
 			handleCompletion(job.id, {
 				jobId: job.id,
-				status: 'done',
+				status: 'reviewing',
 				prUrl: 'https://github.com/org/repo/pull/2',
 			});
 
@@ -74,7 +75,7 @@ describe('job-completion', () => {
 
 			handleCompletion(job.id, {
 				jobId: job.id,
-				status: 'done',
+				status: 'reviewing',
 			});
 
 			const updated = getJob(job.id)!;
@@ -94,6 +95,23 @@ describe('job-completion', () => {
 			const updated = getJob(job.id)!;
 			expect(updated.status).toBe('done');
 			expect(updated.review_verdict).toBe('approved');
+		});
+
+		it('fire-and-forget job in reviewing ignores completion callback', () => {
+			// Simulates the race condition: extension callback fires after the session
+			// subscription already moved the job to reviewing. Fire-and-forget jobs
+			// (max_loops=0) must remain in reviewing for manual review.
+			const job = createTestJob({ title: 'Fire-and-forget guard', max_loops: 0 });
+			updateJobStatus(job.id, { status: 'reviewing', pr_url: 'https://github.com/org/repo/pull/3' });
+
+			handleCompletion(job.id, {
+				jobId: job.id,
+				status: 'done',
+				verdict: 'approved',
+			});
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('reviewing');
 		});
 	});
 

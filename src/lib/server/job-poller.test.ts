@@ -145,6 +145,23 @@ describe('job-poller', () => {
 			});
 			expect(job.model).toBe('anthropic/claude-sonnet-4');
 		});
+
+		it('fire-and-forget job stays in reviewing when handleJobAgentEnd is called again', async () => {
+			const job = createTestJob({
+				title: 'Fire-and-forget review guard',
+				repo: '/repo',
+				max_loops: 0,
+			});
+			// Simulate the race condition: job is already in reviewing state
+			updateJobStatus(job.id, { status: 'reviewing', pr_url: 'https://github.com/org/repo/pull/5' });
+
+			// Extension callback fires a second agent_end with an approved verdict
+			await handleJobAgentEnd(job.id, 'Everything looks great!\nVERDICT: approved');
+
+			// Status must remain reviewing — no automated transition for fire-and-forget
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('reviewing');
+		});
 	});
 
 	describe('handleJobAgentEnd — review jobs', () => {

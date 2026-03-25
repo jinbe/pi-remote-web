@@ -40,9 +40,12 @@ export default function (pi: ExtensionAPI) {
 			const prUrlMatch = assistantText.match(PR_URL_PATTERN);
 			const verdictMatch = assistantText.match(VERDICT_PATTERN);
 
+			// If there's a verdict, the agent was reviewing → report as done.
+			// Otherwise it was a task phase → report as reviewing so the server
+			// doesn't race past reviewing into done for fire-and-forget jobs.
 			const payload: Record<string, string | undefined> = {
 				jobId,
-				status: "done",
+				status: verdictMatch ? "done" : "reviewing",
 				token: callbackToken,
 			};
 
