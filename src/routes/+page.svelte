@@ -29,6 +29,7 @@
 	let addJobRepo = $state('');
 	let showAddReviewJob = $state(false);
 	let addReviewJobRepo = $state('');
+	let showAllSessionsFor = $state<Set<string>>(new Set());
 
 	// Persist expanded project to localStorage
 	$effect(() => {
@@ -582,8 +583,17 @@
 
 					<!-- Sessions list -->
 					{#if expandedProjects.has(group.cwd)}
+						{@const activeSessions = group.sessions.filter((s) => activeSet.has(s.id))}
+						{@const inactiveSessions = group.sessions.filter((s) => !activeSet.has(s.id))}
+						{@const showingAll = showAllSessionsFor.has(group.cwd)}
+						{@const visibleSessions = showingAll ? group.sessions : activeSessions}
 						<div class="session-list border-t border-base-300">
-							{#each group.sessions as session, i (session.id)}
+							{#if visibleSessions.length === 0 && inactiveSessions.length > 0}
+								<div class="px-4 py-3 text-sm text-base-content/40">
+									No active sessions
+								</div>
+							{/if}
+							{#each visibleSessions as session, i (session.id)}
 								<SwipeToDelete
 									ondelete={() => deleteSession(session.id)}
 									disabled={activeSet.has(session.id)}
@@ -620,6 +630,29 @@
 									</a>
 								</SwipeToDelete>
 							{/each}
+
+							<!-- Show/hide inactive sessions toggle -->
+							{#if inactiveSessions.length > 0}
+								<div class="px-4 py-2 text-center border-t border-base-300/50">
+									<button
+										class="link text-xs text-base-content/40 hover:text-base-content/60"
+										onclick={(e) => {
+											e.stopPropagation();
+											hapticLight();
+											const next = new Set(showAllSessionsFor);
+											if (showingAll) next.delete(group.cwd);
+											else next.add(group.cwd);
+											showAllSessionsFor = next;
+										}}
+									>
+										{#if showingAll}
+											Hide {inactiveSessions.length} inactive session{inactiveSessions.length === 1 ? '' : 's'}
+										{:else}
+											Show {inactiveSessions.length} inactive session{inactiveSessions.length === 1 ? '' : 's'}
+										{/if}
+									</button>
+								</div>
+							{/if}
 						</div>
 
 						<!-- Jobs for this project -->
