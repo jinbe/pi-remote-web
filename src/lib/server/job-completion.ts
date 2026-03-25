@@ -6,6 +6,7 @@
  * is respected — it never directly marks a job as done.
  */
 import { getJob, updateJobStatus, type Job } from './job-queue';
+import { getDb } from './cache';
 import { log } from './logger';
 import { existsSync, mkdirSync, readdirSync, rmSync, copyFileSync } from 'fs';
 import { execFileSync } from 'child_process';
@@ -137,6 +138,19 @@ function migrateWorktreeSessions(job: Job): void {
 		// Remove the worktree session directory
 		rmSync(worktreeSessionDir, { recursive: true, force: true });
 		log.info('job-completion', `removed worktree session dir: ${worktreeSessionDir}`);
+
+		// Purge stale cache entries so the worktree doesn't appear as a project
+		const worktreeCwd = resolve(job.worktree_path);
+		const db = getDb();
+		const staleFiles = db.query('SELECT file_path FROM session_meta WHERE cwd = ?').all(worktreeCwd) as { file_path: string }[];
+		if (staleFiles.length > 0) {
+			const filePaths = staleFiles.map(r => r.file_path);
+			for (const fp of filePaths) {
+				db.run('DELETE FROM session_messages WHERE file_path = ?', [fp]);
+			}
+			db.run('DELETE FROM session_meta WHERE cwd = ?', [worktreeCwd]);
+			log.info('job-completion', `purged ${staleFiles.length} stale cache entries for worktree cwd: ${worktreeCwd}`);
+		}
 	} catch (err) {
 		log.warn('job-completion', `failed to migrate worktree sessions: ${err}`);
 	}
