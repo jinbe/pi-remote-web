@@ -15,9 +15,15 @@ function write(level: string, tag: string, ...args: any[]) {
 	const msg = args.map(a =>
 		typeof a === 'string' ? a : JSON.stringify(a, null, 0)
 	).join(' ');
-	const line = `${timestamp()} [${level}] [${tag}] ${msg}\n`;
+	const line = `${timestamp()} [${level}] [${tag}] ${msg}`;
+
+	// Console output
+	const consoleFn = level === 'ERROR' ? console.error : level === 'WARN' ? console.warn : console.log;
+	consoleFn(line);
+
+	// File output
 	try {
-		appendFileSync(LOG_FILE, line);
+		appendFileSync(LOG_FILE, line + '\n');
 	} catch { /* best effort */ }
 }
 
