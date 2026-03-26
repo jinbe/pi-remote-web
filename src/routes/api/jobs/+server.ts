@@ -5,7 +5,7 @@
  * Review jobs can omit the title — it's inferred from the PR URL via `gh` CLI.
  */
 import { json, error } from '@sveltejs/kit';
-import { getJobs, createJob } from '$lib/server/job-queue';
+import { getJobs, createJob, findActiveJobByPrUrl, findActiveJobByIssueUrl } from '$lib/server/job-queue';
 import { fetchPrMetadata, fallbackTitle } from '$lib/server/pr-metadata';
 import { fetchIssueMetadata, fallbackIssueTitle } from '$lib/server/issue-metadata';
 import type { RequestHandler } from './$types';
@@ -67,6 +67,20 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 		if (!resolvedTitle) {
 			throw error(400, 'Title is required');
+		}
+
+		// Deduplicate: reject if an active job already exists for the same PR or issue URL
+		if (trimmedPrUrl) {
+			const existing = findActiveJobByPrUrl(trimmedPrUrl);
+			if (existing) {
+				throw error(409, `An active job already exists for this PR (${existing.status}): ${existing.title}`);
+			}
+		}
+		if (trimmedIssueUrl) {
+			const existing = findActiveJobByIssueUrl(trimmedIssueUrl);
+			if (existing) {
+				throw error(409, `An active job already exists for this issue (${existing.status}): ${existing.title}`);
+			}
 		}
 
 		const job = createJob({

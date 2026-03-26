@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { claimNextJob, updateJobStatus, getJob, getJobChain, deleteJob, retryJob } from './job-queue';
+import { claimNextJob, updateJobStatus, getJob, getJobChain, deleteJob, retryJob, findActiveJobByPrUrl, findActiveJobByIssueUrl } from './job-queue';
 import { createTestJob, getTestJobs, cleanupTestJobs } from './test-helpers';
 
 describe('job-queue', () => {
@@ -239,6 +239,82 @@ describe('job-queue', () => {
 			updateJobStatus(job.id, { status: 'failed' });
 
 			expect(() => retryJob(job.id)).toThrow(/exceeded maximum retries/);
+		});
+	});
+
+	describe('findActiveJobByPrUrl', () => {
+		it('finds a queued job by PR URL', () => {
+			const job = createTestJob({ type: 'review', title: 'Review PR', pr_url: 'https://github.com/org/repo/pull/1' });
+			const found = findActiveJobByPrUrl('https://github.com/org/repo/pull/1');
+			expect(found).not.toBeNull();
+			expect(found!.id).toBe(job.id);
+		});
+
+		it('finds a running job by PR URL', () => {
+			const job = createTestJob({ type: 'review', title: 'Review PR', pr_url: 'https://github.com/org/repo/pull/2' });
+			updateJobStatus(job.id, { status: 'running' });
+			const found = findActiveJobByPrUrl('https://github.com/org/repo/pull/2');
+			expect(found).not.toBeNull();
+			expect(found!.id).toBe(job.id);
+		});
+
+		it('finds a reviewing job by PR URL', () => {
+			const job = createTestJob({ title: 'Task with PR', pr_url: 'https://github.com/org/repo/pull/3' });
+			updateJobStatus(job.id, { status: 'reviewing' });
+			const found = findActiveJobByPrUrl('https://github.com/org/repo/pull/3');
+			expect(found).not.toBeNull();
+			expect(found!.id).toBe(job.id);
+		});
+
+		it('ignores done jobs', () => {
+			createTestJob({ type: 'review', title: 'Done review', pr_url: 'https://github.com/org/repo/pull/4' });
+			updateJobStatus(createTestJob({ type: 'review', title: 'Done review', pr_url: 'https://github.com/org/repo/pull/4' }).id, { status: 'done' });
+			// The first job is still queued, so it should be found
+			const found = findActiveJobByPrUrl('https://github.com/org/repo/pull/4');
+			expect(found).not.toBeNull();
+			expect(found!.status).toBe('queued');
+		});
+
+		it('returns null when only terminal jobs exist for the PR', () => {
+			const job = createTestJob({ type: 'review', title: 'Done review', pr_url: 'https://github.com/org/repo/pull/5' });
+			updateJobStatus(job.id, { status: 'done' });
+			expect(findActiveJobByPrUrl('https://github.com/org/repo/pull/5')).toBeNull();
+		});
+
+		it('returns null when no jobs match the PR URL', () => {
+			expect(findActiveJobByPrUrl('https://github.com/org/repo/pull/999')).toBeNull();
+		});
+	});
+
+	describe('findActiveJobByIssueUrl', () => {
+		it('finds a queued job by issue URL', () => {
+			const job = createTestJob({ title: 'Fix issue', issue_url: 'https://github.com/org/repo/issues/10' });
+			const found = findActiveJobByIssueUrl('https://github.com/org/repo/issues/10');
+			expect(found).not.toBeNull();
+			expect(found!.id).toBe(job.id);
+		});
+
+		it('finds a running job by issue URL', () => {
+			const job = createTestJob({ title: 'Fix issue', issue_url: 'https://github.com/org/repo/issues/11' });
+			updateJobStatus(job.id, { status: 'running' });
+			const found = findActiveJobByIssueUrl('https://github.com/org/repo/issues/11');
+			expect(found).not.toBeNull();
+		});
+
+		it('returns null when only done jobs exist for the issue', () => {
+			const job = createTestJob({ title: 'Done fix', issue_url: 'https://github.com/org/repo/issues/12' });
+			updateJobStatus(job.id, { status: 'done' });
+			expect(findActiveJobByIssueUrl('https://github.com/org/repo/issues/12')).toBeNull();
+		});
+
+		it('returns null for failed jobs', () => {
+			const job = createTestJob({ title: 'Failed fix', issue_url: 'https://github.com/org/repo/issues/13' });
+			updateJobStatus(job.id, { status: 'failed' });
+			expect(findActiveJobByIssueUrl('https://github.com/org/repo/issues/13')).toBeNull();
+		});
+
+		it('returns null when no jobs match the issue URL', () => {
+			expect(findActiveJobByIssueUrl('https://github.com/org/repo/issues/999')).toBeNull();
 		});
 	});
 });

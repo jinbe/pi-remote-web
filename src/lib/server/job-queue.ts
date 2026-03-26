@@ -265,6 +265,31 @@ export function deleteJob(id: string): Job | null {
 	return deleted;
 }
 
+/** Statuses that indicate a job is still in progress (not terminal). */
+const ACTIVE_STATUSES = ['queued', 'claimed', 'running', 'reviewing'];
+
+/**
+ * Find an active job that matches the given PR URL.
+ * Used to prevent duplicate review jobs for the same pull request.
+ */
+export function findActiveJobByPrUrl(prUrl: string): Job | null {
+	const placeholders = ACTIVE_STATUSES.map(() => '?').join(', ');
+	return getDb().query(
+		`SELECT * FROM jobs WHERE pr_url = ? AND status IN (${placeholders}) LIMIT 1`
+	).get(prUrl, ...ACTIVE_STATUSES) as Job | null;
+}
+
+/**
+ * Find an active job that matches the given issue URL.
+ * Used to prevent duplicate task jobs for the same issue.
+ */
+export function findActiveJobByIssueUrl(issueUrl: string): Job | null {
+	const placeholders = ACTIVE_STATUSES.map(() => '?').join(', ');
+	return getDb().query(
+		`SELECT * FROM jobs WHERE issue_url = ? AND status IN (${placeholders}) LIMIT 1`
+	).get(issueUrl, ...ACTIVE_STATUSES) as Job | null;
+}
+
 /**
  * Retry a failed job by resetting its status to queued and incrementing retry_count.
  */
