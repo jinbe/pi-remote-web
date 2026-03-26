@@ -196,7 +196,12 @@
 
 		function onResize() {
 			if (!vv || !pageContainer) return;
-			pageContainer.style.height = `${vv.height}px`;
+			// The root layout applies padding-top: env(safe-area-inset-top),
+			// so the available height inside the layout is less than vv.height.
+			// Read the parent's padding to account for it.
+			const parent = pageContainer.parentElement;
+			const safeTop = parent ? parseInt(getComputedStyle(parent).paddingTop || '0', 10) : 0;
+			pageContainer.style.height = `${vv.height - safeTop}px`;
 			pageContainer.style.transform = `translateY(${vv.offsetTop}px)`;
 			scrollToBottom();
 		}
