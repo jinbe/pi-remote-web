@@ -33,10 +33,18 @@ export interface CompletionPayload {
  * For failures, marks the job as failed directly (no state machine needed).
  * For success, constructs the assistant text markers and lets handleJobAgentEnd
  * drive the state transitions (running → reviewing → done).
+ *
+ * The server-side session subscription also calls handleJobAgentEnd on agent_end,
+ * so the callback and subscription race. We guard against double-processing:
+ * - Terminal states (done/failed/cancelled) are ignored outright.
+ * - If the subscription already transitioned the job to the same state the
+ *   callback wants (e.g. both want 'reviewing'), we skip the state machine
+ *   but still update any missing fields (pr_url, verdict) from the callback.
  */
-export function handleCompletion(jobId: string, payload: CompletionPayload): Job {
-	// Lazy import to avoid circular dependency — job-poller imports from us
-	const { handleJobAgentEnd } = require('./job-poller');
+export async function handleCompletion(jobId: string, payload: CompletionPayload): Promise<Job> {
+	// Dynamic import to avoid circular dependency — job-poller imports from us.
+	// Cannot use require() because the project is ESM ("type": "module").
+	const { handleJobAgentEnd } = await import('./job-poller');
 
 	const job = getJob(jobId);
 	if (!job) {
@@ -64,6 +72,25 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 		return updated!;
 	}
 
+	// Guard against the subscription/callback race: if the subscription already
+	// moved the job to 'reviewing' and the callback also reports 'reviewing',
+	// don't re-run the state machine (which would see the job in 'reviewing'
+	// without a VERDICT and either ignore it or mark it as failed). Instead,
+	// just patch any missing fields from the callback payload.
+	if (job.status === 'reviewing' && payload.status === 'reviewing') {
+		const patchUpdates: Record<string, any> = {};
+		if (payload.prUrl && !job.pr_url) patchUpdates.pr_url = payload.prUrl;
+		if (payload.resultSummary && !job.result_summary) patchUpdates.result_summary = payload.resultSummary;
+
+		if (Object.keys(patchUpdates).length > 0) {
+			updateJobStatus(jobId, patchUpdates);
+			log.info('job-completion', `job ${jobId} already reviewing — patched fields from callback: ${Object.keys(patchUpdates).join(', ')}`);
+		} else {
+			log.info('job-completion', `job ${jobId} already reviewing — callback is a no-op`);
+		}
+		return getJob(jobId) ?? job;
+	}
+
 	// Reconstruct the assistant text markers from the callback payload
 	// so handleJobAgentEnd can extract them and drive the state machine.
 	const markerLines: string[] = [];
@@ -72,8 +99,9 @@ export function handleCompletion(jobId: string, payload: CompletionPayload): Job
 	if (payload.resultSummary) markerLines.push(payload.resultSummary);
 	const syntheticText = markerLines.join('\n');
 
-	// Delegate to the state machine — this handles running → reviewing → done
-	handleJobAgentEnd(jobId, syntheticText);
+	// Delegate to the state machine — this handles running → reviewing → done.
+	// Await so the state transition completes before we return the updated job.
+	await handleJobAgentEnd(jobId, syntheticText);
 
 	// Return the updated job (state may have changed)
 	return getJob(jobId) ?? job;

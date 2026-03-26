@@ -27,6 +27,10 @@
 	<title>Pi Dashboard</title>
 </svelte:head>
 
-<div data-theme={daisyTheme} class="fixed inset-0 bg-base-100 text-base-content overflow-hidden overscroll-none">
+<div
+	data-theme={daisyTheme}
+	class="fixed inset-0 bg-base-100 text-base-content overflow-hidden overscroll-none"
+	style="padding-top: env(safe-area-inset-top); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right);"
+>
 	{@render children()}
 </div>
