@@ -6,23 +6,21 @@
  * queued → claimed → running → reviewing → done/failed/cancelled
  */
 import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
-import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt } from './job-prompts';
+import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt, WORKTREE_BASE } from './job-prompts';
 import { cleanupJob } from './job-completion';
 import { createSession, sendMessage, subscribe, stopSession, isActive } from './rpc-manager';
 import { log } from './logger';
 import { getDb } from './cache';
-import { join } from 'path';
-import { mkdirSync, existsSync, rmSync } from 'fs';
-import { execFileSync } from 'child_process';
+import { mkdirSync, existsSync } from 'fs';
 
 // --- Constants ---
 
 const POLL_INTERVAL_MS = 30_000;
-const WORKTREE_BASE = process.env.PI_WORKTREE_DIR || join(process.cwd(), '.worktrees');
 
 /** Patterns for extracting result markers from assistant text. */
 const PR_URL_PATTERN = /PR_URL:\s*(\S+)/;
 const VERDICT_PATTERN = /VERDICT:\s*(approved|changes_requested)/;
+const WORKTREE_PATH_PATTERN = /WORKTREE_PATH:\s*(\S+)/;
 
 /**
  * Fuzzy fallback patterns for verdict detection when the exact VERDICT marker
@@ -52,14 +50,14 @@ export function start(): void {
 		return;
 	}
 
-	// Ensure worktree base directory exists
+	// Ensure worktree base directory exists (the agent creates worktrees here)
 	try { mkdirSync(WORKTREE_BASE, { recursive: true }); } catch { /* already exists */ }
 
 	// Recover jobs orphaned by a server restart before polling for new work
 	recoverOrphanedJobs();
 
 	pollTimer = setInterval(() => pollOnce(), POLL_INTERVAL_MS);
-	log.info('job-poller', `started (interval: ${POLL_INTERVAL_MS}ms, worktree dir: ${WORKTREE_BASE})`);
+	log.info('job-poller', `started (interval: ${POLL_INTERVAL_MS}ms)`);
 
 	// Run an immediate poll on start (fire-and-forget — runs async)
 	setTimeout(() => pollOnce(), 0);
@@ -118,19 +116,10 @@ export function recoverOrphanedJobs(): void {
 			}
 		}
 
-		// Clean up stale auto-generated branch (job/<id>) if it exists
-		if (!job.branch && job.repo) {
-			const staleBranch = `job/${job.id}`;
-			try {
-				execFileSync('git', ['branch', '-D', staleBranch], { cwd: job.repo, stdio: 'pipe' });
-				log.info('job-poller', `deleted stale branch ${staleBranch} during recovery`);
-			} catch { /* branch doesn't exist — fine */ }
-		}
-
-		// Reset to queued — clear claimed_at, worktree_path, and branch so dispatch starts fresh
+		// Reset to queued — clear claimed_at and worktree_path so dispatch starts fresh
 		getDb().query(`
 			UPDATE jobs
-			SET status = 'queued', claimed_at = NULL, worktree_path = NULL, branch = NULL, updated_at = datetime('now')
+			SET status = 'queued', claimed_at = NULL, worktree_path = NULL, updated_at = datetime('now')
 			WHERE id = ?
 		`).run(job.id);
 		log.info('job-poller', `recovered orphaned job ${job.id} (was ${job.status}) → re-queued`);
@@ -174,11 +163,11 @@ export async function pollOnce(): Promise<void> {
 // --- Job dispatch ---
 
 /**
- * Set up a worktree (for task jobs), create a Pi session, and send the prompt.
- * Review jobs skip the worktree — they only need to read the PR diff via `gh`.
+ * Create a Pi session in the repo directory and send the prompt.
+ * Task jobs: the agent creates its own worktree via the issue-worker skill.
+ * Review jobs: run directly in the repo — no worktree needed.
  */
 async function dispatchJob(job: Job): Promise<void> {
-	let worktreePath: string | null = null;
 	const isReview = job.type === 'review';
 
 	try {
@@ -187,21 +176,10 @@ async function dispatchJob(job: Job): Promise<void> {
 			throw new Error(`Repository path not found: ${repoPath}`);
 		}
 
-		let sessionCwd: string;
+		// All jobs start in the repo directory — task jobs create their own worktree
+		const sessionCwd = repoPath;
 
-		if (isReview) {
-			// Review jobs run directly in the repo — no worktree needed
-			sessionCwd = repoPath;
-		} else {
-			// Task jobs get an isolated worktree
-			worktreePath = createWorktree(repoPath, job);
-			sessionCwd = worktreePath;
-		}
-
-		updateJobStatus(job.id, {
-			status: 'running',
-			worktree_path: worktreePath ?? undefined,
-		});
+		updateJobStatus(job.id, { status: 'running' });
 
 		// Create a Pi session (with optional model override)
 		const sessionId = await createSession(sessionCwd, job.model ?? undefined);
@@ -223,7 +201,6 @@ async function dispatchJob(job: Job): Promise<void> {
 		updateJobStatus(job.id, {
 			status: 'failed',
 			error: `Dispatch failed: ${err.message}`,
-			worktree_path: worktreePath ?? undefined,
 		});
 	}
 }
@@ -238,6 +215,7 @@ async function dispatchJob(job: Job): Promise<void> {
 function subscribeToJobSession(jobId: string, sessionId: string): void {
 	// Accumulated assistant text for the current phase — reset between phases
 	let fullAssistantText = '';
+	let worktreePathCaptured = false;
 
 	const unsubscribe = subscribe(sessionId, (event: any) => {
 		// Accumulate assistant text deltas so we have the full conversation
@@ -245,6 +223,16 @@ function subscribeToJobSession(jobId: string, sessionId: string): void {
 			const ame = event.assistantMessageEvent;
 			if (ame?.type === 'text_delta') {
 				fullAssistantText += ame.delta;
+
+				// Extract WORKTREE_PATH as soon as it appears in the stream
+				if (!worktreePathCaptured) {
+					const wtMatch = fullAssistantText.match(WORKTREE_PATH_PATTERN);
+					if (wtMatch) {
+						worktreePathCaptured = true;
+						updateJobStatus(jobId, { worktree_path: wtMatch[1] });
+						log.info('job-poller', `captured worktree path for job ${jobId}: ${wtMatch[1]}`);
+					}
+				}
 			}
 		}
 
@@ -497,115 +485,4 @@ async function cleanupJobAfterCompletion(job: Job): Promise<void> {
 	}
 }
 
-// --- Input validation ---
 
-/** Safe pattern for git ref names (branches, tags). Rejects shell metacharacters. */
-const SAFE_GIT_REF_PATTERN = /^[a-zA-Z0-9._\-/]+$/;
-
-/**
- * Validate that a string is safe to use as a git ref name.
- * Prevents command injection by rejecting shell metacharacters.
- */
-function validateGitRef(value: string, label: string): void {
-	if (!SAFE_GIT_REF_PATTERN.test(value)) {
-		throw new Error(`Invalid ${label}: "${value}" — only alphanumeric, dots, hyphens, underscores, and slashes are allowed`);
-	}
-}
-
-// --- Worktree management ---
-
-/**
- * Create a git worktree for the job. Uses the job's branch if specified,
- * otherwise creates a new branch from target_branch.
- *
- * Uses execFileSync (not execSync) to avoid shell injection — arguments are
- * passed as an array, never interpolated into a shell command string.
- */
-function createWorktree(repoPath: string, job: Job): string {
-	const worktreeName = `job-${job.id}`;
-	const worktreePath = join(WORKTREE_BASE, worktreeName);
-
-	const targetBranch = job.target_branch || 'main';
-	validateGitRef(targetBranch, 'target branch');
-	if (job.branch) validateGitRef(job.branch, 'branch');
-
-	if (existsSync(worktreePath)) {
-		// Clean up stale worktree — try git first, fall back to rmSync
-		try {
-			execFileSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoPath, stdio: 'pipe' });
-		} catch {
-			try { rmSync(worktreePath, { recursive: true, force: true }); } catch { /* best effort */ }
-		}
-	}
-
-	if (job.branch) {
-		// Use existing branch
-		try {
-			execFileSync('git', ['worktree', 'add', worktreePath, job.branch], { cwd: repoPath, stdio: 'pipe' });
-		} catch {
-			// Branch might not exist locally yet — try fetching and creating from remote
-			try {
-				execFileSync('git', ['fetch', 'origin', job.branch], { cwd: repoPath, stdio: 'pipe' });
-				execFileSync('git', ['worktree', 'add', worktreePath, `origin/${job.branch}`], { cwd: repoPath, stdio: 'pipe' });
-			} catch {
-				// Fall back to creating from target branch
-				execFileSync('git', ['worktree', 'add', '-b', job.branch, worktreePath, targetBranch], { cwd: repoPath, stdio: 'pipe' });
-			}
-		}
-	} else {
-		// Create a new branch for the job
-		const branchName = `job/${job.id}`;
-		validateGitRef(branchName, 'auto-generated branch');
-
-		// Delete stale branch from a previous failed dispatch attempt
-		try {
-			execFileSync('git', ['branch', '-D', branchName], { cwd: repoPath, stdio: 'pipe' });
-			log.info('job-poller', `deleted stale branch ${branchName} before recreating`);
-		} catch { /* branch doesn't exist — expected for fresh jobs */ }
-
-		execFileSync('git', ['worktree', 'add', '-b', branchName, worktreePath, targetBranch], { cwd: repoPath, stdio: 'pipe' });
-		// Update job with the auto-generated branch name
-		updateJobStatus(job.id, { branch: branchName });
-	}
-
-	log.info('job-poller', `created worktree for job ${job.id}: ${worktreePath}`);
-
-	// Install dependencies if a lockfile is present
-	installDependencies(worktreePath, job.id);
-
-	return worktreePath;
-}
-
-// --- Dependency installation ---
-
-/** Lockfile → installer command mapping (checked in priority order). */
-const LOCKFILE_INSTALLERS: Array<{ lockfile: string; command: string; args: string[] }> = [
-	{ lockfile: 'bun.lockb', command: 'bun', args: ['install', '--frozen-lockfile'] },
-	{ lockfile: 'bun.lock', command: 'bun', args: ['install', '--frozen-lockfile'] },
-	{ lockfile: 'pnpm-lock.yaml', command: 'pnpm', args: ['install', '--frozen-lockfile'] },
-	{ lockfile: 'yarn.lock', command: 'yarn', args: ['install', '--frozen-lockfile'] },
-	{ lockfile: 'package-lock.json', command: 'npm', args: ['ci'] },
-];
-
-/**
- * Detect the package manager from lockfiles and run the installer.
- * Skips silently if no lockfile is found.
- */
-function installDependencies(worktreePath: string, jobId: string): void {
-	for (const { lockfile, command, args } of LOCKFILE_INSTALLERS) {
-		if (existsSync(join(worktreePath, lockfile))) {
-			try {
-				log.info('job-poller', `installing dependencies for job ${jobId}: ${command} ${args.join(' ')}`);
-				execFileSync(command, args, {
-					cwd: worktreePath,
-					stdio: 'pipe',
-					timeout: 120_000,
-				});
-				log.info('job-poller', `dependencies installed for job ${jobId}`);
-			} catch (err: any) {
-				log.warn('job-poller', `dependency install failed for job ${jobId}: ${err.message}`);
-			}
-			return; // Only run the first matching installer
-		}
-	}
-}

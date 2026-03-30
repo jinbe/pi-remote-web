@@ -10,6 +10,11 @@
  */
 import type { Job } from './job-queue';
 import { getOrigin } from './origin';
+import { join } from 'path';
+
+// --- Worktree configuration ---
+
+export const WORKTREE_BASE = process.env.PI_WORKTREE_DIR || join(process.cwd(), '.worktrees');
 
 // --- Skill configuration from environment ---
 
@@ -31,7 +36,7 @@ function metadataHeader(job: Job): string {
 	].join('\n');
 }
 
-/** Build the common task context lines (title, description, issue, branch). */
+/** Build the common task context lines (title, description, issue, branch, worktree). */
 function taskContext(job: Job): string[] {
 	const lines: string[] = [];
 	lines.push(job.title);
@@ -39,6 +44,9 @@ function taskContext(job: Job): string[] {
 	if (job.issue_url) lines.push(`Issue: ${job.issue_url}`);
 	if (job.branch) lines.push(`Branch: ${job.branch}`);
 	if (job.target_branch) lines.push(`Target branch: ${job.target_branch}`);
+	// Worktree context — tells the skill to create an isolated worktree
+	lines.push(`Job ID: ${job.id}`);
+	lines.push(`Worktree dir: ${WORKTREE_BASE}`);
 	return lines;
 }
 
