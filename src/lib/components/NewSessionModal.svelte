@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { hapticLight, hapticMedium } from '$lib/haptics';
+	import PathInput from '$lib/components/PathInput.svelte';
 
 	let {
 		open = false,
@@ -70,9 +71,8 @@
 				<label class="label" for="cwd-input">
 					<span class="label-text">Working Directory</span>
 				</label>
-				<input
+				<PathInput
 					id="cwd-input"
-					class="input w-full"
 					placeholder="/path/to/project"
 					bind:value={cwd}
 				/>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import { hapticLight, hapticMedium } from '$lib/haptics';
+	import PathInput from '$lib/components/PathInput.svelte';
 
 	let {
 		open = false,
@@ -133,9 +134,8 @@
 				<label class="label" for="job-repo">
 					<span class="label-text">Repository Path</span>
 				</label>
-				<input
+				<PathInput
 					id="job-repo"
-					class="input w-full"
 					placeholder="/path/to/repo"
 					bind:value={repo}
 				/>
