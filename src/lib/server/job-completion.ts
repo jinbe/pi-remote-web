@@ -1,17 +1,12 @@
 /**
- * Job completion handler — provides cleanup utilities for worktree and session migration.
+ * Job completion handler.
  * The main completion logic (state machine) is in job-poller.ts (handleJobAgentEnd).
  *
  * The extension callback delegates to handleJobAgentEnd so the review loop
  * is respected — it never directly marks a job as done.
  */
 import { getJob, updateJobStatus, type Job } from './job-queue';
-import { getDb } from './cache';
 import { log } from './logger';
-import { existsSync, mkdirSync, readdirSync, rmSync, copyFileSync } from 'fs';
-import { execFileSync } from 'child_process';
-import { join, resolve } from 'path';
-import { homedir } from 'os';
 
 // --- Types ---
 
@@ -66,9 +61,6 @@ export async function handleCompletion(jobId: string, payload: CompletionPayload
 		});
 		log.info('job-completion', `job ${jobId} failed via callback: ${payload.error}`);
 
-		// Still migrate sessions and clean up worktree on failure
-		cleanupJob(job);
-
 		return updated!;
 	}
 
@@ -107,111 +99,4 @@ export async function handleCompletion(jobId: string, payload: CompletionPayload
 	return getJob(jobId) ?? job;
 }
 
-// --- Cleanup functions (exported for use by job-poller) ---
 
-/**
- * Clean up a job's resources: migrate sessions to repo directory, remove worktree.
- * Only call this when the job has reached a terminal state.
- */
-export function cleanupJob(job: Job): void {
-	migrateWorktreeSessions(job);
-	cleanupWorktree(job);
-
-	// Clear worktree_path in the DB so the cache doesn't reference a removed directory
-	if (job.worktree_path) {
-		updateJobStatus(job.id, { worktree_path: null });
-	}
-}
-
-// --- Session migration ---
-
-const SESSIONS_DIR = join(homedir(), '.pi', 'agent', 'sessions');
-
-/**
- * Convert a cwd path to the session directory name pi uses.
- * Mirrors pi's internal convention: `--path-parts--`
- * Exported for testing.
- */
-export function cwdToSessionDirName(cwd: string): string {
-	return `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
-}
-
-/**
- * Copy session files from the worktree's session directory to the repo's
- * session directory so they appear under the correct project in the dashboard.
- */
-function migrateWorktreeSessions(job: Job): void {
-	if (!job.worktree_path || !job.repo) return;
-
-	const worktreeSessionDir = join(SESSIONS_DIR, cwdToSessionDirName(resolve(job.worktree_path)));
-	const repoSessionDir = join(SESSIONS_DIR, cwdToSessionDirName(resolve(job.repo)));
-
-	if (!existsSync(worktreeSessionDir)) {
-		log.info('job-completion', `no worktree session dir to migrate: ${worktreeSessionDir}`);
-		return;
-	}
-
-	try {
-		mkdirSync(repoSessionDir, { recursive: true });
-
-		const files = readdirSync(worktreeSessionDir).filter(f => f.endsWith('.jsonl'));
-		for (const file of files) {
-			const src = join(worktreeSessionDir, file);
-			const dest = join(repoSessionDir, file);
-			copyFileSync(src, dest);
-		}
-
-		log.info('job-completion', `migrated ${files.length} session file(s) from worktree to repo: ${repoSessionDir}`);
-
-		// Remove the worktree session directory
-		rmSync(worktreeSessionDir, { recursive: true, force: true });
-		log.info('job-completion', `removed worktree session dir: ${worktreeSessionDir}`);
-
-		// Purge stale cache entries so the worktree doesn't appear as a project
-		const worktreeCwd = resolve(job.worktree_path);
-		const db = getDb();
-		const staleFiles = db.query('SELECT file_path FROM session_meta WHERE cwd = ?').all(worktreeCwd) as { file_path: string }[];
-		if (staleFiles.length > 0) {
-			const filePaths = staleFiles.map(r => r.file_path);
-			for (const fp of filePaths) {
-				db.run('DELETE FROM session_messages WHERE file_path = ?', [fp]);
-			}
-			db.run('DELETE FROM session_meta WHERE cwd = ?', [worktreeCwd]);
-			log.info('job-completion', `purged ${staleFiles.length} stale cache entries for worktree cwd: ${worktreeCwd}`);
-		}
-	} catch (err) {
-		log.warn('job-completion', `failed to migrate worktree sessions: ${err}`);
-	}
-}
-
-// --- Worktree cleanup ---
-
-/**
- * Remove the git worktree using `git worktree remove` to properly unregister
- * it from git's tracking. Falls back to rmSync if git fails.
- */
-function cleanupWorktree(job: Job): void {
-	if (!job.worktree_path) return;
-
-	// Try git worktree remove first (uses repo path if available)
-	try {
-		if (job.repo) {
-			execFileSync('git', ['worktree', 'remove', '--force', job.worktree_path], {
-				cwd: job.repo,
-				stdio: 'pipe',
-			});
-			log.info('job-completion', `removed worktree via git: ${job.worktree_path}`);
-			return;
-		}
-	} catch (err) {
-		log.warn('job-completion', `git worktree remove failed, falling back to rmSync: ${err}`);
-	}
-
-	// Fallback: remove the directory directly
-	try {
-		rmSync(job.worktree_path, { recursive: true, force: true });
-		log.info('job-completion', `cleaned up worktree via rmSync: ${job.worktree_path}`);
-	} catch (err) {
-		log.warn('job-completion', `failed to clean up worktree ${job.worktree_path}: ${err}`);
-	}
-}

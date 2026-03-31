@@ -30,7 +30,6 @@ export interface Job {
 	loop_count: number;
 	max_loops: number;
 	session_id: string | null;
-	worktree_path: string | null;
 	result_summary: string | null;
 	error: string | null;
 	retry_count: number;
@@ -63,7 +62,6 @@ export interface UpdateJobInput {
 	pr_number?: number;
 	review_verdict?: Job['review_verdict'];
 	session_id?: string;
-	worktree_path?: string | null;
 	result_summary?: string;
 	error?: string;
 	branch?: string;
@@ -168,7 +166,6 @@ export function updateJobStatus(id: string, updates: UpdateJobInput): Job | null
 	if (updates.pr_number !== undefined) { setClauses.push('pr_number = $pr_number'); params.$pr_number = updates.pr_number; }
 	if (updates.review_verdict !== undefined) { setClauses.push('review_verdict = $review_verdict'); params.$review_verdict = updates.review_verdict; }
 	if (updates.session_id !== undefined) { setClauses.push('session_id = $session_id'); params.$session_id = updates.session_id; }
-	if (updates.worktree_path !== undefined) { setClauses.push('worktree_path = $worktree_path'); params.$worktree_path = updates.worktree_path; }
 	if (updates.result_summary !== undefined) { setClauses.push('result_summary = $result_summary'); params.$result_summary = updates.result_summary; }
 	if (updates.error !== undefined) { setClauses.push('error = $error'); params.$error = updates.error; }
 	if (updates.branch !== undefined) { setClauses.push('branch = $branch'); params.$branch = updates.branch; }
