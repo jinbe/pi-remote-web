@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { handleCompletion, cwdToSessionDirName } from './job-completion';
+import { handleCompletion } from './job-completion';
 import { getJob, updateJobStatus } from './job-queue';
 import { createTestJob, cleanupTestJobs } from './test-helpers';
 
@@ -165,23 +165,5 @@ describe('job-completion', () => {
 		});
 	});
 
-	describe('cwdToSessionDirName', () => {
-		it('converts absolute path to pi session dir name', () => {
-			expect(cwdToSessionDirName('/Users/jchan/code/my-project')).toBe(
-				'--Users-jchan-code-my-project--'
-			);
-		});
 
-		it('handles paths with colons (Windows-style)', () => {
-			expect(cwdToSessionDirName('C:\\Users\\dev\\project')).toBe(
-				'--C--Users-dev-project--'
-			);
-		});
-
-		it('strips leading slash', () => {
-			const result = cwdToSessionDirName('/foo/bar');
-			expect(result).toBe('--foo-bar--');
-			expect(result.startsWith('---')).toBe(false);
-		});
-	});
 });

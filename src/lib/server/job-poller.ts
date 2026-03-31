@@ -1,17 +1,15 @@
 /**
  * Background poller that claims queued jobs and dispatches them to Pi sessions.
- * Creates git worktrees for isolation and spawns sessions via rpc-manager.
  * 
- * Jobs now use a single-job review loop model with phase transitions:
+ * Jobs use a single-job review loop model with phase transitions:
  * queued → claimed → running → reviewing → done/failed/cancelled
  */
 import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
-import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt, WORKTREE_BASE } from './job-prompts';
-import { cleanupJob } from './job-completion';
+import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt } from './job-prompts';
 import { createSession, sendMessage, subscribe, stopSession, isActive } from './rpc-manager';
 import { log } from './logger';
 import { getDb } from './cache';
-import { mkdirSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 
 // --- Constants ---
 
@@ -20,7 +18,6 @@ const POLL_INTERVAL_MS = 30_000;
 /** Patterns for extracting result markers from assistant text. */
 const PR_URL_PATTERN = /PR_URL:\s*(\S+)/;
 const VERDICT_PATTERN = /VERDICT:\s*(approved|changes_requested)/;
-const WORKTREE_PATH_PATTERN = /WORKTREE_PATH:\s*(\S+)/;
 
 /**
  * Fuzzy fallback patterns for verdict detection when the exact VERDICT marker
@@ -49,9 +46,6 @@ export function start(): void {
 		log.info('job-poller', 'poller already running');
 		return;
 	}
-
-	// Ensure worktree base directory exists (the agent creates worktrees here)
-	try { mkdirSync(WORKTREE_BASE, { recursive: true }); } catch { /* already exists */ }
 
 	// Recover jobs orphaned by a server restart before polling for new work
 	recoverOrphanedJobs();
@@ -107,19 +101,10 @@ export function recoverOrphanedJobs(): void {
 	).all() as Job[];
 
 	for (const job of orphaned) {
-		// Clean up any partial worktree that was created before the crash
-		if (job.worktree_path) {
-			try {
-				cleanupJob(job);
-			} catch (err) {
-				log.warn('job-poller', `failed to clean up orphaned worktree for job ${job.id}: ${err}`);
-			}
-		}
-
-		// Reset to queued — clear claimed_at and worktree_path so dispatch starts fresh
+		// Reset to queued — clear claimed_at so dispatch starts fresh
 		getDb().query(`
 			UPDATE jobs
-			SET status = 'queued', claimed_at = NULL, worktree_path = NULL, updated_at = datetime('now')
+			SET status = 'queued', claimed_at = NULL, updated_at = datetime('now')
 			WHERE id = ?
 		`).run(job.id);
 		log.info('job-poller', `recovered orphaned job ${job.id} (was ${job.status}) → re-queued`);
@@ -164,8 +149,6 @@ export async function pollOnce(): Promise<void> {
 
 /**
  * Create a Pi session in the repo directory and send the prompt.
- * Task jobs: the agent creates its own worktree via the issue-worker skill.
- * Review jobs: run directly in the repo — no worktree needed.
  */
 async function dispatchJob(job: Job): Promise<void> {
 	const isReview = job.type === 'review';
@@ -176,7 +159,6 @@ async function dispatchJob(job: Job): Promise<void> {
 			throw new Error(`Repository path not found: ${repoPath}`);
 		}
 
-		// All jobs start in the repo directory — task jobs create their own worktree
 		const sessionCwd = repoPath;
 
 		updateJobStatus(job.id, { status: 'running' });
@@ -215,7 +197,6 @@ async function dispatchJob(job: Job): Promise<void> {
 function subscribeToJobSession(jobId: string, sessionId: string): void {
 	// Accumulated assistant text for the current phase — reset between phases
 	let fullAssistantText = '';
-	let worktreePathCaptured = false;
 
 	const unsubscribe = subscribe(sessionId, (event: any) => {
 		// Accumulate assistant text deltas so we have the full conversation
@@ -223,16 +204,6 @@ function subscribeToJobSession(jobId: string, sessionId: string): void {
 			const ame = event.assistantMessageEvent;
 			if (ame?.type === 'text_delta') {
 				fullAssistantText += ame.delta;
-
-				// Extract WORKTREE_PATH as soon as it appears in the stream
-				if (!worktreePathCaptured) {
-					const wtMatch = fullAssistantText.match(WORKTREE_PATH_PATTERN);
-					if (wtMatch) {
-						worktreePathCaptured = true;
-						updateJobStatus(jobId, { worktree_path: wtMatch[1] });
-						log.info('job-poller', `captured worktree path for job ${jobId}: ${wtMatch[1]}`);
-					}
-				}
 			}
 		}
 
@@ -326,7 +297,7 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 						status: 'done',
 						review_verdict: verdict,
 					});
-					await cleanupJobAfterCompletion(job);
+					await stopJobSession(job);
 					cleanupSubscription(jobId);
 					log.info('job-poller', `review job ${jobId} → done (verdict: ${verdict})`);
 				} else {
@@ -335,7 +306,7 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 						status: 'failed',
 						error: 'Review ended without VERDICT marker',
 					});
-					await cleanupJobAfterCompletion(job);
+					await stopJobSession(job);
 					cleanupSubscription(jobId);
 				}
 				return;
@@ -345,7 +316,6 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 			const prUrl = prUrlMatch?.[1];
 
 			// All task jobs transition to reviewing when the agent ends.
-			// Worktrees are kept until the job is manually marked as done.
 			updateJobStatus(jobId, {
 				status: 'reviewing',
 				pr_url: prUrl,
@@ -362,7 +332,7 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 				}
 				log.info('job-poller', `job ${jobId} running → reviewing (review loop active)`);
 			} else {
-				// Fire-and-forget (max_loops=0): stop session, keep worktree.
+				// Fire-and-forget (max_loops=0): stop session.
 				// The user will manually review the PR and mark the job as done.
 				cleanupSubscription(jobId);
 				if (job.session_id) {
@@ -394,11 +364,10 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 					review_verdict: 'approved',
 				});
 
-				// Cleanup: migrate sessions, remove worktree, stop session
-				await cleanupJobAfterCompletion(job);
+				await stopJobSession(job);
 				cleanupSubscription(jobId);
 				
-				log.info('job-poller', `job ${jobId} approved → done, cleaned up`);
+				log.info('job-poller', `job ${jobId} approved → done`);
 				
 			} else if (verdict === 'changes_requested') {
 				const nextLoopCount = job.loop_count + 1;
@@ -411,7 +380,7 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 						result_summary: (job.result_summary ?? '') + '\n[Loop cap reached — review requested changes but no more fix iterations allowed]',
 					});
 
-					await cleanupJobAfterCompletion(job);
+					await stopJobSession(job);
 					cleanupSubscription(jobId);
 					
 					log.info('job-poller', `job ${jobId} loop cap reached (${job.max_loops}) → done`);
@@ -442,7 +411,7 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 					status: 'failed',
 					error: 'Review phase ended without VERDICT marker',
 				});
-				await cleanupJobAfterCompletion(job);
+				await stopJobSession(job);
 				cleanupSubscription(jobId);
 			}
 		}
@@ -454,34 +423,24 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 			error: `Phase transition failed: ${err}`,
 		});
 
-		// Ensure cleanup still runs — migrate sessions + remove worktree
 		const failedJob = getJob(jobId);
 		if (failedJob) {
-			await cleanupJobAfterCompletion(failedJob);
+			await stopJobSession(failedJob);
 		}
 		cleanupSubscription(jobId);
 	}
 }
 
 /**
- * Cleanup after a job completes (done/failed/cancelled).
- * Migrates sessions, removes worktree, and stops the session.
+ * Stop the Pi session associated with a job.
  */
-async function cleanupJobAfterCompletion(job: Job): Promise<void> {
+async function stopJobSession(job: Job): Promise<void> {
+	if (!job.session_id) return;
 	try {
-		await cleanupJob(job);
-		
-		// Stop the session if it's still running
-		if (job.session_id) {
-			try {
-				await stopSession(job.session_id);
-				log.info('job-poller', `stopped session ${job.session_id} for job ${job.id}`);
-			} catch (err) {
-				log.warn('job-poller', `failed to stop session ${job.session_id}: ${err}`);
-			}
-		}
+		await stopSession(job.session_id);
+		log.info('job-poller', `stopped session ${job.session_id} for job ${job.id}`);
 	} catch (err) {
-		log.error('job-poller', `cleanup failed for job ${job.id}: ${err}`);
+		log.warn('job-poller', `failed to stop session ${job.session_id}: ${err}`);
 	}
 }
 

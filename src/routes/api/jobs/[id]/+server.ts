@@ -5,7 +5,6 @@
  */
 import { json, error } from '@sveltejs/kit';
 import { getJob, updateJobStatus, deleteJob } from '$lib/server/job-queue';
-import { cleanupJob } from '$lib/server/job-completion';
 import { stopSession } from '$lib/server/rpc-manager';
 import { log } from '$lib/server/logger';
 import type { RequestHandler } from './$types';
@@ -22,7 +21,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 	cancelled: [],
 };
 
-/** Fields that can be updated via PATCH. Rejects internal-only fields like session_id and worktree_path. */
+/** Fields that can be updated via PATCH. Rejects internal-only fields like session_id. */
 const ALLOWED_PATCH_FIELDS = ['status', 'pr_url', 'pr_number', 'review_verdict', 'result_summary', 'branch', 'review_skill'] as const;
 
 export const GET: RequestHandler = async ({ params }) => {
@@ -57,15 +56,14 @@ export const PATCH: RequestHandler = async ({ params, request }) => {
 		const job = updateJobStatus(params.id, updates);
 		if (!job) throw error(404, 'Job not found');
 
-		// Run cleanup when transitioning to a terminal state via PATCH
+		// Stop the session when transitioning to a terminal state via PATCH
 		if (updates.status === 'done' || updates.status === 'failed' || updates.status === 'cancelled') {
-			try {
-				cleanupJob(currentJob);
-				if (currentJob.session_id) {
+			if (currentJob.session_id) {
+				try {
 					await stopSession(currentJob.session_id);
+				} catch (err) {
+					log.warn('jobs-api', `failed to stop session after PATCH to ${updates.status} for job ${params.id}: ${err}`);
 				}
-			} catch (err) {
-				log.warn('jobs-api', `cleanup after PATCH to ${updates.status} failed for job ${params.id}: ${err}`);
 			}
 		}
 
