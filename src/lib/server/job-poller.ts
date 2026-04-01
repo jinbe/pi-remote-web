@@ -5,7 +5,7 @@
  * queued → claimed → running → reviewing → done/failed/cancelled
  */
 import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
-import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt } from './job-prompts';
+import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt, buildNudgeVerdictPrompt } from './job-prompts';
 import { createSession, sendMessage, subscribe, stopSession, isActive } from './rpc-manager';
 import { log } from './logger';
 import { getDb } from './cache';
@@ -300,11 +300,14 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 					await stopJobSession(job);
 					cleanupSubscription(jobId);
 					log.info('job-poller', `review job ${jobId} → done (verdict: ${verdict})`);
+				} else if (await nudgeForVerdict(job)) {
+					// Nudge sent — wait for next agent_end
+					return;
 				} else {
-					log.warn('job-poller', `review job ${jobId} ended without verdict — marking as failed`);
+					log.warn('job-poller', `review job ${jobId} ended without verdict after ${job.no_verdict_retries} nudges — marking as failed`);
 					updateJobStatus(jobId, {
 						status: 'failed',
-						error: 'Review ended without VERDICT marker',
+						error: `Review ended without VERDICT marker after ${job.no_verdict_retries} retry attempts`,
 					});
 					await stopJobSession(job);
 					cleanupSubscription(jobId);
@@ -404,12 +407,14 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 					
 					log.info('job-poller', `job ${jobId} changes_requested → running (loop ${nextLoopCount}/${job.max_loops})`);
 				}
+			} else if (await nudgeForVerdict(job)) {
+				// Nudge sent — wait for next agent_end
 			} else {
-				// No verdict found — treat as failure
-				log.warn('job-poller', `job ${jobId} review phase ended without verdict — marking as failed`);
+				// No verdict found and nudges exhausted — treat as failure
+				log.warn('job-poller', `job ${jobId} review phase ended without verdict after ${job.no_verdict_retries} nudges — marking as failed`);
 				updateJobStatus(jobId, {
 					status: 'failed',
-					error: 'Review phase ended without VERDICT marker',
+					error: `Review phase ended without VERDICT marker after ${job.no_verdict_retries} retry attempts`,
 				});
 				await stopJobSession(job);
 				cleanupSubscription(jobId);
@@ -428,6 +433,42 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 			await stopJobSession(failedJob);
 		}
 		cleanupSubscription(jobId);
+	}
+}
+
+/**
+ * Nudge a stalled job by sending a follow-up prompt asking the agent to
+ * provide a VERDICT. Returns true if a nudge was sent (still has retries),
+ * false if retries are exhausted.
+ */
+async function nudgeForVerdict(job: Job): Promise<boolean> {
+	const nextRetry = job.no_verdict_retries + 1;
+	if (nextRetry > job.max_no_verdict_retries) {
+		return false;
+	}
+
+	if (!job.session_id) {
+		log.warn('job-poller', `cannot nudge job ${job.id} — no session_id`);
+		return false;
+	}
+
+	try {
+		// Check the session is still alive before nudging
+		if (!isActive(job.session_id)) {
+			log.warn('job-poller', `cannot nudge job ${job.id} — session ${job.session_id} is no longer active`);
+			return false;
+		}
+
+		updateJobStatus(job.id, { no_verdict_retries: nextRetry });
+
+		const nudgePrompt = buildNudgeVerdictPrompt(job, nextRetry);
+		await sendMessage(job.session_id, nudgePrompt);
+
+		log.info('job-poller', `nudged job ${job.id} for verdict (attempt ${nextRetry}/${job.max_no_verdict_retries})`);
+		return true;
+	} catch (err) {
+		log.warn('job-poller', `failed to nudge job ${job.id}: ${err}`);
+		return false;
 	}
 }
 

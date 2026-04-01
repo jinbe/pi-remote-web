@@ -97,6 +97,8 @@ export function getDb(): Database {
 			error TEXT,
 			retry_count INTEGER NOT NULL DEFAULT 0,
 			max_retries INTEGER NOT NULL DEFAULT 2,
+			no_verdict_retries INTEGER NOT NULL DEFAULT 0,
+			max_no_verdict_retries INTEGER NOT NULL DEFAULT 3,
 			callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
 			review_skill TEXT,
 			model TEXT
@@ -106,6 +108,8 @@ export function getDb(): Database {
 		try { db.run('ALTER TABLE jobs ADD COLUMN callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16))))'); } catch {}
 		try { db.run('ALTER TABLE jobs ADD COLUMN review_skill TEXT'); } catch {}
 		try { db.run('ALTER TABLE jobs ADD COLUMN model TEXT'); } catch {}
+		try { db.run('ALTER TABLE jobs ADD COLUMN no_verdict_retries INTEGER NOT NULL DEFAULT 0'); } catch {}
+		try { db.run('ALTER TABLE jobs ADD COLUMN max_no_verdict_retries INTEGER NOT NULL DEFAULT 3'); } catch {}
 
 		// Migration: Test if 'reviewing' status is allowed by trying a test insert
 		// If it fails, we need to migrate the schema to remove CHECK constraints
@@ -148,6 +152,8 @@ export function getDb(): Database {
 				error TEXT,
 				retry_count INTEGER NOT NULL DEFAULT 0,
 				max_retries INTEGER NOT NULL DEFAULT 2,
+				no_verdict_retries INTEGER NOT NULL DEFAULT 0,
+				max_no_verdict_retries INTEGER NOT NULL DEFAULT 3,
 				callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
 				review_skill TEXT,
 				model TEXT

@@ -91,6 +91,29 @@ export function buildTaskFixPrompt(job: Job, _reviewComments: string): string {
 	return parts.join('\n');
 }
 
+// --- Nudge verdict prompt (sent when agent ends without a VERDICT) ---
+
+export function buildNudgeVerdictPrompt(job: Job, attempt: number): string {
+	const parts: string[] = [];
+
+	parts.push(`You stopped without providing a VERDICT. This is attempt ${attempt} of ${job.max_no_verdict_retries}.`);
+	parts.push('');
+	parts.push('If you are stalled or have finished your review, please provide your verdict now.');
+	parts.push('If you have not finished, continue your work and then provide the verdict.');
+	parts.push('');
+	parts.push('=== CRITICAL: REQUIRED OUTPUT ===');
+	parts.push('You MUST output EXACTLY one of these two lines as the VERY LAST thing in your response:');
+	parts.push('');
+	parts.push('VERDICT: approved');
+	parts.push('VERDICT: changes_requested');
+	parts.push('');
+	parts.push('This is a machine-parsed marker. The job will FAIL if you do not include it.');
+	parts.push('Do NOT paraphrase, reword, or wrap it in a code block. Output the exact line on its own.');
+	parts.push('=================================');
+
+	return parts.join('\n');
+}
+
 // --- Review prompt ---
 
 export function buildReviewPrompt(job: Job): string {
