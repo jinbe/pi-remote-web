@@ -102,12 +102,18 @@ export function buildNudgeVerdictPrompt(job: Job, attempt: number): string {
 	parts.push('If you have not finished, continue your work and then provide the verdict.');
 	parts.push('');
 	parts.push('=== CRITICAL: REQUIRED OUTPUT ===');
-	parts.push('You MUST output EXACTLY one of these two lines as the VERY LAST thing in your response:');
+	parts.push('You MUST output EXACTLY one of these lines as the VERY LAST thing in your response:');
 	parts.push('');
 	parts.push('VERDICT: approved');
 	parts.push('VERDICT: changes_requested');
 	parts.push('');
-	parts.push('This is a machine-parsed marker. The job will FAIL if you do not include it.');
+	parts.push('If you cannot complete this job due to an unrecoverable error (e.g. the issue,');
+	parts.push('repo, or PR does not exist, or you lack the information needed to proceed),');
+	parts.push('output this instead:');
+	parts.push('');
+	parts.push('ABORT_JOB: <reason>');
+	parts.push('');
+	parts.push('These are machine-parsed markers. The job will FAIL if you do not include one.');
 	parts.push('Do NOT paraphrase, reword, or wrap it in a code block. Output the exact line on its own.');
 	parts.push('=================================');
 

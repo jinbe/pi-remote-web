@@ -26,6 +26,9 @@ const VERDICT_PATTERN = /VERDICT:\s*(approved|changes_requested)/;
 const VERDICT_FALLBACK_APPROVED = /\b(?:gh pr review \d+ --approve|LGTM|looks good to merge|approving this PR)\b/i;
 const VERDICT_FALLBACK_CHANGES = /\b(?:gh pr review \d+ --request-changes|requesting changes|changes are needed|must fix before merge)\b/i;
 
+/** Pattern for the agent to signal an unrecoverable error and abort the job. */
+const ABORT_JOB_PATTERN = /ABORT_JOB:\s*(.+)/;
+
 // --- State ---
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -283,7 +286,23 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 		const prUrlMatch = assistantText.match(PR_URL_PATTERN);
 		const verdictMatch = assistantText.match(VERDICT_PATTERN);
 
-		log.info('job-poller', `agent_end for job ${jobId} (status=${job.status}) — prUrl=${prUrlMatch?.[1] ?? 'none'}, verdict=${verdictMatch?.[1] ?? 'none'}`);
+		// Check for agent-initiated abort (unrecoverable error)
+		const abortMatch = assistantText.match(ABORT_JOB_PATTERN);
+
+		log.info('job-poller', `agent_end for job ${jobId} (status=${job.status}) — prUrl=${prUrlMatch?.[1] ?? 'none'}, verdict=${verdictMatch?.[1] ?? 'none'}, abort=${abortMatch ? 'yes' : 'no'}`);
+
+		// ABORT_JOB short-circuits all state transitions — fail immediately
+		if (abortMatch) {
+			const reason = abortMatch[1].trim();
+			log.warn('job-poller', `job ${jobId} aborted by agent: ${reason}`);
+			updateJobStatus(jobId, {
+				status: 'failed',
+				error: `Aborted by agent: ${reason}`,
+			});
+			await stopJobSession(job);
+			cleanupSubscription(jobId);
+			return;
+		}
 
 		// State machine transitions
 		if (job.status === 'running') {
