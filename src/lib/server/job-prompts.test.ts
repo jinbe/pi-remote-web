@@ -69,5 +69,19 @@ describe('job-prompts', () => {
 
 			expect(prompt).toContain('stopped without providing a VERDICT');
 		});
+
+		it('includes the ABORT_JOB escape hatch', () => {
+			const job = makeJob();
+			const prompt = buildNudgeVerdictPrompt(job, 1);
+
+			expect(prompt).toContain('ABORT_JOB:');
+		});
+
+		it('explains when to use ABORT_JOB', () => {
+			const job = makeJob();
+			const prompt = buildNudgeVerdictPrompt(job, 1);
+
+			expect(prompt).toContain('unrecoverable error');
+		});
 	});
 });
