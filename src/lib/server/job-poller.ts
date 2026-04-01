@@ -498,12 +498,15 @@ async function nudgeForVerdict(job: Job): Promise<boolean> {
 			return false;
 		}
 
-		updateJobStatus(job.id, { no_verdict_retries: nextRetry });
+		updateJobStatus(job.id, {
+			status: 'running',
+			no_verdict_retries: nextRetry,
+		});
 
 		const nudgePrompt = buildNudgeVerdictPrompt(job, nextRetry);
 		await sendMessage(job.session_id, nudgePrompt);
 
-		log.info('job-poller', `nudged job ${job.id} for verdict (attempt ${nextRetry}/${job.max_no_verdict_retries})`);
+		log.info('job-poller', `nudged job ${job.id} for verdict — status → running (attempt ${nextRetry}/${job.max_no_verdict_retries})`);
 		return true;
 	} catch (err) {
 		log.warn('job-poller', `failed to nudge job ${job.id}: ${err}`);
