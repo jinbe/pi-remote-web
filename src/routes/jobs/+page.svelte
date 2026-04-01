@@ -243,6 +243,20 @@
 		}
 	}
 
+	/** Clear all failed jobs. */
+	async function clearFailedJobs() {
+		const failedJobs = (data.jobs as Job[]).filter((j) => j.status === 'failed');
+		if (failedJobs.length === 0) return;
+		if (!confirm(`Delete ${failedJobs.length} failed job${failedJobs.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+		hapticHeavy();
+		try {
+			await Promise.all(failedJobs.map((j) => fetch(`/api/jobs/${j.id}`, { method: 'DELETE' })));
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to clear failed jobs:', e);
+		}
+	}
+
 	async function togglePoller() {
 		hapticMedium();
 		const action = data.pollerRunning ? 'stop' : 'start';
@@ -572,6 +586,15 @@
 				class="input input-xs flex-1"
 				bind:value={search}
 			/>
+			{#if failedCount > 0}
+				<button
+					class="btn btn-xs btn-error btn-outline gap-1"
+					onclick={clearFailedJobs}
+					title="Delete all failed jobs"
+				>
+					<Icon name="close" class="w-3 h-3" /> Clear failed
+				</button>
+			{/if}
 			{#if doneCount > 0}
 				<button
 					class="btn btn-xs btn-error btn-outline gap-1"
