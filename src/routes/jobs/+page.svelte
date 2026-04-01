@@ -35,6 +35,8 @@
 		error: string | null;
 		retry_count: number;
 		max_retries: number;
+		no_verdict_retries: number;
+		max_no_verdict_retries: number;
 		model: string | null;
 	}
 
@@ -424,6 +426,12 @@
 						<div class="flex gap-2">
 							<span class="text-base-content/50 w-20 flex-shrink-0">Retries</span>
 							<span>{job.retry_count}/{job.max_retries}</span>
+						</div>
+					{/if}
+					{#if job.no_verdict_retries > 0}
+						<div class="flex gap-2">
+							<span class="text-base-content/50 w-20 flex-shrink-0">Nudges</span>
+							<span>{job.no_verdict_retries}/{job.max_no_verdict_retries}</span>
 						</div>
 					{/if}
 					{#if job.session_id}

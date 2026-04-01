@@ -214,6 +214,67 @@ describe('job-poller', () => {
 		});
 	});
 
+	describe('handleJobAgentEnd — no verdict nudge retry', () => {
+		it('fails review-type job without verdict when session is inactive (nudge cannot be sent)', async () => {
+			const job = createTestJob({
+				type: 'review',
+				title: 'Review with no verdict',
+				repo: '/repo',
+				pr_url: 'https://github.com/org/repo/pull/50',
+			});
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session' });
+
+			await handleJobAgentEnd(job.id, 'I reviewed the code but forgot the verdict.');
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('failed');
+			expect(updated.error).toContain('VERDICT');
+			expect(updated.error).toContain('retry');
+		});
+
+		it('fails reviewing-phase job without verdict when session is inactive (nudge cannot be sent)', async () => {
+			const job = createTestJob({
+				title: 'Task review no verdict',
+				repo: '/repo',
+				max_loops: 3,
+			});
+			updateJobStatus(job.id, { status: 'reviewing', session_id: 'test-session' });
+
+			await handleJobAgentEnd(job.id, 'I looked at the changes but no verdict.');
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('failed');
+			expect(updated.error).toContain('VERDICT');
+			expect(updated.error).toContain('retry');
+		});
+
+		it('includes retry count in error message when nudges are exhausted', async () => {
+			const job = createTestJob({
+				type: 'review',
+				title: 'Exhausted nudges',
+				repo: '/repo',
+				pr_url: 'https://github.com/org/repo/pull/60',
+			});
+			// Simulate having already used all nudge retries
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session', no_verdict_retries: 3 });
+
+			await handleJobAgentEnd(job.id, 'No verdict here.');
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('failed');
+			expect(updated.error).toContain('3 retry');
+		});
+
+		it('defaults max_no_verdict_retries to 3', () => {
+			const job = createTestJob({
+				title: 'Check defaults',
+				repo: '/repo',
+			});
+			expect(job.no_verdict_retries).toBe(0);
+			expect(job.max_no_verdict_retries).toBe(3);
+		});
+	});
+
 	describe('recoverOrphanedJobs', () => {
 		it('re-queues a claimed job with no session_id', () => {
 			const job = createTestJob({ title: 'Orphaned claimed', repo: '/repo' });

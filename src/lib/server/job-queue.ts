@@ -34,6 +34,8 @@ export interface Job {
 	error: string | null;
 	retry_count: number;
 	max_retries: number;
+	no_verdict_retries: number;
+	max_no_verdict_retries: number;
 	callback_token: string;
 	review_skill: string | null;
 	model: string | null;
@@ -67,6 +69,7 @@ export interface UpdateJobInput {
 	branch?: string;
 	review_skill?: string;
 	loop_count?: number;
+	no_verdict_retries?: number;
 }
 
 // --- Query helpers ---
@@ -171,6 +174,7 @@ export function updateJobStatus(id: string, updates: UpdateJobInput): Job | null
 	if (updates.branch !== undefined) { setClauses.push('branch = $branch'); params.$branch = updates.branch; }
 	if (updates.review_skill !== undefined) { setClauses.push('review_skill = $review_skill'); params.$review_skill = updates.review_skill; }
 	if (updates.loop_count !== undefined) { setClauses.push('loop_count = $loop_count'); params.$loop_count = updates.loop_count; }
+	if (updates.no_verdict_retries !== undefined) { setClauses.push('no_verdict_retries = $no_verdict_retries'); params.$no_verdict_retries = updates.no_verdict_retries; }
 
 	const sql = `UPDATE jobs SET ${setClauses.join(', ')} WHERE id = $id RETURNING *`;
 	const row = getDb().query(sql).get(params) as Job | null;
