@@ -37,6 +37,14 @@ let isPolling = false;
 /** Active session subscriptions keyed by job ID — used to unsubscribe on cleanup. */
 const sessionUnsubscribers = new Map<string, () => void>();
 
+/**
+ * Per-job lock to serialise handleJobAgentEnd calls. Prevents race conditions
+ * where concurrent agent_end / session_ended events both read the job status
+ * before either has written, causing duplicate state transitions (e.g. a
+ * spurious nudge after a verdict was already processed).
+ */
+const jobLocks = new Map<string, Promise<void>>();
+
 // --- Public API ---
 
 /**
@@ -268,6 +276,14 @@ function extractVerdict(
  * - reviewing → running (changes_requested): send fix prompt or done if loop cap reached
  */
 export async function handleJobAgentEnd(jobId: string, assistantText: string): Promise<void> {
+	// Serialise concurrent calls for the same job to prevent race conditions
+	const prev = jobLocks.get(jobId) ?? Promise.resolve();
+	const current = prev.then(() => _handleJobAgentEndInner(jobId, assistantText));
+	jobLocks.set(jobId, current.catch(() => {}));
+	return current;
+}
+
+async function _handleJobAgentEndInner(jobId: string, assistantText: string): Promise<void> {
 	try {
 		// Re-fetch the job to check current status
 		const job = getJob(jobId);
@@ -286,8 +302,12 @@ export async function handleJobAgentEnd(jobId: string, assistantText: string): P
 		const prUrlMatch = assistantText.match(PR_URL_PATTERN);
 		const verdictMatch = assistantText.match(VERDICT_PATTERN);
 
-		// Check for agent-initiated abort (unrecoverable error)
-		const abortMatch = assistantText.match(ABORT_JOB_PATTERN);
+		// Check for agent-initiated abort — only honoured during nudge retries
+		// (the agent is only told about ABORT_JOB in the nudge prompt, so we
+		// ignore it in normal runs to avoid false positives).
+		const abortMatch = job.no_verdict_retries > 0
+			? assistantText.match(ABORT_JOB_PATTERN)
+			: null;
 
 		log.info('job-poller', `agent_end for job ${jobId} (status=${job.status}) — prUrl=${prUrlMatch?.[1] ?? 'none'}, verdict=${verdictMatch?.[1] ?? 'none'}, abort=${abortMatch ? 'yes' : 'no'}`);
 
