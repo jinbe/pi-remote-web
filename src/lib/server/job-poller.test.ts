@@ -275,6 +275,85 @@ describe('job-poller', () => {
 		});
 	});
 
+	describe('handleJobAgentEnd — ABORT_JOB', () => {
+		it('immediately fails a running review job when ABORT_JOB is present', async () => {
+			const job = createTestJob({
+				type: 'review',
+				title: 'Review missing PR',
+				repo: '/repo',
+				pr_url: 'https://github.com/org/repo/pull/404',
+			});
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session' });
+
+			await handleJobAgentEnd(job.id, 'The PR does not exist.\nABORT_JOB: PR not found - repository returned 404');
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('failed');
+			expect(updated.error).toContain('Aborted by agent');
+			expect(updated.error).toContain('PR not found');
+		});
+
+		it('immediately fails a reviewing-phase job when ABORT_JOB is present', async () => {
+			const job = createTestJob({
+				title: 'Task with bad repo',
+				repo: '/repo',
+				max_loops: 3,
+			});
+			updateJobStatus(job.id, { status: 'reviewing', session_id: 'test-session' });
+
+			await handleJobAgentEnd(job.id, 'Cannot find the repo.\nABORT_JOB: Repository does not exist');
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('failed');
+			expect(updated.error).toContain('Aborted by agent');
+			expect(updated.error).toContain('Repository does not exist');
+		});
+
+		it('ABORT_JOB takes precedence over VERDICT marker', async () => {
+			const job = createTestJob({
+				type: 'review',
+				title: 'Conflicting markers',
+				repo: '/repo',
+			});
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session' });
+
+			await handleJobAgentEnd(job.id, 'VERDICT: approved\nABORT_JOB: Something is fundamentally wrong');
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('failed');
+			expect(updated.error).toContain('Aborted by agent');
+		});
+
+		it('ABORT_JOB skips nudge retries entirely', async () => {
+			const job = createTestJob({
+				type: 'review',
+				title: 'Skip nudges',
+				repo: '/repo',
+			});
+			// Still has nudge retries available
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session', no_verdict_retries: 0 });
+
+			await handleJobAgentEnd(job.id, 'ABORT_JOB: Issue cannot be found');
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('failed');
+			// no_verdict_retries should not have been incremented
+			expect(updated.no_verdict_retries).toBe(0);
+		});
+
+		it('does not abort for terminal-state jobs', async () => {
+			const job = createTestJob({
+				title: 'Already done',
+				repo: '/repo',
+			});
+			updateJobStatus(job.id, { status: 'done' });
+
+			await handleJobAgentEnd(job.id, 'ABORT_JOB: Too late');
+
+			expect(getJob(job.id)!.status).toBe('done');
+		});
+	});
+
 	describe('recoverOrphanedJobs', () => {
 		it('re-queues a claimed job with no session_id', () => {
 			const job = createTestJob({ title: 'Orphaned claimed', repo: '/repo' });
