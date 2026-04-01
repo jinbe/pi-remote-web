@@ -276,14 +276,15 @@ describe('job-poller', () => {
 	});
 
 	describe('handleJobAgentEnd — ABORT_JOB', () => {
-		it('immediately fails a running review job when ABORT_JOB is present', async () => {
+		it('immediately fails a running review job during nudge retry when ABORT_JOB is present', async () => {
 			const job = createTestJob({
 				type: 'review',
 				title: 'Review missing PR',
 				repo: '/repo',
 				pr_url: 'https://github.com/org/repo/pull/404',
 			});
-			updateJobStatus(job.id, { status: 'running', session_id: 'test-session' });
+			// Simulate being in a nudge retry (no_verdict_retries > 0)
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session', no_verdict_retries: 1 });
 
 			await handleJobAgentEnd(job.id, 'The PR does not exist.\nABORT_JOB: PR not found - repository returned 404');
 
@@ -293,13 +294,13 @@ describe('job-poller', () => {
 			expect(updated.error).toContain('PR not found');
 		});
 
-		it('immediately fails a reviewing-phase job when ABORT_JOB is present', async () => {
+		it('immediately fails a reviewing-phase job during nudge retry when ABORT_JOB is present', async () => {
 			const job = createTestJob({
 				title: 'Task with bad repo',
 				repo: '/repo',
 				max_loops: 3,
 			});
-			updateJobStatus(job.id, { status: 'reviewing', session_id: 'test-session' });
+			updateJobStatus(job.id, { status: 'reviewing', session_id: 'test-session', no_verdict_retries: 2 });
 
 			await handleJobAgentEnd(job.id, 'Cannot find the repo.\nABORT_JOB: Repository does not exist');
 
@@ -309,13 +310,13 @@ describe('job-poller', () => {
 			expect(updated.error).toContain('Repository does not exist');
 		});
 
-		it('ABORT_JOB takes precedence over VERDICT marker', async () => {
+		it('ABORT_JOB takes precedence over VERDICT marker during nudge retry', async () => {
 			const job = createTestJob({
 				type: 'review',
 				title: 'Conflicting markers',
 				repo: '/repo',
 			});
-			updateJobStatus(job.id, { status: 'running', session_id: 'test-session' });
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session', no_verdict_retries: 1 });
 
 			await handleJobAgentEnd(job.id, 'VERDICT: approved\nABORT_JOB: Something is fundamentally wrong');
 
@@ -324,21 +325,39 @@ describe('job-poller', () => {
 			expect(updated.error).toContain('Aborted by agent');
 		});
 
-		it('ABORT_JOB skips nudge retries entirely', async () => {
+		it('ABORT_JOB skips remaining nudge retries', async () => {
 			const job = createTestJob({
 				type: 'review',
-				title: 'Skip nudges',
+				title: 'Skip remaining nudges',
 				repo: '/repo',
 			});
-			// Still has nudge retries available
-			updateJobStatus(job.id, { status: 'running', session_id: 'test-session', no_verdict_retries: 0 });
+			// First nudge was sent, still has retries remaining
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session', no_verdict_retries: 1 });
 
 			await handleJobAgentEnd(job.id, 'ABORT_JOB: Issue cannot be found');
 
 			const updated = getJob(job.id)!;
 			expect(updated.status).toBe('failed');
-			// no_verdict_retries should not have been incremented
-			expect(updated.no_verdict_retries).toBe(0);
+			// no_verdict_retries should not have been incremented further
+			expect(updated.no_verdict_retries).toBe(1);
+		});
+
+		it('ignores ABORT_JOB during normal runs (no_verdict_retries is 0)', async () => {
+			const job = createTestJob({
+				type: 'review',
+				title: 'Normal run with ABORT_JOB in text',
+				repo: '/repo',
+				pr_url: 'https://github.com/org/repo/pull/42',
+			});
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session' });
+
+			// Agent happens to mention ABORT_JOB but also gives a verdict
+			await handleJobAgentEnd(job.id, 'ABORT_JOB: this text should be ignored\nVERDICT: approved');
+
+			const updated = getJob(job.id)!;
+			// Should process normally — ABORT_JOB ignored, verdict honoured
+			expect(updated.status).toBe('done');
+			expect(updated.review_verdict).toBe('approved');
 		});
 
 		it('does not abort for terminal-state jobs', async () => {
@@ -351,6 +370,31 @@ describe('job-poller', () => {
 			await handleJobAgentEnd(job.id, 'ABORT_JOB: Too late');
 
 			expect(getJob(job.id)!.status).toBe('done');
+		});
+	});
+
+	describe('handleJobAgentEnd — concurrency', () => {
+		it('serialises concurrent calls so a late empty-text call does not spuriously nudge', async () => {
+			const job = createTestJob({
+				type: 'review',
+				title: 'Race condition test',
+				repo: '/repo',
+				pr_url: 'https://github.com/org/repo/pull/99',
+			});
+			updateJobStatus(job.id, { status: 'running', session_id: 'test-session' });
+
+			// Fire two concurrent calls: one with a verdict, one with empty text
+			// (simulates agent_end + session_ended racing)
+			const call1 = handleJobAgentEnd(job.id, 'Looks good!\nVERDICT: approved');
+			const call2 = handleJobAgentEnd(job.id, '');
+
+			await Promise.all([call1, call2]);
+
+			const updated = getJob(job.id)!;
+			// Should be done (from the first call), not failed/nudged by the second
+			expect(updated.status).toBe('done');
+			expect(updated.review_verdict).toBe('approved');
+			expect(updated.no_verdict_retries).toBe(0);
 		});
 	});
 
