@@ -1,5 +1,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
+/** Bump this when the extension logic changes. */
+export const EXTENSION_VERSION = "1.0.0";
+
 const JOB_ID_PATTERN = /JOB_ID:\s*(\S+)/;
 const CALLBACK_PATTERN = /CALLBACK_URL:\s*(\S+)/;
 const CALLBACK_TOKEN_PATTERN = /CALLBACK_TOKEN:\s*(\S+)/;

@@ -6,7 +6,7 @@
  */
 import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
 import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt, buildNudgeVerdictPrompt } from './job-prompts';
-import { createSession, sendMessage, subscribe, stopSession, isActive } from './rpc-manager';
+import { createSession, sendMessage, stopSession, isActive } from './rpc-manager';
 import { log } from './logger';
 import { getDb } from './cache';
 import { existsSync } from 'fs';
@@ -33,9 +33,6 @@ const ABORT_JOB_PATTERN = /ABORT_JOB:\s*(.+)/;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let isPolling = false;
-
-/** Active session subscriptions keyed by job ID — used to unsubscribe on cleanup. */
-const sessionUnsubscribers = new Map<string, () => void>();
 
 /**
  * Per-job lock to serialise handleJobAgentEnd calls. Prevents race conditions
@@ -180,10 +177,6 @@ async function dispatchJob(job: Job): Promise<void> {
 		// Update job with session ID
 		updateJobStatus(job.id, { session_id: sessionId });
 
-		// Subscribe to session events so we can detect agent_end and trigger
-		// phase transitions server-side — the extension callback is a fallback.
-		subscribeToJobSession(job.id, sessionId);
-
 		// Send the appropriate prompt
 		const prompt = isReview ? buildReviewPrompt(job) : buildTaskPrompt(job);
 		await sendMessage(sessionId, prompt);
@@ -195,59 +188,6 @@ async function dispatchJob(job: Job): Promise<void> {
 			status: 'failed',
 			error: `Dispatch failed: ${err.message}`,
 		});
-	}
-}
-
-// --- Session subscription for server-side job completion ---
-
-/**
- * Subscribe to a job's Pi session to detect agent_end events.
- * The subscription persists through all phase transitions (task → review → fix)
- * and is only cleaned up when the job reaches a terminal state.
- */
-function subscribeToJobSession(jobId: string, sessionId: string): void {
-	// Accumulated assistant text for the current phase — reset between phases
-	let fullAssistantText = '';
-
-	const unsubscribe = subscribe(sessionId, (event: any) => {
-		// Accumulate assistant text deltas so we have the full conversation
-		if (event.type === 'message_update') {
-			const ame = event.assistantMessageEvent;
-			if (ame?.type === 'text_delta') {
-				fullAssistantText += ame.delta;
-			}
-		}
-
-		if (event.type === 'agent_end') {
-			// Include any text captured in _lastAssistantText (the final message)
-			const lastText = event._lastAssistantText ?? '';
-			const combinedText = fullAssistantText + '\n' + lastText;
-
-			// Handle phase transition — don't cleanup subscription yet
-			handleJobAgentEnd(jobId, combinedText);
-			
-			// Reset accumulated text for the next phase
-			fullAssistantText = '';
-		}
-
-		if (event.type === 'session_ended') {
-			// Session ended without agent_end — treat as completion
-			handleJobAgentEnd(jobId, fullAssistantText);
-			cleanupSubscription(jobId);
-		}
-	});
-
-	sessionUnsubscribers.set(jobId, unsubscribe);
-}
-
-/**
- * Remove the session subscription for a job.
- */
-function cleanupSubscription(jobId: string): void {
-	const unsubscribe = sessionUnsubscribers.get(jobId);
-	if (unsubscribe) {
-		unsubscribe();
-		sessionUnsubscribers.delete(jobId);
 	}
 }
 
@@ -320,7 +260,6 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 				error: `Aborted by agent: ${reason}`,
 			});
 			await stopJobSession(job);
-			cleanupSubscription(jobId);
 			return;
 		}
 
@@ -337,7 +276,6 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 						review_verdict: verdict,
 					});
 					await stopJobSession(job);
-					cleanupSubscription(jobId);
 					log.info('job-poller', `review job ${jobId} → done (verdict: ${verdict})`);
 				} else if (await nudgeForVerdict(job)) {
 					// Nudge sent — wait for next agent_end
@@ -349,7 +287,6 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 						error: `Review ended without VERDICT marker after ${job.no_verdict_retries} retry attempts`,
 					});
 					await stopJobSession(job);
-					cleanupSubscription(jobId);
 				}
 				return;
 			}
@@ -376,7 +313,6 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 			} else {
 				// Fire-and-forget (max_loops=0): stop session.
 				// The user will manually review the PR and mark the job as done.
-				cleanupSubscription(jobId);
 				if (job.session_id) {
 					try {
 						await stopSession(job.session_id);
@@ -407,7 +343,6 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 				});
 
 				await stopJobSession(job);
-				cleanupSubscription(jobId);
 				
 				log.info('job-poller', `job ${jobId} approved → done`);
 				
@@ -423,7 +358,6 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 					});
 
 					await stopJobSession(job);
-					cleanupSubscription(jobId);
 					
 					log.info('job-poller', `job ${jobId} loop cap reached (${job.max_loops}) → done`);
 					
@@ -456,7 +390,6 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 					error: `Review phase ended without VERDICT marker after ${job.no_verdict_retries} retry attempts`,
 				});
 				await stopJobSession(job);
-				cleanupSubscription(jobId);
 			}
 		}
 	} catch (err) {
@@ -471,7 +404,6 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 		if (failedJob) {
 			await stopJobSession(failedJob);
 		}
-		cleanupSubscription(jobId);
 	}
 }
 

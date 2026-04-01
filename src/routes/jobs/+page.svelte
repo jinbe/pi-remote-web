@@ -40,9 +40,38 @@
 		model: string | null;
 	}
 
+	interface ExtensionStatus {
+		installed: boolean;
+		isSymlink: boolean;
+		repoVersion: string | null;
+		installedVersion: string | null;
+		upToDate: boolean;
+		repoPath: string;
+		installedPath: string;
+	}
+
 	let { data } = $props();
 
 	const { theme, toggleTheme } = getContext<{ theme: 'dark' | 'light'; toggleTheme: () => void }>('theme');
+
+	// Extension status
+	let extensionStatus = $state<ExtensionStatus>(data.extensionStatus as ExtensionStatus);
+	let installingExtension = $state(false);
+
+	async function installExtension() {
+		hapticMedium();
+		installingExtension = true;
+		try {
+			const res = await fetch('/api/jobs/extension-status', { method: 'POST' });
+			if (res.ok) {
+				extensionStatus = await res.json();
+			}
+		} catch (e) {
+			console.error('Failed to install extension:', e);
+		} finally {
+			installingExtension = false;
+		}
+	}
 
 	// Filter state
 	let statusFilter = $state<string>('active');
@@ -549,6 +578,34 @@
 					<span class="hidden sm:inline">Poller Off</span>
 				{/if}
 			</button>
+			<!-- Extension status indicator -->
+			{#if !extensionStatus.installed || !extensionStatus.upToDate}
+				<button
+					class="btn btn-sm {extensionStatus.installed ? 'btn-warning' : 'btn-error'} gap-1"
+					onclick={installExtension}
+					disabled={installingExtension}
+					title={extensionStatus.installed
+						? `Extension outdated: ${extensionStatus.installedVersion} → ${extensionStatus.repoVersion}`
+						: 'Job callback extension not installed — click to install'}
+				>
+					{#if installingExtension}
+						<span class="loading loading-spinner loading-xs"></span>
+					{:else if extensionStatus.installed}
+						<Icon name="refresh" class="w-3.5 h-3.5" />
+					{:else}
+						<Icon name="bolt" class="w-3.5 h-3.5" />
+					{/if}
+					<span class="hidden sm:inline">{extensionStatus.installed ? 'Update Hook' : 'Install Hook'}</span>
+				</button>
+			{:else}
+				<span
+					class="btn btn-sm btn-ghost text-success/60 cursor-default gap-1"
+					title="Job callback extension v{extensionStatus.repoVersion} installed"
+				>
+					<Icon name="check" class="w-3.5 h-3.5" />
+					<span class="hidden sm:inline">Hook v{extensionStatus.repoVersion}</span>
+				</span>
+			{/if}
 			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAddJob = true; }}><Icon name="plus" class="w-4 h-4" /> New Task</button>
 			<button class="btn btn-sm btn-secondary gap-1" onclick={() => { hapticMedium(); showAddReviewJob = true; }}><Icon name="search" class="w-4 h-4" /> New Review</button>
 			<button class="btn btn-sm btn-ghost" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh"><Icon name="refresh" class="w-4 h-4" /></button>
