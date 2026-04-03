@@ -367,7 +367,7 @@
 				</a>
 			{/if}
 		</div>
-		<div class="flex gap-2">
+		<div class="flex gap-2 items-center">
 			{#if hasAnythingRunning}
 				<button
 					class="btn btn-sm btn-error"
@@ -382,10 +382,25 @@
 				</button>
 			{/if}
 			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showNewSession = true; }}><Icon name="plus" class="w-4 h-4" /> New</button>
-			<button class="btn btn-sm btn-ghost" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh"><Icon name="refresh" class="w-4 h-4" /></button>
-			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
-				{#if theme === 'dark'}<Icon name="sun" class="w-5 h-5" />{:else}<Icon name="moon" class="w-5 h-5" />{/if}
-			</button>
+			<!-- Kebab menu -->
+			<div class="dropdown dropdown-end">
+				<div tabindex="0" role="button" class="btn btn-sm btn-ghost btn-circle" aria-label="More actions">
+					<Icon name="more-vertical" class="w-5 h-5" />
+				</div>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-44 p-2 shadow-lg border border-base-300">
+					<li>
+						<button onclick={() => { hapticLight(); invalidateAll(); }}>
+							<Icon name="refresh" class="w-4 h-4" /> Refresh
+						</button>
+					</li>
+					<li>
+						<button onclick={() => { hapticLight(); toggleTheme(); }}>
+							{#if theme === 'dark'}<Icon name="sun" class="w-4 h-4" /> Light Mode{:else}<Icon name="moon" class="w-4 h-4" /> Dark Mode{/if}
+						</button>
+					</li>
+				</ul>
+			</div>
 		</div>
 	</div>
 
