@@ -21,11 +21,13 @@
 		prPollerRunning,
 		pollIntervalMs,
 		concurrency,
+		onaddrepo,
 	}: {
 		repos: MonitoredRepo[];
 		prPollerRunning: boolean;
 		pollIntervalMs: number;
 		concurrency: number;
+		onaddrepo?: () => void;
 	} = $props();
 
 	let scanningRepo = $state<string | null>(null);
@@ -112,6 +114,16 @@
 			<span class="badge badge-xs badge-ghost">{repos.length}</span>
 		</div>
 		<div class="flex items-center gap-1">
+			<!-- Add repo -->
+			{#if onaddrepo}
+				<button
+					class="btn btn-xs btn-ghost gap-0.5"
+					onclick={() => { hapticMedium(); onaddrepo?.(); }}
+					title="Add a repo to monitor"
+				>
+					<Icon name="plus" class="w-3 h-3" /> Add
+				</button>
+			{/if}
 			<!-- PR Poller toggle -->
 			<button
 				class="btn btn-xs {prPollerRunning ? 'btn-success' : 'btn-ghost'}"
@@ -150,7 +162,17 @@
 
 	<!-- Repo list -->
 	{#if repos.length === 0}
-		<p class="text-sm text-base-content/50 py-4 text-center">No repos monitored yet.</p>
+		<div class="py-4 text-center">
+			<p class="text-sm text-base-content/50">No repos monitored yet.</p>
+			{#if onaddrepo}
+				<button
+					class="btn btn-sm btn-primary mt-2 gap-1"
+					onclick={() => { hapticMedium(); onaddrepo?.(); }}
+				>
+					<Icon name="plus" class="w-4 h-4" /> Add Repo
+				</button>
+			{/if}
+		</div>
 	{:else}
 		<div class="flex flex-col gap-1.5">
 			{#each repos as repo (repo.id)}

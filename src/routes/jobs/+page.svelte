@@ -611,7 +611,7 @@
 			{/if}
 			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAddJob = true; }}><Icon name="plus" class="w-4 h-4" /> New Task</button>
 			<button class="btn btn-sm btn-secondary gap-1" onclick={() => { hapticMedium(); showAddReviewJob = true; }}><Icon name="search" class="w-4 h-4" /> New Review</button>
-			<button class="btn btn-sm btn-ghost gap-1" onclick={() => { hapticMedium(); showAddRepo = true; }}><Icon name="plus" class="w-4 h-4" /> Repo</button>
+
 			<button class="btn btn-sm btn-ghost" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh"><Icon name="refresh" class="w-4 h-4" /></button>
 			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
 				{#if theme === 'dark'}<Icon name="sun" class="w-5 h-5" />{:else}<Icon name="moon" class="w-5 h-5" />{/if}
@@ -677,16 +677,15 @@
 	</div>
 
 	<!-- Monitored Repos -->
-	{#if data.monitoredRepos && data.monitoredRepos.length > 0}
-		<div class="mb-4">
-			<MonitoredRepos
-				repos={data.monitoredRepos}
-				prPollerRunning={data.prPollerRunning}
-				pollIntervalMs={data.prPollIntervalMs}
-				concurrency={data.prPollConcurrency}
-			/>
-		</div>
-	{/if}
+	<div class="mb-4">
+		<MonitoredRepos
+			repos={data.monitoredRepos}
+			prPollerRunning={data.prPollerRunning}
+			pollIntervalMs={data.prPollIntervalMs}
+			concurrency={data.prPollConcurrency}
+			onaddrepo={() => { showAddRepo = true; }}
+		/>
+	</div>
 
 	<!-- Jobs list -->
 	{#if filteredJobs.length === 0}
