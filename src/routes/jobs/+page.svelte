@@ -4,6 +4,8 @@
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import AddJobModal from '$lib/components/AddJobModal.svelte';
 	import AddReviewJobModal from '$lib/components/AddReviewJobModal.svelte';
+	import AddRepoModal from '$lib/components/AddRepoModal.svelte';
+	import MonitoredRepos from '$lib/components/MonitoredRepos.svelte';
 	import JobChain from '$lib/components/JobChain.svelte';
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
@@ -79,6 +81,7 @@
 	let search = $state('');
 	let showAddJob = $state(false);
 	let showAddReviewJob = $state(false);
+	let showAddRepo = $state(false);
 
 	// Expanded job for detail view
 	let expandedJob = $state<string | null>(null);
@@ -608,6 +611,7 @@
 			{/if}
 			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAddJob = true; }}><Icon name="plus" class="w-4 h-4" /> New Task</button>
 			<button class="btn btn-sm btn-secondary gap-1" onclick={() => { hapticMedium(); showAddReviewJob = true; }}><Icon name="search" class="w-4 h-4" /> New Review</button>
+			<button class="btn btn-sm btn-ghost gap-1" onclick={() => { hapticMedium(); showAddRepo = true; }}><Icon name="plus" class="w-4 h-4" /> Repo</button>
 			<button class="btn btn-sm btn-ghost" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh"><Icon name="refresh" class="w-4 h-4" /></button>
 			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
 				{#if theme === 'dark'}<Icon name="sun" class="w-5 h-5" />{:else}<Icon name="moon" class="w-5 h-5" />{/if}
@@ -672,6 +676,18 @@
 		</div>
 	</div>
 
+	<!-- Monitored Repos -->
+	{#if data.monitoredRepos && data.monitoredRepos.length > 0}
+		<div class="mb-4">
+			<MonitoredRepos
+				repos={data.monitoredRepos}
+				prPollerRunning={data.prPollerRunning}
+				pollIntervalMs={data.prPollIntervalMs}
+				concurrency={data.prPollConcurrency}
+			/>
+		</div>
+	{/if}
+
 	<!-- Jobs list -->
 	{#if filteredJobs.length === 0}
 		<div class="py-12 text-center text-base-content/50">
@@ -706,4 +722,9 @@
 <AddReviewJobModal
 	open={showAddReviewJob}
 	onclose={() => (showAddReviewJob = false)}
+/>
+
+<AddRepoModal
+	open={showAddRepo}
+	onclose={() => (showAddRepo = false)}
 />
