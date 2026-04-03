@@ -82,6 +82,7 @@
 	let showAddJob = $state(false);
 	let showAddReviewJob = $state(false);
 	let showAddRepo = $state(false);
+	let prMonitorOpen = $state(false);
 
 	// Expanded job for detail view
 	let expandedJob = $state<string | null>(null);
@@ -676,7 +677,7 @@
 		</div>
 	</div>
 
-	<!-- Monitored Repos -->
+	<!-- PR Monitor (collapsible) -->
 	<div class="mb-4">
 		<MonitoredRepos
 			repos={data.monitoredRepos}
@@ -684,6 +685,8 @@
 			pollIntervalMs={data.prPollIntervalMs}
 			concurrency={data.prPollConcurrency}
 			onaddrepo={() => { showAddRepo = true; }}
+			open={prMonitorOpen}
+			ontoggle={(v) => { prMonitorOpen = v; }}
 		/>
 	</div>
 
