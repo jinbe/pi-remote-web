@@ -3,7 +3,7 @@
   Usage: <Icon name="cog" class="w-4 h-4" />
 -->
 <script lang="ts">
-	export type IconName = 'clock' | 'lock' | 'bolt' | 'hammer' | 'search' | 'target' | 'paperclip' | 'cog' | 'document' | 'pencil' | 'save' | 'sun' | 'moon' | 'circle-green' | 'circle-red' | 'check-circle' | 'play-pause' | 'stop-circle' | 'play' | 'stop' | 'compress' | 'close' | 'check' | 'chevron-right' | 'plus' | 'arrow-left' | 'arrow-down' | 'refresh' | 'dash' | 'enter' | 'star-filled' | 'star-outline' | 'more-vertical';
+	export type IconName = 'clock' | 'lock' | 'bolt' | 'hammer' | 'search' | 'target' | 'paperclip' | 'cog' | 'document' | 'pencil' | 'save' | 'sun' | 'moon' | 'circle-green' | 'circle-red' | 'check-circle' | 'play-pause' | 'stop-circle' | 'play' | 'stop' | 'compress' | 'close' | 'check' | 'chevron-right' | 'plus' | 'arrow-left' | 'arrow-down' | 'refresh' | 'dash' | 'enter' | 'star-filled' | 'star-outline' | 'more-vertical' | 'warning';
 	let { name, class: className = 'w-4 h-4' }: { name: IconName; class?: string } = $props();
 </script>
 
@@ -170,6 +170,11 @@
 	<!-- ☆ Outline star / unfavourite -->
 	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 		<path stroke-linecap="round" stroke-linejoin="round" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+	</svg>
+{:else if name === 'warning'}
+	<!-- ⚠ Warning / error -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
 	</svg>
 {:else if name === 'more-vertical'}
 	<!-- ⋮ Kebab / more actions -->

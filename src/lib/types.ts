@@ -11,6 +11,7 @@ export interface JournalEntry {
 		model?: string;
 		usage?: { input: number; output: number; cost?: { total: number } };
 		stopReason?: string;
+		errorMessage?: string;
 		toolCallId?: string;
 		toolName?: string;
 		isError?: boolean;

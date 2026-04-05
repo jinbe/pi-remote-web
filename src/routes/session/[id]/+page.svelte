@@ -264,6 +264,17 @@
 					streaming = false;
 					currentAssistantText = '';
 					currentThinkingText = '';
+					// Surface API errors as a toast for immediate visibility
+					if (event.messages?.length) {
+						for (const msg of event.messages) {
+							if (msg.stopReason === 'error' && msg.errorMessage) {
+								const errorText = msg.errorMessage.length > 200
+									? msg.errorMessage.slice(0, 200) + '…'
+									: msg.errorMessage;
+								addToast(errorText, 'error');
+							}
+						}
+					}
 					reloadMessages();
 					// Add to session events
 					sessionEvents = [...sessionEvents, {
@@ -411,9 +422,10 @@
 	function addToast(message: string, severity: string) {
 		const id = uniqueId();
 		toasts = [...toasts, { id, message, severity }];
+		const duration = severity === 'error' ? 8000 : 4000;
 		setTimeout(() => {
 			toasts = toasts.filter((t) => t.id !== id);
-		}, 4000);
+		}, duration);
 	}
 
 	// Sync streaming state from server (used after SSE reconnect or missed events)

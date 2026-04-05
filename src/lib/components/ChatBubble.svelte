@@ -121,6 +121,8 @@
 	const toolCalls = $derived(getToolCalls(entry.message));
 	const thinking = $derived(getThinkingContent(entry.message));
 	const images = $derived(getImages(entry.message));
+	const errorMessage = $derived(entry.message?.errorMessage);
+	const isError = $derived(entry.message?.stopReason === 'error' && !!errorMessage);
 	const renderedHtml = $derived(isAssistant && text ? renderMarkdown(text) : '');
 	const canSwipeCopy = $derived(!!text && !isToolResult);
 </script>
@@ -178,7 +180,9 @@
 				? 'chat-bubble-primary'
 				: isToolResult
 					? 'chat-bubble-secondary'
-					: ''} max-w-[90vw] md:max-w-xl relative overflow-hidden"
+					: isError
+						? 'chat-bubble-error'
+						: ''} max-w-[90vw] md:max-w-xl relative overflow-hidden"
 		>
 			{#if isToolResult}
 				<!-- Tool results: collapsed by default, show truncated preview -->
@@ -217,7 +221,15 @@
 					</div>
 				{/if}
 
-				{#if text}
+				{#if isError}
+					<div class="flex items-start gap-2">
+						<Icon name="warning" class="w-4 h-4 flex-shrink-0 mt-0.5" />
+						<div class="min-w-0">
+							<div class="font-semibold text-sm mb-1">Error</div>
+							<pre class="text-xs font-mono whitespace-pre-wrap break-all max-h-48 overflow-y-auto">{errorMessage}</pre>
+						</div>
+					</div>
+				{:else if text}
 					{#if isAssistant}
 						<div class="markdown-body text-sm">
 							{@html renderedHtml}
