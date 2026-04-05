@@ -58,8 +58,29 @@ const PROMPT_TIMEOUT_MS = 10_000;
 // so they need a longer timeout.
 const STEER_TIMEOUT_MS = 60_000;
 
-const RELAY_SCRIPT = join(__dirname, 'pi-relay.ts');
+const PI_RELAY_SCRIPT = join(__dirname, 'pi-relay.ts');
+const CLAUDE_RELAY_SCRIPT = join(__dirname, 'claude-relay.ts');
 const SOCKET_DIR = join(tmpdir(), 'pi-remote-web');
+
+// --- Harness selection ---
+
+export type HarnessType = 'pi' | 'claude-code';
+
+/**
+ * Determine which coding harness to use.
+ * Set PI_HARNESS=claude-code in .env to use Claude Code instead of pi.
+ */
+export function getHarness(): HarnessType {
+	const envVal = process.env.PI_HARNESS?.toLowerCase();
+	if (envVal === 'claude-code' || envVal === 'claude') return 'claude-code';
+	return 'pi';
+}
+
+function getRelayScript(): string {
+	const harness = getHarness();
+	log.info('harness', `using harness: ${harness}`);
+	return harness === 'claude-code' ? CLAUDE_RELAY_SCRIPT : PI_RELAY_SCRIPT;
+}
 
 // --- State (stored on globalThis to survive Vite HMR module re-evaluation) ---
 
@@ -336,12 +357,13 @@ async function spawnRelay(
 	cwd: string,
 	piArgs: string[]
 ): Promise<number> {
-	log.info('relay', `spawning: ${RELAY_SCRIPT} ${socketPath} ${cwd} ${piArgs.join(' ')}`);
+	const relayScript = getRelayScript();
+	log.info('relay', `spawning: ${relayScript} ${socketPath} ${cwd} ${piArgs.join(' ')}`);
 
 	// Spawn relay as a detached process that survives our exit.
 	// Use stdin/stdout/stderr: 'ignore' so no pipe ties us to the child.
 	// The relay writes a PID file and creates the socket — we poll for those.
-	const proc = Bun.spawn(['bun', 'run', RELAY_SCRIPT, socketPath, cwd, ...piArgs], {
+	const proc = Bun.spawn(['bun', 'run', relayScript, socketPath, cwd, ...piArgs], {
 		cwd,
 		stdin: 'ignore',
 		stdout: 'ignore',
