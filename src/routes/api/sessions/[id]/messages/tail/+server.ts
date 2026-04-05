@@ -1,10 +1,17 @@
 import { decodeSessionId, getTailMessages } from '$lib/server/session-scanner';
+import { existsSync } from 'fs';
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, url }) => {
 	const filePath = decodeSessionId(params.id);
 	const count = Math.max(1, Math.min(200, parseInt(url.searchParams.get('count') || '20') || 20));
+
+	// For Claude Code sessions, the file may not exist (synthetic path from relay)
+	if (!existsSync(filePath)) {
+		return json({ messages: [], hasMore: false });
+	}
+
 	try {
 		const result = await getTailMessages(filePath, count);
 		return json(result);

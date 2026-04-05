@@ -62,7 +62,9 @@ interface SyntheticState {
  * Claude stores sessions at ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
  */
 function buildSessionFilePath(sessionId: string): string {
-	const encodedCwd = cwd.replace(/\//g, '-').replace(/^-/, '');
+	// Claude Code encodes cwd by replacing / with - (keeping the leading dash)
+	// e.g. /Users/jchan/code → -Users-jchan-code
+	const encodedCwd = cwd.replace(/\//g, '-');
 	return join(homedir(), '.claude', 'projects', encodedCwd, `${sessionId}.jsonl`);
 }
 
