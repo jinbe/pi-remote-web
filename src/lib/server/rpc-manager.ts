@@ -15,6 +15,7 @@ interface ManagedSession {
 	sessionId: string;
 	sessionPath: string;
 	cwd: string;
+	harness: HarnessType;
 	relayPid: number;
 	socketPath: string;
 	socket: Socket<undefined> | null;
@@ -76,8 +77,13 @@ export function getHarness(): HarnessType {
 	return 'pi';
 }
 
-function getRelayScript(): string {
-	const harness = getHarness();
+/** Detect harness from session file path — Claude Code sessions live under ~/.claude/ */
+function detectHarnessFromPath(filePath: string): HarnessType {
+	const claudeDir = join(homedir(), '.claude');
+	return filePath.startsWith(claudeDir) ? 'claude-code' : 'pi';
+}
+
+function getRelayScript(harness: HarnessType): string {
 	log.info('harness', `using harness: ${harness}`);
 	return harness === 'claude-code' ? CLAUDE_RELAY_SCRIPT : PI_RELAY_SCRIPT;
 }
@@ -355,9 +361,10 @@ function handleSessionEnded(managed: ManagedSession) {
 async function spawnRelay(
 	socketPath: string,
 	cwd: string,
-	piArgs: string[]
+	piArgs: string[],
+	harness: HarnessType = 'pi'
 ): Promise<number> {
-	const relayScript = getRelayScript();
+	const relayScript = getRelayScript(harness);
 	log.info('relay', `spawning: ${relayScript} ${socketPath} ${cwd} ${piArgs.join(' ')}`);
 
 	// Spawn relay as a detached process that survives our exit.
@@ -440,7 +447,8 @@ async function connectToRelay(managed: ManagedSession): Promise<void> {
 export async function resumeSession(
 	sessionId: string,
 	filePath: string,
-	cwd: string
+	cwd: string,
+	harness: HarnessType = 'pi'
 ): Promise<void> {
 	if (activeSessions.has(sessionId) || resumingSessionIds.has(sessionId)) {
 		return;
@@ -456,13 +464,17 @@ export async function resumeSession(
 		if (!relayPid) {
 			// Spawn a new relay
 			insertActiveStmt.run(sessionId, filePath, cwd, null, new Date().toISOString(), null, null, 'starting', socketPath);
-			relayPid = await spawnRelay(socketPath, cwd, ['--session', filePath]);
+			const resumeArgs = harness === 'claude-code'
+				? ['--resume', filePath.match(/([0-9a-f-]{36})\.jsonl$/)?.[1] || filePath]
+				: ['--session', filePath];
+			relayPid = await spawnRelay(socketPath, cwd, resumeArgs, harness);
 		}
 
 		const managed: ManagedSession = {
 			sessionId,
 			sessionPath: filePath,
 			cwd,
+			harness,
 			relayPid,
 			socketPath,
 			socket: null,
@@ -507,19 +519,21 @@ export async function resumeSession(
 	}
 }
 
-export async function createSession(cwd: string, model?: string): Promise<string> {
+export async function createSession(cwd: string, model?: string, harness?: HarnessType): Promise<string> {
+	const effectiveHarness = harness || getHarness();
 	const tempId = crypto.randomUUID();
 	const socketPath = socketPathFor(tempId);
 
 	const piArgs: string[] = [];
 	if (model) piArgs.push('--model', model);
 
-	const relayPid = await spawnRelay(socketPath, cwd, piArgs);
+	const relayPid = await spawnRelay(socketPath, cwd, piArgs, effectiveHarness);
 
 	const managed: ManagedSession = {
 		sessionId: '',
 		sessionPath: '',
 		cwd,
+		harness: effectiveHarness,
 		relayPid,
 		socketPath,
 		socket: null,
@@ -830,6 +844,7 @@ export async function recoverActiveSessions() {
 					sessionId: row.session_id,
 					sessionPath: row.file_path,
 					cwd: row.cwd,
+					harness: detectHarnessFromPath(row.file_path),
 					relayPid,
 					socketPath,
 					socket: null,
@@ -843,7 +858,7 @@ export async function recoverActiveSessions() {
 					autoStopTimer: null,
 					writeQueue: [],
 					writing: false,
-			cachedCommands: null,
+					cachedCommands: null,
 				};
 
 				await connectToRelay(managed);

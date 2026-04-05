@@ -13,7 +13,7 @@
 
 import { unlinkSync, writeFileSync, appendFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
+import { tmpdir, homedir } from 'os';
 import type { Socket } from 'bun';
 
 const [socketPath, cwd, ...claudeArgs] = process.argv.slice(2);
@@ -30,7 +30,8 @@ try { unlinkSync(socketPath); } catch {}
 
 // --- Logging ---
 
-const LOG_FILE = join(tmpdir(), 'pi-remote-web', 'debug.log');
+const LOG_DIR = join(tmpdir(), 'pi-remote-web');
+const LOG_FILE = join(LOG_DIR, 'debug.log');
 function relayLog(msg: string) {
 	try { appendFileSync(LOG_FILE, `${new Date().toISOString()} [INFO] [claude-relay] ${msg}\n`); } catch {}
 }
@@ -39,6 +40,7 @@ function relayLog(msg: string) {
 
 interface SyntheticState {
 	sessionId: string;
+	sessionFile: string | null;
 	model: string | null;
 	isStreaming: boolean;
 	messages: any[];
@@ -55,8 +57,18 @@ interface SyntheticState {
 	prevThinkingText: string;
 }
 
+/**
+ * Build a synthetic session file path that mirrors Claude Code's layout.
+ * Claude stores sessions at ~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+ */
+function buildSessionFilePath(sessionId: string): string {
+	const encodedCwd = cwd.replace(/\//g, '-').replace(/^-/, '');
+	return join(homedir(), '.claude', 'projects', encodedCwd, `${sessionId}.jsonl`);
+}
+
 const state: SyntheticState = {
 	sessionId: crypto.randomUUID(),
+	sessionFile: null,
 	model: null,
 	isStreaming: false,
 	messages: [],
@@ -72,14 +84,23 @@ const state: SyntheticState = {
 	prevThinkingText: '',
 };
 
-// --- Pending RPC commands (commands from the web UI that need synthetic responses) ---
+// --- Init readiness ---
 
-interface PendingCommand {
-	id: string;
-	type: string;
-}
-
-const pendingCommands: PendingCommand[] = [];
+/** Resolves when the system.init event has been received from Claude */
+let initReceived = false;
+let initResolve: (() => void) | null = null;
+const initReady = new Promise<void>((resolve) => {
+	initResolve = resolve;
+	// Timeout after 30s — don't block forever if init never arrives
+	setTimeout(() => {
+		if (!initReceived) {
+			relayLog('init timeout — proceeding with synthetic session ID');
+			state.sessionFile = buildSessionFilePath(state.sessionId);
+			initReceived = true;
+			resolve();
+		}
+	}, 30_000);
+});
 
 // --- Per-client write queue to handle backpressure ---
 
@@ -177,8 +198,15 @@ function translateClaudeEvent(event: any): void {
 			if (event.subtype === 'init') {
 				// Claude Code init — extract model and session ID
 				state.model = event.model || null;
-				if (event.session_id) state.sessionId = event.session_id;
-				relayLog(`init: model=${state.model} session=${state.sessionId}`);
+				if (event.session_id) {
+					state.sessionId = event.session_id;
+					state.sessionFile = buildSessionFilePath(event.session_id);
+				}
+				relayLog(`init: model=${state.model} session=${state.sessionId} file=${state.sessionFile}`);
+				if (!initReceived) {
+					initReceived = true;
+					initResolve?.();
+				}
 			}
 			// Skip hook events, they're Claude Code internal
 			break;
@@ -378,13 +406,6 @@ function translateClaudeEvent(event: any): void {
 			state.prevAssistantText = '';
 			state.prevThinkingText = '';
 			state.currentToolCalls.clear();
-
-			// Resolve any pending prompt command
-			const promptCmd = pendingCommands.find(c => c.type === 'prompt');
-			if (promptCmd) {
-				pendingCommands.splice(pendingCommands.indexOf(promptCmd), 1);
-			}
-
 			break;
 		}
 
@@ -448,7 +469,7 @@ if (proc.stderr) {
 
 // --- Handle pi RPC commands from clients ---
 
-function handleRpcCommand(raw: string): void {
+async function handleRpcCommand(raw: string): Promise<void> {
 	let parsed: any;
 	try {
 		parsed = JSON.parse(raw);
@@ -517,6 +538,11 @@ function handleRpcCommand(raw: string): void {
 		}
 
 		case 'get_state': {
+			// Wait for claude's init event so we have the real session ID
+			await initReady;
+			if (!state.sessionFile) {
+				state.sessionFile = buildSessionFilePath(state.sessionId);
+			}
 			respond(id, 'get_state', true, {
 				model: state.model ? {
 					id: state.model,
@@ -528,7 +554,7 @@ function handleRpcCommand(raw: string): void {
 				isCompacting: false,
 				steeringMode: 'all',
 				followUpMode: 'one-at-a-time',
-				sessionFile: null,
+				sessionFile: state.sessionFile,
 				sessionId: state.sessionId,
 				autoCompactionEnabled: false,
 				messageCount: state.messages.length,

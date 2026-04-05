@@ -19,6 +19,7 @@
 
 	let cwd = $state('');
 	let model = $state('');
+	let harness = $state<'pi' | 'claude-code'>('pi');
 
 	// Pre-fill cwd from defaultCwd when modal opens
 	$effect(() => {
@@ -41,7 +42,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					cwd: cwd.trim(),
-					model: model.trim() || undefined
+					model: model.trim() || undefined,
+					harness
 				})
 			});
 
@@ -106,6 +108,26 @@
 						{/each}
 					</div>
 				{/if}
+			</div>
+
+			<div class="form-control mt-4">
+				<label class="label">
+					<span class="label-text">Harness</span>
+				</label>
+				<div class="flex gap-2">
+					<button
+						class="btn btn-sm flex-1 {harness === 'pi' ? 'btn-primary' : 'btn-ghost'}"
+						onclick={() => { hapticLight(); harness = 'pi'; }}
+					>
+						π pi
+					</button>
+					<button
+						class="btn btn-sm flex-1 {harness === 'claude-code' ? 'btn-primary' : 'btn-ghost'}"
+						onclick={() => { hapticLight(); harness = 'claude-code'; }}
+					>
+						◆ Claude Code
+					</button>
+				</div>
 			</div>
 
 			{#if errorMsg}

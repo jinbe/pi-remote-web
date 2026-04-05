@@ -29,7 +29,9 @@ export async function ensureInit() {
 	});
 
 	const sessionsDir = process.env.PI_SESSIONS_DIR || join(homedir(), '.pi', 'agent', 'sessions');
+	const claudeSessionsDir = join(homedir(), '.claude', 'projects');
 	startWatching(sessionsDir);
+	startWatching(claudeSessionsDir);
 
 	// Start the job queue poller (claims and dispatches queued jobs)
 	startJobPoller();
