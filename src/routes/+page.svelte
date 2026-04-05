@@ -18,6 +18,7 @@
 	const { theme, toggleTheme } = getContext<{ theme: 'dark' | 'light'; toggleTheme: () => void }>('theme');
 
 	let search = $state('');
+	let harnessFilter = $state<'all' | 'pi' | 'claude-code'>('all');
 	let showNewSession = $state(false);
 	let expandedProject = $state<string | null>(
 		browser ? localStorage.getItem('pi-expanded-project') : null
@@ -58,17 +59,23 @@
 	const devCommandsMap = $derived(data.devCommands as Record<string, string>);
 	const runningDevSet = $derived(new Set(data.runningDevServers as string[]));
 
-	// Filter by search
+	// Filter by search and harness
 	const filtered = $derived.by(() => {
 		const q = search.toLowerCase();
-		if (!q) return data.sessions;
-		return data.sessions.filter(
-			(s) =>
-				(s.name?.toLowerCase().includes(q) ?? false) ||
-				s.cwd.toLowerCase().includes(q) ||
-				s.firstMessage.toLowerCase().includes(q) ||
-				(s.model?.toLowerCase().includes(q) ?? false)
-		);
+		let result = data.sessions;
+		if (harnessFilter !== 'all') {
+			result = result.filter((s) => (s.harness || 'pi') === harnessFilter);
+		}
+		if (q) {
+			result = result.filter(
+				(s) =>
+					(s.name?.toLowerCase().includes(q) ?? false) ||
+					s.cwd.toLowerCase().includes(q) ||
+					s.firstMessage.toLowerCase().includes(q) ||
+					(s.model?.toLowerCase().includes(q) ?? false)
+			);
+		}
+		return result;
 	});
 
 	// Group by project (cwd), sorted: favorites first, then by most recent session
@@ -135,15 +142,23 @@
 		invalidateAll();
 	}
 
-	async function createSessionForProject(cwd: string) {
+	/** Get the most recently used harness for a given cwd */
+	function getLastHarness(cwd: string): 'pi' | 'claude-code' {
+		const projectSessions = data.sessions.filter((s) => s.cwd === cwd);
+		if (projectSessions.length > 0) return projectSessions[0].harness || 'pi';
+		return 'pi';
+	}
+
+	async function createSessionForProject(cwd: string, harness?: 'pi' | 'claude-code') {
 		if (creatingForProject) return;
 		hapticMedium();
 		creatingForProject = cwd;
+		const effectiveHarness = harness || getLastHarness(cwd);
 		try {
 			const res = await fetch('/api/sessions/new', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ cwd })
+				body: JSON.stringify({ cwd, harness: effectiveHarness })
 			});
 			if (res.ok) {
 				const { sessionId } = await res.json();
@@ -404,14 +419,28 @@
 		</div>
 	</div>
 
-	<!-- Search -->
-	<div class="mb-4">
+	<!-- Search + harness filter -->
+	<div class="mb-4 flex gap-2 items-center">
 		<input
 			type="text"
 			placeholder="Search sessions..."
-			class="input input-sm w-full"
+			class="input input-sm flex-1"
 			bind:value={search}
 		/>
+		<div class="join">
+			<button
+				class="join-item btn btn-xs {harnessFilter === 'all' ? 'btn-active' : ''}"
+				onclick={() => { hapticLight(); harnessFilter = 'all'; }}
+			>All</button>
+			<button
+				class="join-item btn btn-xs {harnessFilter === 'pi' ? 'btn-active' : ''}"
+				onclick={() => { hapticLight(); harnessFilter = 'pi'; }}
+			>π</button>
+			<button
+				class="join-item btn btn-xs {harnessFilter === 'claude-code' ? 'btn-active' : ''}"
+				onclick={() => { hapticLight(); harnessFilter = 'claude-code'; }}
+			>◆</button>
+		</div>
 	</div>
 
 	<!-- Project groups -->
@@ -473,14 +502,13 @@
 							<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 							<ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-50 w-48 p-2 shadow-lg border border-base-300">
 								<li>
-									<button onclick={(e) => { e.stopPropagation(); createSessionForProject(group.cwd); }} disabled={creatingForProject === group.cwd}>
-										{#if creatingForProject === group.cwd}
-											<span class="loading loading-spinner loading-sm"></span>
-											New Session
-										{:else}
-											<span class="opacity-70 inline-flex"><Icon name="plus" class="w-4 h-4" /></span>
-											New Session
-										{/if}
+									<button onclick={(e) => { e.stopPropagation(); createSessionForProject(group.cwd, 'pi'); }} disabled={creatingForProject === group.cwd}>
+										<span class="opacity-70">π</span> New pi Session
+									</button>
+								</li>
+								<li>
+									<button onclick={(e) => { e.stopPropagation(); createSessionForProject(group.cwd, 'claude-code'); }} disabled={creatingForProject === group.cwd}>
+										<span class="opacity-70">◆</span> New Claude Session
 									</button>
 								</li>
 								<li>
@@ -540,19 +568,27 @@
 						>
 							<span class="opacity-40"><Icon name="cog" class="w-4 h-4" /></span>
 						</button>
-						<button
-							class="hidden md:inline-flex btn btn-ghost btn-xs"
-							onclick={(e: MouseEvent) => { e.stopPropagation(); createSessionForProject(group.cwd); }}
-							title="New session in {group.shortName}"
-							aria-label="New session in {group.shortName}"
-							disabled={creatingForProject === group.cwd}
-						>
-							{#if creatingForProject === group.cwd}
-								<span class="loading loading-spinner loading-sm"></span>
-							{:else}
-								<span class="opacity-50"><Icon name="plus" class="w-4 h-4" /></span>
-							{/if}
-						</button>
+						<div class="hidden md:inline-flex dropdown dropdown-end">
+							<button
+								tabindex="0"
+								class="btn btn-ghost btn-xs"
+								onclick={(e) => e.stopPropagation()}
+								title="New session in {group.shortName}"
+								aria-label="New session"
+								disabled={creatingForProject === group.cwd}
+							>
+								{#if creatingForProject === group.cwd}
+									<span class="loading loading-spinner loading-sm"></span>
+								{:else}
+									<span class="opacity-50"><Icon name="plus" class="w-4 h-4" /></span>
+								{/if}
+							</button>
+							<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+							<ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-50 w-44 p-2 shadow-lg border border-base-300">
+								<li><button onclick={(e) => { e.stopPropagation(); createSessionForProject(group.cwd, 'pi'); }}>π pi</button></li>
+								<li><button onclick={(e) => { e.stopPropagation(); createSessionForProject(group.cwd, 'claude-code'); }}>◆ Claude Code</button></li>
+							</ul>
+						</div>
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); toggleFavorite(group.cwd); }}
@@ -630,6 +666,11 @@
 											<div class="mt-0.5 flex items-center gap-2 text-xs text-base-content-faint">
 												<span>{timeAgo(session.lastModified)}</span>
 												<span>· {session.messageCount} msgs</span>
+												{#if session.harness === 'claude-code'}
+													<span class="badge badge-xs badge-outline" title="Claude Code">◆</span>
+												{:else}
+													<span class="badge badge-xs badge-outline" title="pi">π</span>
+												{/if}
 												{#if session.model}
 													<span class="badge badge-xs badge-ghost">{session.model}</span>
 												{/if}
@@ -688,6 +729,7 @@
 	open={showNewSession}
 	{recentCwds}
 	{recentModels}
+	defaultHarness={data.sessions[0]?.harness || 'pi'}
 	onclose={() => (showNewSession = false)}
 />
 

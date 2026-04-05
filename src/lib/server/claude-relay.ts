@@ -492,8 +492,10 @@ async function handleRpcCommand(raw: string): Promise<void> {
 			// If currently streaming, treat as steer/follow-up
 			if (state.isStreaming) {
 				if (parsed.streamingBehavior === 'steer' || parsed.streamingBehavior === 'followUp') {
-					// Claude Code stream-json accepts additional user_message lines
-					writeToClaudeStdin(JSON.stringify({ type: 'user_message', content: message }) + '\n');
+					writeToClaudeStdin(JSON.stringify({
+						type: 'user',
+						message: { role: 'user', content: message },
+					}) + '\n');
 					respond(id, 'prompt', true);
 				} else {
 					respond(id, 'prompt', false, undefined, 'Agent is streaming. Specify streamingBehavior.');
@@ -509,7 +511,11 @@ async function handleRpcCommand(raw: string): Promise<void> {
 			});
 
 			// Send to Claude via stream-json input
-			writeToClaudeStdin(JSON.stringify({ type: 'user_message', content: message }) + '\n');
+			// Claude Code expects: {"type":"user","message":{"role":"user","content":"..."}}
+			writeToClaudeStdin(JSON.stringify({
+				type: 'user',
+				message: { role: 'user', content: message },
+			}) + '\n');
 
 			// Respond immediately (fire-and-forget like pi RPC)
 			respond(id, 'prompt', true);
@@ -518,15 +524,20 @@ async function handleRpcCommand(raw: string): Promise<void> {
 
 		case 'steer': {
 			const message = parsed.message || '';
-			writeToClaudeStdin(JSON.stringify({ type: 'user_message', content: message }) + '\n');
+			writeToClaudeStdin(JSON.stringify({
+				type: 'user',
+				message: { role: 'user', content: message },
+			}) + '\n');
 			respond(id, 'steer', true);
 			break;
 		}
 
 		case 'follow_up': {
 			const message = parsed.message || '';
-			// Claude Code doesn't differentiate steer vs follow-up — send immediately
-			writeToClaudeStdin(JSON.stringify({ type: 'user_message', content: message }) + '\n');
+			writeToClaudeStdin(JSON.stringify({
+				type: 'user',
+				message: { role: 'user', content: message },
+			}) + '\n');
 			respond(id, 'follow_up', true);
 			break;
 		}

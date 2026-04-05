@@ -8,18 +8,20 @@
 		defaultCwd = '',
 		recentCwds = [],
 		recentModels = [],
+		defaultHarness = 'pi' as 'pi' | 'claude-code',
 		onclose
 	}: {
 		open: boolean;
 		defaultCwd?: string;
 		recentCwds?: string[];
 		recentModels?: string[];
+		defaultHarness?: 'pi' | 'claude-code';
 		onclose: () => void;
 	} = $props();
 
 	let cwd = $state('');
 	let model = $state('');
-	let harness = $state<'pi' | 'claude-code'>('pi');
+	let harness = $state<'pi' | 'claude-code'>(defaultHarness);
 
 	// Pre-fill cwd from defaultCwd when modal opens
 	$effect(() => {
