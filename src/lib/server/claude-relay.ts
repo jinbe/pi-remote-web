@@ -84,22 +84,26 @@ const state: SyntheticState = {
 	prevThinkingText: '',
 };
 
-// --- Init readiness ---
+// --- Session ID readiness ---
 
-/** Resolves when the system.init event has been received from Claude */
-let initReceived = false;
-let initResolve: (() => void) | null = null;
-const initReady = new Promise<void>((resolve) => {
-	initResolve = resolve;
-	// Timeout after 30s — don't block forever if init never arrives
+/**
+ * Resolves when we've captured a session_id from any Claude event.
+ * Claude emits session_id on every event (hooks, init, etc.), so we grab
+ * it from the first event that carries one.
+ */
+let sessionIdCaptured = false;
+let sessionIdResolve: (() => void) | null = null;
+const sessionIdReady = new Promise<void>((resolve) => {
+	sessionIdResolve = resolve;
+	// Timeout after 15s — don't block forever
 	setTimeout(() => {
-		if (!initReceived) {
-			relayLog('init timeout — proceeding with synthetic session ID');
+		if (!sessionIdCaptured) {
+			relayLog('session ID capture timeout — proceeding with synthetic ID');
 			state.sessionFile = buildSessionFilePath(state.sessionId);
-			initReceived = true;
+			sessionIdCaptured = true;
 			resolve();
 		}
-	}, 30_000);
+	}, 15_000);
 });
 
 // --- Per-client write queue to handle backpressure ---
@@ -191,22 +195,23 @@ function writeToClaudeStdin(data: string): void {
 // --- Translate Claude Code events to pi RPC events ---
 
 function translateClaudeEvent(event: any): void {
+	// Capture session_id from the first event that carries one
+	if (!sessionIdCaptured && event.session_id) {
+		state.sessionId = event.session_id;
+		state.sessionFile = buildSessionFilePath(event.session_id);
+		sessionIdCaptured = true;
+		sessionIdResolve?.();
+		relayLog(`captured session ID: ${state.sessionId} file=${state.sessionFile}`);
+	}
+
 	const eventType = event.type;
 
 	switch (eventType) {
 		case 'system': {
 			if (event.subtype === 'init') {
-				// Claude Code init — extract model and session ID
+				// Claude Code init — extract model
 				state.model = event.model || null;
-				if (event.session_id) {
-					state.sessionId = event.session_id;
-					state.sessionFile = buildSessionFilePath(event.session_id);
-				}
-				relayLog(`init: model=${state.model} session=${state.sessionId} file=${state.sessionFile}`);
-				if (!initReceived) {
-					initReceived = true;
-					initResolve?.();
-				}
+				relayLog(`init: model=${state.model} session=${state.sessionId}`);
 			}
 			// Skip hook events, they're Claude Code internal
 			break;
@@ -538,8 +543,8 @@ async function handleRpcCommand(raw: string): Promise<void> {
 		}
 
 		case 'get_state': {
-			// Wait for claude's init event so we have the real session ID
-			await initReady;
+			// Wait for session ID capture from any claude event
+			await sessionIdReady;
 			if (!state.sessionFile) {
 				state.sessionFile = buildSessionFilePath(state.sessionId);
 			}
