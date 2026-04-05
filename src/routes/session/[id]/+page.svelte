@@ -123,13 +123,15 @@
 			const res = await fetch(`/api/sessions/${data.sessionId}/messages`);
 			if (res.ok) {
 				const result = await res.json();
-				tree = result.tree;
-				currentLeaf = result.tree.currentLeaf;
-				// Preserve scroll position — measure before replacing
-				const wasAtBottom = isNearBottom();
-				currentMessages = result.messages;
-				hasMore = false;
-				if (wasAtBottom) scrollToBottom(true);
+				// Don't replace existing messages with empty results
+				if (result.messages.length > 0 || currentMessages.length === 0) {
+					tree = result.tree;
+					currentLeaf = result.tree.currentLeaf;
+					const wasAtBottom = isNearBottom();
+					currentMessages = result.messages;
+					hasMore = false;
+					if (wasAtBottom) scrollToBottom(true);
+				}
 			}
 		} catch (e) {
 			console.error('Failed to load full history:', e);
@@ -159,11 +161,16 @@
 			const res = await fetch(`/api/sessions/${data.sessionId}/messages`);
 			if (res.ok) {
 				const result = await res.json();
-				tree = result.tree;
-				currentLeaf = result.tree.currentLeaf;
-				const wasAtBottom = isNearBottom();
-				currentMessages = result.messages;
-				if (wasAtBottom) scrollToBottom(true);
+				// Don't replace existing messages with empty results
+				// (happens for Claude Code sessions where the JSONL file
+				// doesn't exist — conversation lives in SSE stream only)
+				if (result.messages.length > 0 || currentMessages.length === 0) {
+					tree = result.tree;
+					currentLeaf = result.tree.currentLeaf;
+					const wasAtBottom = isNearBottom();
+					currentMessages = result.messages;
+					if (wasAtBottom) scrollToBottom(true);
+				}
 				// Clear optimistic message when real messages arrive
 				pendingUserMessage = null;
 			}
@@ -265,6 +272,17 @@
 					currentAssistantText = '';
 					currentThinkingText = '';
 					reloadMessages();
+					// For Claude Code sessions: agent_end carries inline messages
+					// that won't be in the JSONL file. Merge them in.
+					if (event.messages?.length && currentMessages.length === 0) {
+						currentMessages = event.messages.map((m: any, i: number) => ({
+							type: 'message',
+							id: `inline-${i}`,
+							parentId: i > 0 ? `inline-${i - 1}` : null,
+							message: m
+						}));
+						scrollToBottom(true);
+					}
 					// Add to session events
 					sessionEvents = [...sessionEvents, {
 						id: sessionEvents.length + 1,

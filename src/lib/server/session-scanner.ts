@@ -7,6 +7,10 @@ import { buildSessionTree, getPathToNode } from './session-tree';
 import { getMsgsStmt, upsertMsgsStmt } from './cache';
 
 const SESSIONS_DIR = process.env.PI_SESSIONS_DIR || join(homedir(), '.pi', 'agent', 'sessions');
+const CLAUDE_SESSIONS_DIR = join(homedir(), '.claude', 'projects');
+
+/** All allowed session root directories for path validation */
+const ALLOWED_SESSION_DIRS = [SESSIONS_DIR, CLAUDE_SESSIONS_DIR];
 
 // --- Encoding ---
 
@@ -20,10 +24,16 @@ export function decodeSessionId(id: string): string {
 	}
 	const filePath = Buffer.from(id, 'base64url').toString();
 	const resolved = resolve(filePath);
-	if (!resolved.startsWith(SESSIONS_DIR)) {
+	const allowed = ALLOWED_SESSION_DIRS.some(dir => resolved.startsWith(dir));
+	if (!allowed) {
 		throw new Error('Invalid session ID: path outside sessions directory');
 	}
 	return resolved;
+}
+
+/** Detect whether a session file belongs to Claude Code or pi */
+export function detectSessionHarness(filePath: string): 'pi' | 'claude-code' {
+	return filePath.startsWith(CLAUDE_SESSIONS_DIR) ? 'claude-code' : 'pi';
 }
 
 // --- File scanning ---
@@ -34,13 +44,13 @@ interface FileInfo {
 	size: number;
 }
 
-async function scanSessionFiles(): Promise<FileInfo[]> {
+async function scanDir(dir: string): Promise<FileInfo[]> {
 	const results: FileInfo[] = [];
 	try {
-		const entries = await readdir(SESSIONS_DIR, { withFileTypes: true });
+		const entries = await readdir(dir, { withFileTypes: true });
 		for (const entry of entries) {
 			if (!entry.isDirectory()) continue;
-			const dirPath = join(SESSIONS_DIR, entry.name);
+			const dirPath = join(dir, entry.name);
 			try {
 				const files = await readdir(dirPath);
 				for (const file of files) {
@@ -58,15 +68,29 @@ async function scanSessionFiles(): Promise<FileInfo[]> {
 			}
 		}
 	} catch {
-		/* sessions dir doesn't exist yet */
+		/* dir doesn't exist yet */
 	}
 	return results;
+}
+
+async function scanSessionFiles(): Promise<FileInfo[]> {
+	const [piFiles, claudeFiles] = await Promise.all([
+		scanDir(SESSIONS_DIR),
+		scanDir(CLAUDE_SESSIONS_DIR),
+	]);
+	return [...piFiles, ...claudeFiles];
 }
 
 // --- JSONL parsing ---
 
 export async function parseSessionMetadata(filePath: string): Promise<ParsedSessionMeta> {
 	const s = await stat(filePath);
+	const isClaudeSession = filePath.startsWith(CLAUDE_SESSIONS_DIR);
+
+	if (isClaudeSession) {
+		return parseClaudeSessionMetadata(filePath, s);
+	}
+
 	const text = await Bun.file(filePath).text();
 	const lines = text.split('\n');
 
@@ -126,9 +150,71 @@ export async function parseSessionMetadata(filePath: string): Promise<ParsedSess
 		lastModified: new Date(s.mtimeMs),
 		messageCount,
 		model,
+		harness: 'pi' as const,
 		mtime: Math.floor(s.mtimeMs),
 		size: s.size,
 		createdAt
+	};
+}
+
+/** Parse Claude Code's JSONL session format */
+async function parseClaudeSessionMetadata(filePath: string, s: import('fs').Stats): Promise<ParsedSessionMeta> {
+	const text = await Bun.file(filePath).text();
+	const lines = text.split('\n');
+
+	let cwd = '';
+	let firstMessage = '';
+	let model: string | null = null;
+	let messageCount = 0;
+	let createdAt = '';
+
+	for (const line of lines) {
+		if (!line.trim()) continue;
+		try {
+			const entry = JSON.parse(line);
+
+			// Claude entries carry cwd on every line
+			if (!cwd && entry.cwd) cwd = entry.cwd;
+
+			// Earliest timestamp as createdAt
+			if (!createdAt && entry.timestamp) createdAt = entry.timestamp;
+
+			if (entry.type === 'user' && entry.message?.role === 'user') {
+				messageCount++;
+				if (!firstMessage) {
+					const content = entry.message.content;
+					if (typeof content === 'string') {
+						firstMessage = content.slice(0, 200);
+					} else if (Array.isArray(content)) {
+						const text = content.find((c: any) => c.type === 'text');
+						if (text?.text) firstMessage = text.text.slice(0, 200);
+					}
+				}
+			} else if (entry.type === 'assistant') {
+				messageCount++;
+				// Extract model from assistant messages
+				if (!model && entry.message?.model) {
+					model = entry.message.model;
+				}
+			}
+		} catch {
+			/* skip malformed lines */
+		}
+	}
+
+	return {
+		id: encodeSessionId(filePath),
+		filePath,
+		cwd,
+		name: null,
+		firstMessage: firstMessage || '(empty session)',
+		lastModified: new Date(s.mtimeMs),
+		messageCount,
+		model,
+		harness: 'claude-code' as const,
+		mtime: Math.floor(s.mtimeMs),
+		size: s.size,
+		createdAt: createdAt || new Date(s.mtimeMs).toISOString()
 	};
 }
 
@@ -222,7 +308,8 @@ function cachedToMeta(row: CachedMeta): SessionMeta {
 		firstMessage: row.first_message || '(empty session)',
 		lastModified: new Date(row.last_modified),
 		messageCount: row.message_count,
-		model: row.model
+		model: row.model,
+		harness: detectSessionHarness(row.file_path),
 	};
 }
 

@@ -2,6 +2,7 @@ import {
 	decodeSessionId,
 	parseSessionMetadata
 } from '$lib/server/session-scanner';
+import { existsSync } from 'fs';
 import { isActive, getActiveSession } from '$lib/server/rpc-manager';
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
@@ -28,22 +29,24 @@ export const load: PageServerLoad = async ({ params }) => {
 	const filePath = decodeSessionId(params.id);
 	const active = isActive(params.id);
 
-	// Try loading metadata from the JSONL file
-	try {
-		const meta = await parseSessionMetadata(filePath);
-		const gitBranch = await getGitBranch(meta.cwd);
-		return {
-			sessionId: params.id,
-			filePath,
-			meta: {
-				...meta,
-				lastModified: meta.lastModified.toISOString()
-			},
-			isActive: active,
-			gitBranch
-		};
-	} catch {
-		// File may not be ready yet for newly created sessions
+	// Try loading metadata from the JSONL file (if it exists)
+	if (existsSync(filePath)) {
+		try {
+			const meta = await parseSessionMetadata(filePath);
+			const gitBranch = await getGitBranch(meta.cwd);
+			return {
+				sessionId: params.id,
+				filePath,
+				meta: {
+					...meta,
+					lastModified: meta.lastModified.toISOString()
+				},
+				isActive: active,
+				gitBranch
+			};
+		} catch {
+			// File may not be parseable
+		}
 	}
 
 	// Fallback for active sessions whose file isn't scannable yet
