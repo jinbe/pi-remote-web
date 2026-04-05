@@ -239,6 +239,15 @@ export async function getTailMessages(
 	count: number = 20,
 	chunkSize: number = 64 * 1024
 ): Promise<{ messages: AgentMessage[]; hasMore: boolean }> {
+	const isClaudeSession = filePath.startsWith(CLAUDE_SESSIONS_DIR);
+
+	if (isClaudeSession) {
+		// For Claude sessions, use the full parser and take the tail
+		const { messages } = await getClaudeSessionMessages(filePath);
+		const tail = messages.slice(-count);
+		return { messages: tail, hasMore: messages.length > count };
+	}
+
 	const file = Bun.file(filePath);
 	const size = file.size;
 
@@ -385,6 +394,12 @@ async function refreshStaleEntries(paths: string[]) {
 export async function getSessionMessages(
 	filePath: string
 ): Promise<{ messages: AgentMessage[]; tree: SessionTree }> {
+	const isClaudeSession = filePath.startsWith(CLAUDE_SESSIONS_DIR);
+
+	if (isClaudeSession) {
+		return getClaudeSessionMessages(filePath);
+	}
+
 	const s = await stat(filePath);
 	const mtime = Math.floor(s.mtimeMs);
 	const size = s.size;
@@ -404,6 +419,70 @@ export async function getSessionMessages(
 	upsertMsgsStmt().run(filePath, mtime, size, JSON.stringify(messages), JSON.stringify(tree));
 
 	return { messages, tree };
+}
+
+/** Parse Claude Code JSONL and transpose to pi message format */
+async function getClaudeSessionMessages(
+	filePath: string
+): Promise<{ messages: AgentMessage[]; tree: SessionTree }> {
+	const text = await Bun.file(filePath).text();
+	const lines = text.split('\n');
+	const entries: AgentMessage[] = [];
+
+	for (const line of lines) {
+		if (!line.trim()) continue;
+		try {
+			const entry = JSON.parse(line);
+			// Only include user and assistant messages
+			if (entry.type === 'user' || entry.type === 'assistant') {
+				const msg = entry.message;
+				if (!msg) continue;
+
+				// Normalise user content: Claude uses string, pi uses [{type:'text',text:'...'}]
+				if (entry.type === 'user' && typeof msg.content === 'string') {
+					msg.content = [{ type: 'text', text: msg.content }];
+				}
+
+				entries.push({
+					type: 'message',
+					id: entry.uuid || `claude-${entries.length}`,
+					parentId: entry.parentUuid || (entries.length > 0 ? entries[entries.length - 1].id : null),
+					message: msg
+				} as any);
+			}
+		} catch {
+			/* skip malformed */
+		}
+	}
+
+	const currentLeaf = entries.length > 0 ? (entries[entries.length - 1] as any).id : '';
+
+	// Build a minimal tree structure compatible with SessionTree
+	const nodes: Record<string, any> = {};
+	const children: Record<string, string[]> = {};
+	const roots: string[] = [];
+
+	for (const e of entries) {
+		const entry = e as any;
+		nodes[entry.id] = entry;
+		if (entry.parentId) {
+			if (!children[entry.parentId]) children[entry.parentId] = [];
+			children[entry.parentId].push(entry.id);
+		} else {
+			roots.push(entry.id);
+		}
+	}
+
+	return {
+		messages: entries,
+		tree: {
+			nodes,
+			children,
+			roots,
+			leaves: [currentLeaf],
+			currentLeaf
+		}
+	};
 }
 
 export async function warmAllSessions(): Promise<void> {

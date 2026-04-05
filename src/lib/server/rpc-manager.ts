@@ -651,6 +651,12 @@ export async function getState(sessionId: string): Promise<any> {
 	return sendCommand(managed, { type: 'get_state' });
 }
 
+export async function getMessages(sessionId: string): Promise<any> {
+	const managed = activeSessions.get(sessionId);
+	if (!managed) throw new Error('Session not active');
+	return sendCommand(managed, { type: 'get_messages' });
+}
+
 export async function abortSession(sessionId: string): Promise<void> {
 	const managed = activeSessions.get(sessionId);
 	if (!managed) throw new Error('Session not active');
