@@ -3,6 +3,7 @@ import { warmAllSessions } from './session-scanner';
 import { recoverActiveSessions } from './rpc-manager';
 import { startWatching } from './session-watcher';
 import { start as startJobPoller } from './job-poller';
+import { start as startPrPoller } from './github-pr-poller';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -32,6 +33,9 @@ export async function ensureInit() {
 
 	// Start the job queue poller (claims and dispatches queued jobs)
 	startJobPoller();
+
+	// Start the GitHub PR poller (scans monitored repos for open PRs)
+	startPrPoller();
 
 	console.log('Pi Dashboard initialized');
 }

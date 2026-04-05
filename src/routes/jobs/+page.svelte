@@ -4,6 +4,8 @@
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import AddJobModal from '$lib/components/AddJobModal.svelte';
 	import AddReviewJobModal from '$lib/components/AddReviewJobModal.svelte';
+	import AddRepoModal from '$lib/components/AddRepoModal.svelte';
+	import MonitoredRepos from '$lib/components/MonitoredRepos.svelte';
 	import JobChain from '$lib/components/JobChain.svelte';
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
@@ -79,6 +81,8 @@
 	let search = $state('');
 	let showAddJob = $state(false);
 	let showAddReviewJob = $state(false);
+	let showAddRepo = $state(false);
+	let prMonitorOpen = $state(false);
 
 	// Expanded job for detail view
 	let expandedJob = $state<string | null>(null);
@@ -561,7 +565,7 @@
 			<h1 class="text-lg font-bold">Jobs</h1>
 		</div>
 		<div class="flex gap-2 items-center">
-			<!-- Poller toggle -->
+			<!-- Poller status (compact) -->
 			<button
 				class="btn btn-sm {data.pollerRunning ? 'btn-success' : 'btn-ghost'}"
 				onclick={togglePoller}
@@ -578,40 +582,65 @@
 					<span class="hidden sm:inline">Poller Off</span>
 				{/if}
 			</button>
-			<!-- Extension status indicator -->
-			{#if !extensionStatus.installed || !extensionStatus.upToDate}
-				<button
-					class="btn btn-sm {extensionStatus.installed ? 'btn-warning' : 'btn-error'} gap-1"
-					onclick={installExtension}
-					disabled={installingExtension}
-					title={extensionStatus.installed
-						? `Extension outdated: ${extensionStatus.installedVersion} → ${extensionStatus.repoVersion}`
-						: 'Job callback extension not installed — click to install'}
-				>
-					{#if installingExtension}
-						<span class="loading loading-spinner loading-xs"></span>
-					{:else if extensionStatus.installed}
-						<Icon name="refresh" class="w-3.5 h-3.5" />
+			<!-- Primary actions -->
+			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAddJob = true; }}><Icon name="plus" class="w-4 h-4" /> <span class="hidden sm:inline">New Task</span><span class="sm:hidden">Task</span></button>
+			<button class="btn btn-sm btn-secondary gap-1" onclick={() => { hapticMedium(); showAddReviewJob = true; }}><Icon name="search" class="w-4 h-4" /> <span class="hidden sm:inline">New Review</span><span class="sm:hidden">Review</span></button>
+			<!-- Kebab menu -->
+			<div class="dropdown dropdown-end">
+				<div tabindex="0" role="button" class="btn btn-sm btn-ghost btn-circle" aria-label="More actions">
+					<Icon name="more-vertical" class="w-5 h-5" />
+				</div>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-52 p-2 shadow-lg border border-base-300">
+					<li>
+						<button onclick={() => { hapticLight(); invalidateAll(); }}>
+							<Icon name="refresh" class="w-4 h-4" /> Refresh
+						</button>
+					</li>
+					<li>
+						<button onclick={() => { hapticLight(); toggleTheme(); }}>
+							{#if theme === 'dark'}<Icon name="sun" class="w-4 h-4" /> Light Mode{:else}<Icon name="moon" class="w-4 h-4" /> Dark Mode{/if}
+						</button>
+					</li>
+					<div class="divider my-0"></div>
+					<!-- Extension status -->
+					{#if !extensionStatus.installed || !extensionStatus.upToDate}
+						<li>
+							<button onclick={installExtension} disabled={installingExtension}>
+								{#if installingExtension}
+									<span class="loading loading-spinner loading-xs"></span>
+								{:else if extensionStatus.installed}
+									<Icon name="refresh" class="w-4 h-4" />
+								{:else}
+									<Icon name="bolt" class="w-4 h-4" />
+								{/if}
+								{extensionStatus.installed ? 'Update Hook' : 'Install Hook'}
+							</button>
+						</li>
 					{:else}
-						<Icon name="bolt" class="w-3.5 h-3.5" />
+						<li class="disabled">
+							<span class="text-success/60">
+								<Icon name="check" class="w-4 h-4" /> Hook v{extensionStatus.repoVersion}
+							</span>
+						</li>
 					{/if}
-					<span class="hidden sm:inline">{extensionStatus.installed ? 'Update Hook' : 'Install Hook'}</span>
-				</button>
-			{:else}
-				<span
-					class="btn btn-sm btn-ghost text-success/60 cursor-default gap-1"
-					title="Job callback extension v{extensionStatus.repoVersion} installed"
-				>
-					<Icon name="check" class="w-3.5 h-3.5" />
-					<span class="hidden sm:inline">Hook v{extensionStatus.repoVersion}</span>
-				</span>
-			{/if}
-			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAddJob = true; }}><Icon name="plus" class="w-4 h-4" /> New Task</button>
-			<button class="btn btn-sm btn-secondary gap-1" onclick={() => { hapticMedium(); showAddReviewJob = true; }}><Icon name="search" class="w-4 h-4" /> New Review</button>
-			<button class="btn btn-sm btn-ghost" onclick={() => { hapticLight(); invalidateAll(); }} aria-label="Refresh"><Icon name="refresh" class="w-4 h-4" /></button>
-			<button class="btn btn-sm btn-ghost btn-circle text-lg" onclick={() => { hapticLight(); toggleTheme(); }} title="Toggle theme" aria-label="Toggle theme">
-				{#if theme === 'dark'}<Icon name="sun" class="w-5 h-5" />{:else}<Icon name="moon" class="w-5 h-5" />{/if}
-			</button>
+					{#if doneCount > 0}
+						<div class="divider my-0"></div>
+						<li>
+							<button onclick={clearCompletedJobs} class="text-error">
+								<Icon name="close" class="w-4 h-4" /> Clear done ({doneCount})
+							</button>
+						</li>
+					{/if}
+					{#if failedCount > 0}
+						<li>
+							<button onclick={clearFailedJobs} class="text-error">
+								<Icon name="close" class="w-4 h-4" /> Clear failed ({failedCount})
+							</button>
+						</li>
+					{/if}
+				</ul>
+			</div>
 		</div>
 	</div>
 
@@ -651,25 +680,20 @@
 				class="input input-xs flex-1"
 				bind:value={search}
 			/>
-			{#if failedCount > 0}
-				<button
-					class="btn btn-xs btn-error btn-outline gap-1"
-					onclick={clearFailedJobs}
-					title="Delete all failed jobs"
-				>
-					<Icon name="close" class="w-3 h-3" /> Clear failed
-				</button>
-			{/if}
-			{#if doneCount > 0}
-				<button
-					class="btn btn-xs btn-error btn-outline gap-1"
-					onclick={clearCompletedJobs}
-					title="Delete all completed jobs"
-				>
-					<Icon name="close" class="w-3 h-3" /> Clear done
-				</button>
-			{/if}
 		</div>
+	</div>
+
+	<!-- PR Monitor (collapsible) -->
+	<div class="mb-4">
+		<MonitoredRepos
+			repos={data.monitoredRepos}
+			prPollerRunning={data.prPollerRunning}
+			pollIntervalMs={data.prPollIntervalMs}
+			concurrency={data.prPollConcurrency}
+			onaddrepo={() => { showAddRepo = true; }}
+			open={prMonitorOpen}
+			ontoggle={(v) => { prMonitorOpen = v; }}
+		/>
 	</div>
 
 	<!-- Jobs list -->
@@ -706,4 +730,9 @@
 <AddReviewJobModal
 	open={showAddReviewJob}
 	onclose={() => (showAddReviewJob = false)}
+/>
+
+<AddRepoModal
+	open={showAddRepo}
+	onclose={() => (showAddRepo = false)}
 />

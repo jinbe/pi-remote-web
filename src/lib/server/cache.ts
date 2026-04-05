@@ -173,6 +173,21 @@ export function getDb(): Database {
 			db.run('CREATE INDEX idx_jobs_created ON jobs(created_at)');
 		}
 
+		db.run(`CREATE TABLE IF NOT EXISTS monitored_repos (
+			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+			owner TEXT NOT NULL,
+			name TEXT NOT NULL,
+			local_path TEXT,
+			assigned_only INTEGER NOT NULL DEFAULT 1,
+			manual_only INTEGER NOT NULL DEFAULT 1,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(owner, name)
+		)`);
+
+		db.run('CREATE INDEX IF NOT EXISTS idx_monitored_repos_enabled ON monitored_repos(enabled)');
+
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_parent ON jobs(parent_job_id)');
