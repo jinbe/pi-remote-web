@@ -446,7 +446,8 @@ async function getClaudeSessionMessages(
 				entries.push({
 					type: 'message',
 					id: entry.uuid || `claude-${entries.length}`,
-					parentId: entry.parentUuid || (entries.length > 0 ? entries[entries.length - 1].id : null),
+					parentId: entry.parentUuid || (entries.length > 0 ? (entries[entries.length - 1] as any).id : null),
+					timestamp: entry.timestamp || new Date().toISOString(),
 					message: msg
 				} as any);
 			}
