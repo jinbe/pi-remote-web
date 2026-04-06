@@ -438,9 +438,20 @@ async function getClaudeSessionMessages(
 				const msg = entry.message;
 				if (!msg) continue;
 
+				const content = msg.content;
+
 				// Normalise user content: Claude uses string, pi uses [{type:'text',text:'...'}]
-				if (entry.type === 'user' && typeof msg.content === 'string') {
-					msg.content = [{ type: 'text', text: msg.content }];
+				if (entry.type === 'user' && typeof content === 'string') {
+					msg.content = [{ type: 'text', text: content }];
+				}
+
+				// Skip entries with no renderable content:
+				// - tool_result messages (role=user, content=[{type:'tool_result'}])
+				// - tool_use-only assistant messages (content=[{type:'tool_use'}])
+				if (Array.isArray(msg.content)) {
+					const hasText = msg.content.some((c: any) => c.type === 'text' && c.text?.trim());
+					const hasThinking = msg.content.some((c: any) => c.type === 'thinking');
+					if (!hasText && !hasThinking) continue;
 				}
 
 				entries.push({
