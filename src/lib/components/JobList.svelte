@@ -261,16 +261,32 @@
 					</div>
 				{/if}
 
-				<!-- Go to session link (only for running/reviewing jobs with a session) -->
-				{#if expandedJob === job.id && job.session_id && ['running', 'reviewing', 'claimed'].includes(job.status)}
-					<div class="px-3 pb-2">
-						<a
-							href="/session/{job.session_id}"
-							class="btn btn-xs btn-outline btn-primary gap-1"
+				<!-- Go to session link + action buttons for active jobs -->
+				{#if expandedJob === job.id && ['running', 'reviewing', 'claimed'].includes(job.status)}
+					<div class="px-3 pb-2 flex flex-wrap gap-2">
+						{#if job.session_id}
+							<a
+								href="/session/{job.session_id}"
+								class="btn btn-xs btn-outline btn-primary gap-1"
+							>
+								<Icon name="chevron-right" class="w-3 h-3" />
+								View Session
+							</a>
+						{/if}
+						<button
+							class="btn btn-xs btn-outline btn-success gap-1"
+							onclick={(e) => { e.stopPropagation(); job.status === 'running' ? forceJobDone(job.id) : markJobDone(job.id); }}
 						>
-							<Icon name="chevron-right" class="w-3 h-3" />
-							Go to session
-						</a>
+							<Icon name="check" class="w-3 h-3" />
+							{job.status === 'running' ? 'Force Done' : 'Done'}
+						</button>
+						<button
+							class="btn btn-xs btn-outline btn-error gap-1"
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+						>
+							<Icon name="close" class="w-3 h-3" />
+							Cancel
+						</button>
 					</div>
 				{/if}
 
