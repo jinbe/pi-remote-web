@@ -13,7 +13,7 @@
  */
 import { execFileSync } from 'child_process';
 import { getDb } from './cache';
-import { createJob, findActiveJobByPrUrl } from './job-queue';
+import { createJob, findActiveJobByPrUrl, findRecentJobByPrUrl } from './job-queue';
 import { REVIEW_SKILL } from './job-prompts';
 import { log } from './logger';
 
@@ -314,6 +314,14 @@ function processPrs(
 		const existing = findActiveJobByPrUrl(prUrl);
 		if (existing) {
 			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — active job exists (${existing.status})`);
+			result.skipped++;
+			continue;
+		}
+
+		// Skip if this PR was reviewed recently (prevent re-polling immediately after completion)
+		const recent = findRecentJobByPrUrl(prUrl);
+		if (recent) {
+			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — reviewed recently (${recent.status} at ${recent.completed_at})`);
 			result.skipped++;
 			continue;
 		}

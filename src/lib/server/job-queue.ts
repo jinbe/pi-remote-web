@@ -281,6 +281,18 @@ export function findActiveJobByPrUrl(prUrl: string): Job | null {
 }
 
 /**
+ * Find any job for this PR URL that was completed recently (within the given hours).
+ * Used to prevent re-polling the same PR immediately after a review finishes.
+ */
+export function findRecentJobByPrUrl(prUrl: string, withinHours: number = 4): Job | null {
+	return getDb().query(
+		`SELECT * FROM jobs WHERE pr_url = ? AND status IN ('done', 'cancelled')
+		 AND completed_at > datetime('now', '-' || ? || ' hours')
+		 ORDER BY completed_at DESC LIMIT 1`
+	).get(prUrl, withinHours) as Job | null;
+}
+
+/**
  * Find an active job that matches the given issue URL.
  * Used to prevent duplicate task jobs for the same issue.
  */
