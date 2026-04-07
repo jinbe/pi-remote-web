@@ -760,6 +760,19 @@ export async function getCommands(sessionId: string): Promise<any> {
 	const managed = activeSessions.get(sessionId);
 	if (!managed) throw new Error('Session not active');
 
+	// Claude Code has no get_commands RPC — return discovered slash commands instead
+	if (managed.harness === 'claude-code') {
+		if (!managed.cachedCommands) {
+			const { getSlashCommands } = await import('./slash-commands');
+			managed.cachedCommands = getSlashCommands().map(c => ({
+				name: c.name,
+				description: c.description,
+				source: c.source === 'built-in' || c.source === 'bundled-skill' ? 'extension' : 'skill',
+			}));
+		}
+		return { commands: managed.cachedCommands };
+	}
+
 	// Return cached commands instantly — commands don't change during a session
 	if (managed.cachedCommands) {
 		return { commands: managed.cachedCommands };
