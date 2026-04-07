@@ -13,7 +13,7 @@
  */
 import { execFileSync } from 'child_process';
 import { getDb } from './cache';
-import { createJob, findActiveJobByPrUrl, findRecentJobByPrUrl } from './job-queue';
+import { createJob, findActiveJobByPrUrl } from './job-queue';
 import { REVIEW_SKILL } from './job-prompts';
 import { log } from './logger';
 
@@ -234,6 +234,11 @@ const DISMISS_KEYWORDS = [
  * Returns { shouldReview: boolean, reason: string }.
  */
 function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor: string, ghUser: string): { shouldReview: boolean; reason: string } {
+	// Belt-and-suspenders: never review your own PRs
+	if (prAuthor && prAuthor.toLowerCase() === ghUser.toLowerCase()) {
+		return { shouldReview: false, reason: `self-authored by ${prAuthor}` };
+	}
+
 	try {
 		// Fetch reviews
 		const reviewsJson = execFileSync('gh', [
@@ -318,13 +323,7 @@ function processPrs(
 			continue;
 		}
 
-		// Skip if this PR was reviewed recently (prevent re-polling immediately after completion)
-		const recent = findRecentJobByPrUrl(prUrl);
-		if (recent) {
-			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — reviewed recently (${recent.status} at ${recent.completed_at})`);
-			result.skipped++;
-			continue;
-		}
+
 
 		// Check review state — skip if already handled
 		const { shouldReview, reason } = shouldReviewPr(repo.owner, repo.name, pr.number, prAuthor, ghUser);
