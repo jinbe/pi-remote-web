@@ -727,9 +727,10 @@
 
 <NewSessionModal
 	open={showNewSession}
+	defaultCwd={newSessionCwd}
 	{recentCwds}
 	{recentModels}
-	defaultHarness={data.sessions[0]?.harness || 'pi'}
+	defaultHarness={newSessionHarness}
 	onclose={() => (showNewSession = false)}
 />
 

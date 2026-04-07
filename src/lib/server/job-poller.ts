@@ -306,7 +306,7 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 			if (job.max_loops > 0 && job.session_id) {
 				try {
 					const harness = (job.harness as HarnessType) || getHarness();
-				const reviewPrompt = buildReviewPrompt(job, harness);
+					const reviewPrompt = buildReviewPrompt(job, harness);
 					await sendMessage(job.session_id, reviewPrompt);
 				} catch (err) {
 					log.warn('job-poller', `failed to send review prompt for job ${jobId}: ${err}`);
