@@ -159,13 +159,15 @@ function scanSkillsDir(dir: string, source: SlashCommand['source'], pluginName?:
 	return commands;
 }
 
-function scanUserSkills(): SlashCommand[] {
-	return scanSkillsDir(join(homedir(), '.claude', 'skills'), 'user-skill');
+function scanUserSkills(homeDir?: string): SlashCommand[] {
+	const home = homeDir ?? homedir();
+	return scanSkillsDir(join(home, '.claude', 'skills'), 'user-skill');
 }
 
-function scanPluginSkills(): SlashCommand[] {
+function scanPluginSkills(homeDir?: string): SlashCommand[] {
 	const commands: SlashCommand[] = [];
-	const pluginsCache = join(homedir(), '.claude', 'plugins', 'cache');
+	const home = homeDir ?? homedir();
+	const pluginsCache = join(home, '.claude', 'plugins', 'cache');
 	if (!existsSync(pluginsCache)) return commands;
 
 	try {
@@ -227,28 +229,50 @@ function semverCompare(a: string, b: string): number {
 const NO_PROJECT = '__NO_PROJECT__';
 const commandCache = new Map<string, SlashCommand[]>();
 
+/** Clear the command cache. Exported for testing. */
+export function clearCommandCache(): void {
+	commandCache.clear();
+}
+
+/** Options for controlling slash command discovery. */
+export interface SlashCommandOptions {
+	/** Project directory to scan for project-level skills. */
+	projectDir?: string;
+	/** Override the home directory used for user/plugin skill scanning. Defaults to os.homedir(). */
+	homeDir?: string;
+}
+
 /**
  * Get all available slash commands for Claude Code sessions.
- * Results are cached per projectDir. Call `refreshSlashCommands()` to force a rescan.
+ * Results are cached per projectDir+homeDir key. Call `refreshSlashCommands()` to force a rescan.
  */
-export function getSlashCommands(projectDir?: string): SlashCommand[] {
-	const key = projectDir || NO_PROJECT;
+export function getSlashCommands(opts?: SlashCommandOptions): SlashCommand[] {
+	const key = cacheKey(opts);
 	const cached = commandCache.get(key);
 	if (cached) return cached;
-	return refreshSlashCommands(projectDir);
+	return refreshSlashCommands(opts);
+}
+
+/** Build a stable cache key from the options. */
+function cacheKey(opts?: SlashCommandOptions): string {
+	const parts: string[] = [];
+	parts.push(opts?.projectDir || NO_PROJECT);
+	if (opts?.homeDir) parts.push(opts.homeDir);
+	return parts.join('::');
 }
 
 /**
  * Force a rescan of all slash command sources.
  */
-export function refreshSlashCommands(projectDir?: string): SlashCommand[] {
-	const key = projectDir || NO_PROJECT;
+export function refreshSlashCommands(opts?: SlashCommandOptions): SlashCommand[] {
+	const { projectDir, homeDir } = opts ?? {};
+	const key = cacheKey(opts);
 	const start = Date.now();
 	const commands: SlashCommand[] = [
 		...BUILT_IN_COMMANDS,
 		...BUNDLED_SKILLS,
-		...scanUserSkills(),
-		...scanPluginSkills(),
+		...scanUserSkills(homeDir),
+		...scanPluginSkills(homeDir),
 	];
 
 	if (projectDir) {

@@ -771,7 +771,7 @@ export async function getCommands(sessionId: string): Promise<any> {
 	if (managed.harness === 'claude-code') {
 		if (!managed.cachedCommands) {
 			const { getSlashCommands } = await import('./slash-commands');
-			managed.cachedCommands = getSlashCommands(managed.cwd).map(c => ({
+			managed.cachedCommands = getSlashCommands({ projectDir: managed.cwd }).map(c => ({
 				name: c.name,
 				description: c.description,
 				source: c.source === 'built-in' || c.source === 'bundled-skill' ? 'extension' : 'skill',
@@ -801,7 +801,7 @@ function prefetchCommands(managed: ManagedSession): void {
 	// Claude Code has no get_commands RPC — eagerly populate from slash-commands scanner
 	if (managed.harness === 'claude-code') {
 		import('./slash-commands').then(({ getSlashCommands }) => {
-			managed.cachedCommands = getSlashCommands(managed.cwd).map(c => ({
+			managed.cachedCommands = getSlashCommands({ projectDir: managed.cwd }).map(c => ({
 				name: c.name,
 				description: c.description,
 				source: c.source === 'built-in' || c.source === 'bundled-skill' ? 'extension' : 'skill',
