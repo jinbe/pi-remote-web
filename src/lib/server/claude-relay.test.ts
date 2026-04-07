@@ -273,7 +273,7 @@ describe('Claude Code → pi RPC translation', () => {
 			},
 		});
 
-		// Tool result — should reset prevAssistantText
+		// Tool result — should reset prevAssistantText and persist pre-tool text
 		translateClaudeEvent(state, {
 			type: 'user',
 			message: {
@@ -285,6 +285,11 @@ describe('Claude Code → pi RPC translation', () => {
 				}],
 			},
 		});
+
+		// Pre-tool text should have been persisted
+		const assistantMsgs = state.messages.filter(m => m.role === 'assistant');
+		expect(assistantMsgs).toHaveLength(1);
+		expect(assistantMsgs[0].content[0].text).toBe('Let me check.');
 
 		// New assistant text after tool result
 		const events = translateClaudeEvent(state, {
@@ -474,6 +479,76 @@ describe('Claude Code → pi RPC translation', () => {
 
 		expect(capturedId).toBe('captured-123');
 		expect(state.sessionId).toBe('captured-123');
+		expect(state.sessionIdCaptured).toBe(true);
+	});
+
+	test('onSessionId callback is invoked only once per translator instance', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+		let callCount = 0;
+		const onSessionId = () => { callCount++; };
+
+		// First event with session_id — should invoke
+		translateClaudeEvent(state, {
+			type: 'system',
+			subtype: 'init',
+			model: 'claude-sonnet-4-20250514',
+			session_id: 'first-id',
+		}, onSessionId);
+
+		// Second event with session_id — should NOT invoke again
+		translateClaudeEvent(state, {
+			type: 'assistant',
+			session_id: 'second-id',
+			message: { content: [{ type: 'text', text: 'hi' }] },
+		}, onSessionId);
+
+		expect(callCount).toBe(1);
+		expect(state.sessionId).toBe('first-id');
+	});
+
+	test('pre-tool assistant text is persisted to messages before reset', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		// Assistant produces text before tool use
+		translateClaudeEvent(state, {
+			type: 'assistant',
+			message: { content: [{ type: 'text', text: 'Let me check that file.' }] },
+		});
+
+		// Tool use
+		translateClaudeEvent(state, {
+			type: 'assistant',
+			message: {
+				content: [{
+					type: 'tool_use',
+					id: 'toolu_persist',
+					name: 'Read',
+					input: { path: 'file.txt' },
+				}],
+			},
+		});
+
+		// Tool result — should persist the pre-tool text
+		translateClaudeEvent(state, {
+			type: 'user',
+			message: {
+				content: [{
+					type: 'tool_result',
+					tool_use_id: 'toolu_persist',
+					content: 'file contents here',
+					is_error: false,
+				}],
+			},
+		});
+
+		// The pre-tool text should be in messages
+		const assistantMsgs = state.messages.filter(m => m.role === 'assistant');
+		expect(assistantMsgs).toHaveLength(1);
+		expect(assistantMsgs[0].content[0].text).toBe('Let me check that file.');
+
+		// Tool result should also be in messages
+		const toolMsgs = state.messages.filter(m => m.role === 'toolResult');
+		expect(toolMsgs).toHaveLength(1);
 	});
 });
 

@@ -26,6 +26,8 @@ export interface SyntheticState {
 	/** Tracks the previous assistant text snapshot so we can compute deltas */
 	prevAssistantText: string;
 	prevThinkingText: string;
+	/** Whether onSessionId has already been invoked for this translator instance */
+	sessionIdCaptured: boolean;
 }
 
 /** Create a fresh default state — useful for tests. */
@@ -46,6 +48,7 @@ export function createSyntheticState(overrides?: Partial<SyntheticState>): Synth
 		currentToolCalls: new Map(),
 		prevAssistantText: '',
 		prevThinkingText: '',
+		sessionIdCaptured: false,
 		...overrides,
 	};
 }
@@ -68,9 +71,10 @@ export function translateClaudeEvent(
 ): any[] {
 	const output: any[] = [];
 
-	// Capture session_id from the first event that carries one
-	if (onSessionId && event.session_id) {
+	// Capture session_id from the first event that carries one (once only)
+	if (onSessionId && event.session_id && !state.sessionIdCaptured) {
 		state.sessionId = event.session_id;
+		state.sessionIdCaptured = true;
 		onSessionId(event.session_id);
 	}
 
@@ -219,6 +223,16 @@ export function translateClaudeEvent(
 						timestamp: Date.now(),
 					});
 				}
+			}
+
+			// Persist any accumulated pre-tool assistant text so history isn't lost
+			if (state.currentAssistantText) {
+				state.messages.push({
+					role: 'assistant',
+					content: [{ type: 'text', text: state.currentAssistantText }],
+					model: state.model,
+					timestamp: Date.now(),
+				});
 			}
 
 			// After tool results, a new turn may start — reset text tracking for next assistant message
