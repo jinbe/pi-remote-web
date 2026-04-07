@@ -6,7 +6,7 @@
  */
 import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
 import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt, buildNudgeVerdictPrompt } from './job-prompts';
-import { createSession, sendMessage, stopSession, isActive } from './rpc-manager';
+import { createSession, sendMessage, stopSession, isActive, getHarness } from './rpc-manager';
 import { log } from './logger';
 import { getDb } from './cache';
 import { existsSync } from 'fs';
@@ -178,7 +178,8 @@ async function dispatchJob(job: Job): Promise<void> {
 		updateJobStatus(job.id, { session_id: sessionId });
 
 		// Send the appropriate prompt
-		const prompt = isReview ? buildReviewPrompt(job) : buildTaskPrompt(job);
+		const harness = getHarness();
+		const prompt = isReview ? buildReviewPrompt(job, harness) : buildTaskPrompt(job, harness);
 		await sendMessage(sessionId, prompt);
 
 		log.info('job-poller', `dispatched ${isReview ? 'review' : 'task'} job ${job.id} → session ${sessionId}`);

@@ -44,13 +44,13 @@ function taskContext(job: Job): string[] {
 
 // --- Task prompt ---
 
-export function buildTaskPrompt(job: Job): string {
+export function buildTaskPrompt(job: Job, harness: string = 'pi'): string {
 	const header = metadataHeader(job);
 	const skill = job.max_loops === 0 ? TASK_SKILL : LOOP_TASK_SKILL;
 	const context = taskContext(job);
 	const parts = [header, ''];
 
-	if (skill) {
+	if (skill && harness === 'pi') {
 		parts.push(`/skill:${skill} ${context.join('\n')}`);
 	} else {
 		parts.push(...context);
@@ -122,11 +122,11 @@ export function buildNudgeVerdictPrompt(job: Job, attempt: number): string {
 
 // --- Review prompt ---
 
-export function buildReviewPrompt(job: Job): string {
+export function buildReviewPrompt(job: Job, harness: string = 'pi'): string {
 	const header = metadataHeader(job);
 	const parts = [header, ''];
 
-	if (REVIEW_SKILL) {
+	if (REVIEW_SKILL && harness === 'pi') {
 		const context: string[] = [];
 		context.push(`Review: ${job.title}`);
 		context.push(`Loop ${job.loop_count}/${job.max_loops}`);
