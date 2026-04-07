@@ -86,9 +86,9 @@ test.describe('Home Page - Navigation', () => {
 		page.on('pageerror', (err) => errors.push(err.message));
 
 		await page.goto('/');
-		// Open the kebab dropdown
-		await page.locator('button[aria-label="More actions"]').click();
-		// Click the Refresh item
+		// Open the kebab dropdown (trigger is a div[role="button"], not <button>)
+		await page.getByRole('button', { name: 'More actions' }).click();
+		// Click the Refresh item inside the dropdown menu
 		await page.locator('.dropdown-content button', { hasText: 'Refresh' }).click();
 		// Wait for invalidateAll to settle
 		await page.waitForTimeout(500);
