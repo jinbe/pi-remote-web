@@ -1,8 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, afterAll, mock } from 'bun:test';
 
 // Mock rpc-manager so tests are isolated from cross-file mock.module leaks
 // (cmux-manager.test.ts mocks isActive to return true, which poisons the
 // global module cache when bun runs tests in the same process).
+//
+// NOTE: Bun's mock.module() overrides persist in the ES module registry for
+// the lifetime of the process — mock.restore() explicitly does NOT undo them
+// (per Bun docs). There is no public API to remove a mock.module override.
+// We call mock.restore() in afterAll for spy cleanup and re-register the real
+// module via mock.module() to minimise leakage into subsequent test files.
+
+// Capture the real module exports *before* mock.module is applied.
+// mock.module is hoisted, so we use require.resolve + a dynamic require to
+// grab the real implementation at the resolved path.
+const rpcManagerPath = require.resolve('./rpc-manager');
+const realRpcManager = require(rpcManagerPath);
+
 const mockIsActive = mock(() => false);
 const mockSendMessage = mock(() => Promise.reject(new Error('no real session')));
 const mockStopSession = mock(() => Promise.resolve());
@@ -26,6 +39,14 @@ describe('job-poller', () => {
 		stop();
 		_resetForTesting();
 		cleanupTestJobs();
+	});
+
+	afterAll(() => {
+		// Restore spy state (call counts, mockImplementation, etc.)
+		mock.restore();
+		// Re-register the real rpc-manager so subsequent test files that
+		// import it without their own mock.module() get the real exports.
+		mock.module('./rpc-manager', () => realRpcManager);
 	});
 
 	describe('start/stop', () => {
