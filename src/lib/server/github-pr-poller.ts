@@ -203,10 +203,11 @@ export function listOpenPrs(owner: string, name: string, assignee?: string, excl
 			});
 		}
 
-		// Filter out bot authors
+		// Filter out bot authors (check is_bot flag + login patterns)
 		prs = prs.filter((pr: any) => {
+			if (pr.author?.is_bot) return false;
 			const login = (pr.author?.login || pr.author?.Login || '').toLowerCase();
-			return !BOT_AUTHORS.some(bot => login === bot.toLowerCase());
+			return !BOT_LOGIN_PATTERNS.some(pat => login.includes(pat.toLowerCase()));
 		});
 
 		return prs as GitHubPr[];
@@ -217,7 +218,8 @@ export function listOpenPrs(owner: string, name: string, assignee?: string, excl
 }
 
 // --- Bot author patterns to exclude ---
-const BOT_AUTHORS = ['dependabot[bot]', 'snyk-io[bot]', 'renovate[bot]', 'github-actions[bot]'];
+// gh pr list returns login as 'app/snyk-io' for GitHub Apps, not 'snyk-io[bot]'
+const BOT_LOGIN_PATTERNS = ['dependabot', 'snyk-io', 'renovate', 'github-actions'];
 
 // --- Dismiss keywords: if the last non-author comment contains one, skip ---
 const DISMISS_KEYWORDS = [
