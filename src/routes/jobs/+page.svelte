@@ -526,11 +526,25 @@
 							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
 						>Cancel</button>
 					{/if}
+					{#if job.status === 'running'}
+						<button
+							class="btn btn-xs btn-success btn-outline gap-1"
+							onclick={(e) => { e.stopPropagation(); if (confirm('Force this job as done? The session will be stopped.')) markJobDone(job.id); }}
+						><Icon name="check" class="w-3 h-3" /> Force Done</button>
+						<button
+							class="btn btn-xs btn-error btn-outline gap-1"
+							onclick={(e) => { e.stopPropagation(); if (confirm('Cancel this job? The session will be stopped.')) cancelJob(job.id); }}
+						><Icon name="close" class="w-3 h-3" /> Cancel</button>
+					{/if}
 					{#if job.status === 'reviewing'}
 						<button
 							class="btn btn-xs btn-success btn-outline gap-1"
 							onclick={(e) => { e.stopPropagation(); markJobDone(job.id); }}
 						><Icon name="check" class="w-3 h-3" /> Done</button>
+						<button
+							class="btn btn-xs btn-error btn-outline gap-1"
+							onclick={(e) => { e.stopPropagation(); if (confirm('Cancel this job? The session will be stopped.')) cancelJob(job.id); }}
+						><Icon name="close" class="w-3 h-3" /> Cancel</button>
 					{/if}
 					{#if job.status === 'failed'}
 						<button
@@ -538,7 +552,7 @@
 							onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}
 						><Icon name="refresh" class="w-3 h-3" /> Retry</button>
 					{/if}
-					{#if ['queued', 'reviewing', 'done', 'failed', 'cancelled'].includes(job.status)}
+					{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
 						<button
 							class="btn btn-xs btn-error btn-outline"
 							onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
