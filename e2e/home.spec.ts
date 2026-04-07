@@ -1,19 +1,14 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Home Page', () => {
-	test('loads and shows the sessions heading', async ({ page }) => {
+	test('loads and shows the logo', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.locator('h1')).toContainText('Pi Sessions');
+		await expect(page.locator('img[alt="Pi"]')).toBeVisible();
 	});
 
 	test('shows the New button', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.locator('button', { hasText: '+ New' })).toBeVisible();
-	});
-
-	test('shows the refresh button', async ({ page }) => {
-		await page.goto('/');
-		await expect(page.locator('button', { hasText: '↻' })).toBeVisible();
+		await expect(page.locator('button', { hasText: 'New' })).toBeVisible();
 	});
 
 	test('has a search input', async ({ page }) => {
@@ -34,20 +29,11 @@ test.describe('Home Page', () => {
 
 	test('opens New Session modal', async ({ page }) => {
 		await page.goto('/');
-		await page.locator('button', { hasText: '+ New' }).click();
+		await page.locator('button', { hasText: 'New' }).click();
 		// The NewSessionModal dialog should appear with heading
 		await expect(page.getByRole('heading', { name: 'New Session' })).toBeVisible({
 			timeout: 3000
 		});
-	});
-
-	test('refresh button triggers data reload', async ({ page }) => {
-		await page.goto('/');
-		// Click refresh and verify page doesn't error
-		const refreshBtn = page.locator('button', { hasText: '↻' });
-		await refreshBtn.click();
-		// Page should still show the heading
-		await expect(page.locator('h1')).toContainText('Pi Sessions');
 	});
 
 	test('project groups are displayed when sessions exist', async ({ page }) => {
@@ -73,18 +59,18 @@ test.describe('Home Page', () => {
 });
 
 test.describe('Home Page - Empty State', () => {
-	test('shows empty state message when no sessions exist', async ({ page }) => {
+	test('shows empty state or session list', async ({ page }) => {
 		await page.goto('/');
 		// Either shows sessions or empty state — both are valid
-		const heading = page.locator('h1');
-		await expect(heading).toContainText('Pi Sessions');
+		const hasLogo = await page.locator('img[alt="Pi"]').count();
+		expect(hasLogo).toBeGreaterThan(0);
 	});
 });
 
 test.describe('Home Page - Navigation', () => {
-	test('page has correct title or heading', async ({ page }) => {
+	test('page has correct logo and layout', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.locator('h1')).toBeVisible();
+		await expect(page.locator('img[alt="Pi"]')).toBeVisible();
 	});
 
 	test('page loads without JS errors', async ({ page }) => {
