@@ -169,13 +169,13 @@ export function getGitHubUser(): string | null {
 /**
  * List open PRs for a given repo. Optionally filter by assignee.
  */
-export function listOpenPrs(owner: string, name: string, assignee?: string): GitHubPr[] {
+export function listOpenPrs(owner: string, name: string, assignee?: string, excludeAuthor?: string): GitHubPr[] {
 	try {
 		const args = [
 			'pr', 'list',
 			'--repo', `${owner}/${name}`,
 			'--state', 'open',
-			'--json', 'number,title,headRefName,baseRefName,url',
+			'--json', 'number,title,headRefName,baseRefName,url,isDraft,author',
 			'--limit', '30',
 		];
 
@@ -189,7 +189,20 @@ export function listOpenPrs(owner: string, name: string, assignee?: string): Git
 			encoding: 'utf-8',
 		});
 
-		return JSON.parse(output) as GitHubPr[];
+		let prs = JSON.parse(output) as any[];
+
+		// Filter out draft PRs
+		prs = prs.filter((pr: any) => !pr.isDraft);
+
+		// Filter out PRs authored by the current user (don't review your own)
+		if (excludeAuthor) {
+			prs = prs.filter((pr: any) => {
+				const login = pr.author?.login || pr.author?.Login || '';
+				return login.toLowerCase() !== excludeAuthor.toLowerCase();
+			});
+		}
+
+		return prs as GitHubPr[];
 	} catch (err) {
 		log.warn('github-pr-poller', `failed to list PRs for ${owner}/${name}: ${err}`);
 		return [];
@@ -263,7 +276,7 @@ export async function scanRepos(manualRepoId?: string): Promise<{ created: numbe
 
 		let prs: GitHubPr[];
 		try {
-			prs = listOpenPrs(repo.owner, repo.name, assignee);
+			prs = listOpenPrs(repo.owner, repo.name, assignee, ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
@@ -346,7 +359,7 @@ export async function scanAllRepos(): Promise<{ created: number; skipped: number
 		const assignee = repo.assigned_only ? ghUser : undefined;
 		let prs: GitHubPr[];
 		try {
-			prs = listOpenPrs(repo.owner, repo.name, assignee);
+			prs = listOpenPrs(repo.owner, repo.name, assignee, ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
