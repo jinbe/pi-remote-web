@@ -62,6 +62,7 @@ interface GitHubPr {
 	headRefName: string;
 	baseRefName: string;
 	url: string;
+	author?: { login: string };
 }
 
 // --- Configuration ---
@@ -202,10 +203,146 @@ export function listOpenPrs(owner: string, name: string, assignee?: string, excl
 			});
 		}
 
+		// Filter out bot authors
+		prs = prs.filter((pr: any) => {
+			const login = (pr.author?.login || pr.author?.Login || '').toLowerCase();
+			return !BOT_AUTHORS.some(bot => login === bot.toLowerCase());
+		});
+
 		return prs as GitHubPr[];
 	} catch (err) {
 		log.warn('github-pr-poller', `failed to list PRs for ${owner}/${name}: ${err}`);
 		return [];
+	}
+}
+
+// --- Bot author patterns to exclude ---
+const BOT_AUTHORS = ['dependabot[bot]', 'snyk-io[bot]', 'renovate[bot]', 'github-actions[bot]'];
+
+// --- Dismiss keywords: if the last non-author comment contains one, skip ---
+const DISMISS_KEYWORDS = [
+	'approve', 'lgtm', 'ship it', 'shipit', 'looks good',
+	'needs work', 'needs changes', 'changes requested',
+	'wip', 'work in progress', 'not ready',
+	'hold off', "don't merge", 'do not merge', '+1',
+];
+
+/**
+ * Check whether a PR needs review by inspecting its review state and comments.
+ * Returns { shouldReview: boolean, reason: string }.
+ */
+function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor: string, ghUser: string): { shouldReview: boolean; reason: string } {
+	try {
+		// Fetch reviews
+		const reviewsJson = execFileSync('gh', [
+			'api', `repos/${owner}/${name}/pulls/${prNumber}/reviews`,
+			'--jq', '[.[] | select(.state != "DISMISSED" and .state != "PENDING") | {user: .user.login, state: .state}]',
+		], { timeout: GH_TIMEOUT_MS, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+
+		const reviews = JSON.parse(reviewsJson || '[]') as Array<{ user: string; state: string }>;
+		const lastReview = reviews.length > 0 ? reviews[reviews.length - 1] : null;
+
+		// Already approved — skip
+		if (lastReview?.state === 'APPROVED') {
+			return { shouldReview: false, reason: `already approved by ${lastReview.user}` };
+		}
+
+		// My review is the latest — waiting on author
+		if (lastReview && lastReview.user.toLowerCase() === ghUser.toLowerCase()) {
+			return { shouldReview: false, reason: `last review is mine (${lastReview.state}) — waiting on author` };
+		}
+
+		// Fetch last human comment
+		const commentsJson = execFileSync('gh', [
+			'api', `repos/${owner}/${name}/issues/${prNumber}/comments`,
+			'--jq', '[.[] | select(.user.type != "Bot") | {user: .user.login, body: .body}] | last // empty',
+		], { timeout: GH_TIMEOUT_MS, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+
+		if (commentsJson?.trim()) {
+			const lastComment = JSON.parse(commentsJson) as { user: string; body: string };
+
+			// Last commenter is NOT the PR author — check dismiss keywords
+			if (lastComment.user.toLowerCase() !== prAuthor.toLowerCase()) {
+				const lowerBody = (lastComment.body || '').toLowerCase();
+				const matched = DISMISS_KEYWORDS.find(kw => lowerBody.includes(kw));
+				if (matched) {
+					return { shouldReview: false, reason: `last comment by ${lastComment.user} contains "${matched}"` };
+				}
+				// Non-author commented without dismiss keyword — still skip (they're handling it)
+				return { shouldReview: false, reason: `last comment by ${lastComment.user} (not PR author)` };
+			}
+
+			// Author commented — re-review needed
+			return { shouldReview: true, reason: 'author commented — re-review needed' };
+		}
+
+		// No comments — check if there are any reviews
+		if (!lastReview) {
+			return { shouldReview: true, reason: 'new PR — needs review' };
+		}
+
+		return { shouldReview: true, reason: `activity from ${lastReview.user} (${lastReview.state})` };
+	} catch (err) {
+		log.warn('github-pr-poller', `failed to check review state for ${owner}/${name}#${prNumber}: ${err}`);
+		// On error, default to reviewing (safe fallback)
+		return { shouldReview: true, reason: 'review state check failed — defaulting to review' };
+	}
+}
+
+/**
+ * Process a list of PRs for a repo: check review state, skip duplicates, create jobs.
+ */
+function processPrs(
+	prs: GitHubPr[],
+	repo: MonitoredRepo,
+	ghUser: string,
+	concurrency: number,
+	result: { created: number; skipped: number; errors: number }
+): void {
+	for (const pr of prs) {
+		if (countActiveJobs() >= concurrency) {
+			log.info('github-pr-poller', `concurrency limit reached — stopping PR processing`);
+			break;
+		}
+
+		const prUrl = pr.url;
+		const prAuthor = pr.author?.login || '';
+
+		// Skip if there's already an active job for this PR
+		const existing = findActiveJobByPrUrl(prUrl);
+		if (existing) {
+			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — active job exists (${existing.status})`);
+			result.skipped++;
+			continue;
+		}
+
+		// Check review state — skip if already handled
+		const { shouldReview, reason } = shouldReviewPr(repo.owner, repo.name, pr.number, prAuthor, ghUser);
+		if (!shouldReview) {
+			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — ${reason}`);
+			result.skipped++;
+			continue;
+		}
+
+		log.info('github-pr-poller', `${repo.owner}/${repo.name}#${pr.number}: ${reason}`);
+
+		// Create a review job
+		try {
+			const job = createJob({
+				type: 'review',
+				title: pr.title || `PR #${pr.number}`,
+				repo: repo.local_path ?? undefined,
+				branch: pr.headRefName,
+				target_branch: pr.baseRefName,
+				pr_url: prUrl,
+				review_skill: REVIEW_SKILL || undefined,
+			});
+			log.info('github-pr-poller', `created review job ${job.id} for ${repo.owner}/${repo.name}#${pr.number}`);
+			result.created++;
+		} catch (err) {
+			log.error('github-pr-poller', `failed to create job for ${repo.owner}/${repo.name}#${pr.number}: ${err}`);
+			result.errors++;
+		}
 	}
 }
 
@@ -283,42 +420,7 @@ export async function scanRepos(manualRepoId?: string): Promise<{ created: numbe
 			continue;
 		}
 
-		for (const pr of prs) {
-			// Re-check concurrency for each PR
-			if (countActiveJobs() >= concurrency) {
-				log.info('github-pr-poller', `concurrency limit reached — stopping PR processing`);
-				break;
-			}
-
-			const prUrl = pr.url;
-
-			// Skip if there's already an active job for this PR
-			const existing = findActiveJobByPrUrl(prUrl);
-			if (existing) {
-				log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — active job exists (${existing.status})`);
-				result.skipped++;
-				continue;
-			}
-
-			// Create a review job
-			try {
-				const job = createJob({
-					type: 'review',
-					title: pr.title || `PR #${pr.number}`,
-					repo: repo.local_path ?? undefined,
-					branch: pr.headRefName,
-					target_branch: pr.baseRefName,
-					pr_url: prUrl,
-					review_skill: REVIEW_SKILL || undefined,
-				});
-
-				log.info('github-pr-poller', `created review job ${job.id} for ${repo.owner}/${repo.name}#${pr.number}`);
-				result.created++;
-			} catch (err) {
-				log.error('github-pr-poller', `failed to create job for ${repo.owner}/${repo.name}#${pr.number}: ${err}`);
-				result.errors++;
-			}
-		}
+		processPrs(prs, repo, ghUser, concurrency, result);
 	}
 
 	log.info('github-pr-poller', `scan complete: ${result.created} created, ${result.skipped} skipped, ${result.errors} errors`);
@@ -366,34 +468,7 @@ export async function scanAllRepos(): Promise<{ created: number; skipped: number
 			continue;
 		}
 
-		for (const pr of prs) {
-			if (countActiveJobs() >= concurrency) {
-				log.info('github-pr-poller', `concurrency limit reached — stopping PR processing`);
-				break;
-			}
-
-			const prUrl = pr.url;
-			const existing = findActiveJobByPrUrl(prUrl);
-			if (existing) {
-				result.skipped++;
-				continue;
-			}
-
-			try {
-				createJob({
-					type: 'review',
-					title: pr.title || `PR #${pr.number}`,
-					repo: repo.local_path ?? undefined,
-					branch: pr.headRefName,
-					target_branch: pr.baseRefName,
-					pr_url: prUrl,
-					review_skill: REVIEW_SKILL || undefined,
-				});
-				result.created++;
-			} catch (err) {
-				result.errors++;
-			}
-		}
+		processPrs(prs, repo, ghUser, concurrency, result);
 	}
 
 	return result;
