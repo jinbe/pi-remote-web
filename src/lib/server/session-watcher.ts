@@ -4,7 +4,8 @@ import { join } from 'path';
 const fileCallbacks = new Set<(filePath: string) => void>();
 const sessionCallbacks = new Set<(event: 'update') => void>();
 
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+/** Per-directory debounce timers so each watcher debounces independently. */
+const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function startWatching(sessionsDir: string) {
 	try {
@@ -14,10 +15,12 @@ export function startWatching(sessionsDir: string) {
 
 				for (const cb of fileCallbacks) cb(fullPath);
 
-				if (debounceTimer) clearTimeout(debounceTimer);
-				debounceTimer = setTimeout(() => {
+				const existing = debounceTimers.get(sessionsDir);
+				if (existing) clearTimeout(existing);
+				debounceTimers.set(sessionsDir, setTimeout(() => {
+					debounceTimers.delete(sessionsDir);
 					for (const cb of sessionCallbacks) cb('update');
-				}, 500);
+				}, 500));
 			}
 		});
 	} catch {

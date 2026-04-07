@@ -915,9 +915,10 @@ export async function recoverActiveSessions() {
 			}
 		}
 
-		log.info('recovery', `recovering session: ${row.session_id} (${row.cwd})`);
+		const harness = detectHarnessFromPath(row.file_path);
+		log.info('recovery', `recovering session: ${row.session_id} (${row.cwd}) harness=${harness}`);
 		try {
-			await resumeSession(row.session_id, row.file_path, row.cwd);
+			await resumeSession(row.session_id, row.file_path, row.cwd, harness);
 			recovered++;
 		} catch (err) {
 			log.error('recovery', `failed to recover ${row.session_id}: ${err}`);

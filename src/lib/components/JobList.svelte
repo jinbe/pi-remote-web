@@ -262,7 +262,7 @@
 				{/if}
 
 				<!-- Go to session link + action buttons for active jobs -->
-				{#if expandedJob === job.id && ['running', 'reviewing', 'claimed'].includes(job.status)}
+				{#if expandedJob === job.id && ['running', 'reviewing'].includes(job.status)}
 					<div class="px-3 pb-2 flex flex-wrap gap-2">
 						{#if job.session_id}
 							<a

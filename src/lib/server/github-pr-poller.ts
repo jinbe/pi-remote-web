@@ -24,6 +24,10 @@ const DEFAULT_POLL_INTERVAL_SECONDS = 600;
 const DEFAULT_CONCURRENCY = 5;
 const GH_TIMEOUT_MS = 15_000;
 
+/** Per-PR error backoff: skip PRs that have failed review-state checks recently. */
+const prErrorBackoff = new Map<string, number>(); // prKey → timestamp when backoff expires
+const PR_ERROR_BACKOFF_MS = 30 * 60 * 1000; // 30 minutes
+
 /** Statuses that count towards the concurrency limit. */
 const ACTIVE_JOB_STATUSES = ['queued', 'claimed', 'running', 'reviewing'];
 
@@ -291,9 +295,11 @@ function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor:
 
 		return { shouldReview: true, reason: `activity from ${lastReview.user} (${lastReview.state})` };
 	} catch (err) {
-		log.warn('github-pr-poller', `failed to check review state for ${owner}/${name}#${prNumber}: ${err}`);
-		// On error, default to reviewing (safe fallback)
-		return { shouldReview: true, reason: 'review state check failed — defaulting to review' };
+		log.error('github-pr-poller', `failed to check review state for ${owner}/${name}#${prNumber}: ${err}`);
+		// Fail closed — skip this PR and apply a per-PR backoff to avoid endless re-enqueueing
+		const prKey = `${owner}/${name}#${prNumber}`;
+		prErrorBackoff.set(prKey, Date.now() + PR_ERROR_BACKOFF_MS);
+		return { shouldReview: false, reason: 'review state check failed — skipping with backoff' };
 	}
 }
 
@@ -325,6 +331,16 @@ function processPrs(
 		}
 
 
+
+		// Check per-PR error backoff — skip if a recent review-state check failed
+		const prKey = `${repo.owner}/${repo.name}#${pr.number}`;
+		const backoffExpiry = prErrorBackoff.get(prKey);
+		if (backoffExpiry && Date.now() < backoffExpiry) {
+			log.info('github-pr-poller', `skipping ${prKey} — in error backoff until ${new Date(backoffExpiry).toISOString()}`);
+			result.skipped++;
+			continue;
+		}
+		if (backoffExpiry) prErrorBackoff.delete(prKey); // expired — clean up
 
 		// Check review state — skip if already handled
 		const { shouldReview, reason } = shouldReviewPr(repo.owner, repo.name, pr.number, prAuthor, ghUser);

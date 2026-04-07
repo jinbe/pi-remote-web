@@ -189,6 +189,7 @@
 	}
 
 	async function cancelJob(jobId: string) {
+		if (!confirm('Cancel this job? The session will be stopped.')) return;
 		hapticMedium();
 		try {
 			await fetch(`/api/jobs/${jobId}`, {
@@ -516,7 +517,7 @@
 						><Icon name="check" class="w-3 h-3" /> Force Done</button>
 						<button
 							class="btn btn-xs btn-error btn-outline gap-1"
-							onclick={(e) => { e.stopPropagation(); if (confirm('Cancel this job? The session will be stopped.')) cancelJob(job.id); }}
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
 						><Icon name="close" class="w-3 h-3" /> Cancel</button>
 					{/if}
 					{#if job.status === 'reviewing'}
@@ -526,7 +527,7 @@
 						><Icon name="check" class="w-3 h-3" /> Done</button>
 						<button
 							class="btn btn-xs btn-error btn-outline gap-1"
-							onclick={(e) => { e.stopPropagation(); if (confirm('Cancel this job? The session will be stopped.')) cancelJob(job.id); }}
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
 						><Icon name="close" class="w-3 h-3" /> Cancel</button>
 					{/if}
 					{#if job.status === 'failed'}
@@ -684,7 +685,7 @@
 	{:else}
 		<div class="flex flex-col gap-2">
 			{#each filteredJobs as job (job.id)}
-				{@const isDeletable = ['queued', 'reviewing', 'done', 'failed', 'cancelled'].includes(job.status)}
+				{@const isDeletable = ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
 				{#if isDeletable}
 					<SwipeToDelete ondelete={() => deleteJobDirect(job.id)}>
 						{@render jobCard(job)}

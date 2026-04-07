@@ -11,6 +11,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		const cwd = resolve(body.cwd || '');
 
 		if (!cwd || !existsSync(cwd)) throw error(400, 'Invalid or non-existent working directory');
+		if (harness && harness !== 'pi' && harness !== 'claude-code') throw error(400, 'Invalid harness — must be "pi" or "claude-code"');
 
 		const sessionId = await createSession(cwd, model, harness);
 		return json({ ok: true, sessionId });

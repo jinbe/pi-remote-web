@@ -25,8 +25,9 @@ if (!socketPath || !cwd) {
 
 const pidPath = socketPath.replace(/\.sock$/, '.pid');
 
-// Clean up stale socket
+// Clean up stale socket and PID file
 try { unlinkSync(socketPath); } catch {}
+try { unlinkSync(pidPath); } catch {}
 
 // --- Logging ---
 
@@ -491,9 +492,16 @@ async function handleRpcCommand(raw: string): Promise<void> {
 		case 'prompt': {
 			const message = parsed.message || '';
 
+			// Reject image attachments — Claude Code stream-json doesn't support multimodal input
+			if (parsed.images && parsed.images.length > 0) {
+				respond(id, 'prompt', false, undefined, 'Image attachments are not supported by the Claude Code harness');
+				break;
+			}
+
 			// If currently streaming, treat as steer/follow-up
 			if (state.isStreaming) {
 				if (parsed.streamingBehavior === 'steer' || parsed.streamingBehavior === 'followUp') {
+					state.messages.push({ role: 'user', content: message, timestamp: Date.now() });
 					writeToClaudeStdin(JSON.stringify({
 						type: 'user',
 						message: { role: 'user', content: message },
@@ -526,6 +534,11 @@ async function handleRpcCommand(raw: string): Promise<void> {
 
 		case 'steer': {
 			const message = parsed.message || '';
+			if (parsed.images && parsed.images.length > 0) {
+				respond(id, 'steer', false, undefined, 'Image attachments are not supported by the Claude Code harness');
+				break;
+			}
+			state.messages.push({ role: 'user', content: message, timestamp: Date.now() });
 			writeToClaudeStdin(JSON.stringify({
 				type: 'user',
 				message: { role: 'user', content: message },
@@ -536,6 +549,11 @@ async function handleRpcCommand(raw: string): Promise<void> {
 
 		case 'follow_up': {
 			const message = parsed.message || '';
+			if (parsed.images && parsed.images.length > 0) {
+				respond(id, 'follow_up', false, undefined, 'Image attachments are not supported by the Claude Code harness');
+				break;
+			}
+			state.messages.push({ role: 'user', content: message, timestamp: Date.now() });
 			writeToClaudeStdin(JSON.stringify({
 				type: 'user',
 				message: { role: 'user', content: message },

@@ -105,9 +105,9 @@ const BUNDLED_SKILLS: SlashCommand[] = [
 
 // --- SKILL.md parsing ---
 
-const FRONTMATTER_RE = /^---\s*\n([\s\S]*?)\n---/;
+const FRONTMATTER_RE = /^---\s*\r?\n([\s\S]*?)\r?\n---/;
 
-function parseSkillMd(content: string, fallbackName: string): { name: string; description: string } {
+export function parseSkillMd(content: string, fallbackName: string): { name: string; description: string } {
 	const fmMatch = content.match(FRONTMATTER_RE);
 	let name = fallbackName;
 	let description = '';
@@ -182,7 +182,7 @@ function scanPluginSkills(): SlashCommand[] {
 				const versions = readdirSync(pluginDir, { withFileTypes: true })
 					.filter(v => v.isDirectory())
 					.map(v => v.name)
-					.sort()
+					.sort(semverCompare)
 					.reverse();
 
 				if (versions.length === 0) continue;
@@ -203,16 +203,38 @@ function scanProjectSkills(projectDir: string): SlashCommand[] {
 	return scanSkillsDir(join(projectDir, '.claude', 'skills'), 'project-skill');
 }
 
-// --- Cached results ---
+// --- Semantic version comparison ---
 
-let cachedCommands: SlashCommand[] | null = null;
+/**
+ * Compare version strings numerically by segment.
+ * Handles dotted numeric versions (e.g. "1.2.3" vs "10.0.0") correctly,
+ * unlike a plain lexicographic sort where "9.0.0" > "10.0.0".
+ */
+function semverCompare(a: string, b: string): number {
+	const pa = a.split('.').map(Number);
+	const pb = b.split('.').map(Number);
+	const len = Math.max(pa.length, pb.length);
+	for (let i = 0; i < len; i++) {
+		const na = pa[i] ?? 0;
+		const nb = pb[i] ?? 0;
+		if (na !== nb) return na - nb;
+	}
+	return 0;
+}
+
+// --- Cached results (keyed by projectDir) ---
+
+const NO_PROJECT = '__NO_PROJECT__';
+const commandCache = new Map<string, SlashCommand[]>();
 
 /**
  * Get all available slash commands for Claude Code sessions.
- * Results are cached after the first call. Call `refreshSlashCommands()` to force a rescan.
+ * Results are cached per projectDir. Call `refreshSlashCommands()` to force a rescan.
  */
 export function getSlashCommands(projectDir?: string): SlashCommand[] {
-	if (cachedCommands) return cachedCommands;
+	const key = projectDir || NO_PROJECT;
+	const cached = commandCache.get(key);
+	if (cached) return cached;
 	return refreshSlashCommands(projectDir);
 }
 
@@ -220,6 +242,7 @@ export function getSlashCommands(projectDir?: string): SlashCommand[] {
  * Force a rescan of all slash command sources.
  */
 export function refreshSlashCommands(projectDir?: string): SlashCommand[] {
+	const key = projectDir || NO_PROJECT;
 	const start = Date.now();
 	const commands: SlashCommand[] = [
 		...BUILT_IN_COMMANDS,
@@ -237,8 +260,9 @@ export function refreshSlashCommands(projectDir?: string): SlashCommand[] {
 	for (const cmd of commands) {
 		seen.set(cmd.name, cmd);
 	}
-	cachedCommands = Array.from(seen.values());
+	const result = Array.from(seen.values());
+	commandCache.set(key, result);
 
-	log.info('slash-commands', `discovered ${cachedCommands.length} commands in ${Date.now() - start}ms`);
-	return cachedCommands;
+	log.info('slash-commands', `discovered ${result.length} commands for ${key} in ${Date.now() - start}ms`);
+	return result;
 }

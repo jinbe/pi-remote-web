@@ -273,10 +273,6 @@ export function deleteJob(id: string): Job | null {
 const ACTIVE_STATUSES = ['queued', 'claimed', 'running', 'reviewing'];
 
 /**
- * Find an active job that matches the given PR URL.
- * Used to prevent duplicate review jobs for the same pull request.
- */
-/**
  * Find a running/reviewing job by its session ID.
  * Used to connect agent_end events to jobs for harnesses without callback hooks.
  */
@@ -286,6 +282,10 @@ export function findJobBySessionId(sessionId: string): Job | null {
 	).get(sessionId) as Job | null;
 }
 
+/**
+ * Find an active job that matches the given PR URL.
+ * Used to prevent duplicate review jobs for the same pull request.
+ */
 export function findActiveJobByPrUrl(prUrl: string): Job | null {
 	const placeholders = ACTIVE_STATUSES.map(() => '?').join(', ');
 	return getDb().query(

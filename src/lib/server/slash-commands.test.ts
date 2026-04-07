@@ -2,10 +2,10 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { parseSkillMd } from './slash-commands';
 
-// We test the internal parsing/scanning logic by importing the module
-// and using a temp directory structure.
-
+// Temp fixture directory — tests that exercise the real scanner still
+// hit ~/.claude (see note below) but frontmatter parsing tests use this.
 const TEST_DIR = join(tmpdir(), `slash-commands-test-${Date.now()}`);
 const SKILLS_DIR = join(TEST_DIR, '.claude', 'skills');
 
@@ -18,9 +18,8 @@ afterEach(() => {
 });
 
 describe('slash-commands', () => {
-	// We can't easily test the module directly because it hardcodes ~/.claude,
-	// but we can test the SKILL.md parsing logic by importing it indirectly.
-	// For now, test the structure expectations.
+
+	// --- parseSkillMd (exported, tested directly) ---
 
 	test('SKILL.md with frontmatter is parseable', () => {
 		const content = `---
@@ -32,15 +31,9 @@ description: A test skill for unit testing
 
 This is a test skill.`;
 
-		const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-		expect(fmMatch).not.toBeNull();
-
-		const fm = fmMatch![1];
-		const nameMatch = fm.match(/^name:\s*(.+)$/m);
-		const descMatch = fm.match(/^description:\s*(.+)$/m);
-
-		expect(nameMatch![1].trim()).toBe('test-skill');
-		expect(descMatch![1].trim()).toBe('A test skill for unit testing');
+		const result = parseSkillMd(content, 'fallback');
+		expect(result.name).toBe('test-skill');
+		expect(result.description).toBe('A test skill for unit testing');
 	});
 
 	test('SKILL.md with quoted values parses correctly', () => {
@@ -51,16 +44,9 @@ description: 'A skill with quoted values'
 
 Instructions here.`;
 
-		const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-		const fm = fmMatch![1];
-		const nameMatch = fm.match(/^name:\s*(.+)$/m);
-		const descMatch = fm.match(/^description:\s*(.+)$/m);
-
-		const name = nameMatch![1].trim().replace(/^['"]|['"]$/g, '');
-		const desc = descMatch![1].trim().replace(/^['"]|['"]$/g, '');
-
-		expect(name).toBe('quoted-skill');
-		expect(desc).toBe('A skill with quoted values');
+		const result = parseSkillMd(content, 'fallback');
+		expect(result.name).toBe('quoted-skill');
+		expect(result.description).toBe('A skill with quoted values');
 	});
 
 	test('SKILL.md without frontmatter falls back to first paragraph', () => {
@@ -70,13 +56,9 @@ This is the first paragraph that should be used as the description.
 
 More content here.`;
 
-		const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-		expect(fmMatch).toBeNull();
-
-		// The heading is its own paragraph, so first non-heading paragraph is second
-		const body = content.trim();
-		const paras = body.split(/\n\s*\n/).map(p => p.replace(/^#+\s+.*\n?/, '').trim()).filter(Boolean);
-		expect(paras[0]).toBe('This is the first paragraph that should be used as the description.');
+		const result = parseSkillMd(content, 'my-skill');
+		expect(result.name).toBe('my-skill');
+		expect(result.description).toBe('This is the first paragraph that should be used as the description.');
 	});
 
 	test('SKILL.md with empty description falls back to body', () => {
@@ -88,18 +70,24 @@ Fallback description from body.
 
 More details.`;
 
-		const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-		const fm = fmMatch![1];
-		const descMatch = fm.match(/^description:\s*(.+)$/m);
-		expect(descMatch).toBeNull();
-
-		const body = content.slice(fmMatch![0].length).trim();
-		const firstPara = body.split(/\n\s*\n/)[0]?.replace(/^#+\s+.*\n?/, '').trim();
-		expect(firstPara).toBe('Fallback description from body.');
+		const result = parseSkillMd(content, 'fallback');
+		expect(result.name).toBe('no-desc');
+		expect(result.description).toBe('Fallback description from body.');
 	});
 
+	test('SKILL.md with CRLF line endings parses correctly', () => {
+		const content = '---\r\nname: crlf-skill\r\ndescription: Handles Windows line endings\r\n---\r\n\r\n# CRLF Skill\r\n';
+
+		const result = parseSkillMd(content, 'fallback');
+		expect(result.name).toBe('crlf-skill');
+		expect(result.description).toBe('Handles Windows line endings');
+	});
+
+	// --- Integration tests (use real ~/.claude paths) ---
+	// Note: These tests rely on the host machine having ~/.claude/skills/ populated.
+	// They're kept for integration coverage but won't pass in CI without fixtures.
+
 	test('built-in commands list is non-empty and has expected entries', async () => {
-		// Import the module to access getSlashCommands
 		const { getSlashCommands } = await import('./slash-commands');
 		const commands = getSlashCommands();
 

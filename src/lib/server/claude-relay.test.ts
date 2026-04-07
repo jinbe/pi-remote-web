@@ -755,11 +755,13 @@ describe('Synthetic state (get_state / get_session_stats)', () => {
 	});
 });
 
+// Note: These tests replicate the getHarness() logic inline rather than calling
+// the real function because bun:test doesn't support environment variable mutation
+// between tests (process.env changes don't take effect after module load).
+// If bun:test adds env mocking, these should be refactored to call getHarness() directly.
 describe('Harness selection', () => {
 
 	test('getHarness returns pi by default', async () => {
-		// We can't easily test env var mutation in bun:test without mocking
-		// so we test the logic inline
 		const envVal = undefined;
 		const result = envVal === 'claude-code' || envVal === 'claude' ? 'claude-code' : 'pi';
 		expect(result).toBe('pi');

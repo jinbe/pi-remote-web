@@ -305,7 +305,8 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 			// to continue the automated review cycle in the same session.
 			if (job.max_loops > 0 && job.session_id) {
 				try {
-					const reviewPrompt = buildReviewPrompt(job);
+					const harness = (job.harness as HarnessType) || getHarness();
+				const reviewPrompt = buildReviewPrompt(job, harness);
 					await sendMessage(job.session_id, reviewPrompt);
 				} catch (err) {
 					log.warn('job-poller', `failed to send review prompt for job ${jobId}: ${err}`);
