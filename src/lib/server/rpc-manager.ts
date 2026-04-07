@@ -292,6 +292,10 @@ function processData(managed: ManagedSession, raw: Buffer | Uint8Array) {
 				managed.streamingAssistantText = '';
 				managed.streamingThinkingText = '';
 				insertSessionEvent(managed.sessionId, 'agent_end');
+
+				// Trigger job completion for any harness — pi uses a callback
+				// extension but Claude Code doesn't, so we detect it here.
+				triggerJobCompletion(managed.sessionId, parsed._lastAssistantText);
 			}
 			if (parsed.type === 'session_ended') {
 				handleSessionEnded(managed);
@@ -910,6 +914,33 @@ export async function recoverActiveSessions() {
 
 	if (rows.length > 0) {
 		log.info('recovery', `${reconnected} reconnected, ${recovered} respawned (of ${rows.length} total)`);
+	}
+}
+
+// --- Job completion trigger ---
+
+/**
+ * Check if a session belongs to a job and trigger the completion handler.
+ * This is the universal path — works for both pi (backup to callback extension)
+ * and Claude Code (primary path since it has no callback hook).
+ */
+function triggerJobCompletion(sessionId: string, assistantText: string): void {
+	try {
+		// Dynamic import to avoid circular deps at module load time
+		Promise.all([
+			import('./job-queue'),
+			import('./job-poller'),
+		]).then(([{ findJobBySessionId }, { handleJobAgentEnd }]) => {
+			const job = findJobBySessionId(sessionId);
+			if (job) {
+				log.info('job-trigger', `agent_end for job ${job.id} (session ${sessionId}) — triggering completion`);
+				handleJobAgentEnd(job.id, assistantText).catch((err) => {
+					log.error('job-trigger', `failed to handle job completion for ${job.id}: ${err}`);
+				});
+			}
+		}).catch(() => {});
+	} catch {
+		// Best effort — don't crash the event loop
 	}
 }
 
