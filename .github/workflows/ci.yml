@@ -19,8 +19,8 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Ensure ~/.pi directory exists
-        run: mkdir -p ~/.pi
+      - name: Ensure pi directories exist
+        run: mkdir -p ~/.pi/agent/sessions ~/.claude/projects
 
       - name: Run typecheck
         run: bun run check
@@ -38,8 +38,8 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Ensure ~/.pi directory exists
-        run: mkdir -p ~/.pi
+      - name: Ensure pi directories exist
+        run: mkdir -p ~/.pi/agent/sessions ~/.claude/projects
 
       - name: Run unit tests
         run: bun test src/
@@ -57,8 +57,8 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Ensure ~/.pi directory exists
-        run: mkdir -p ~/.pi
+      - name: Ensure pi directories exist
+        run: mkdir -p ~/.pi/agent/sessions ~/.claude/projects
 
       - name: Install Playwright browsers
         run: bunx playwright install --with-deps chromium
