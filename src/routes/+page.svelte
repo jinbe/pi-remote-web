@@ -20,6 +20,8 @@
 	let search = $state('');
 	let harnessFilter = $state<'all' | 'pi' | 'claude-code'>('all');
 	let showNewSession = $state(false);
+	let newSessionCwd = $state('');
+	let newSessionHarness = $state<'pi' | 'claude-code'>('pi');
 	let expandedProject = $state<string | null>(
 		browser ? localStorage.getItem('pi-expanded-project') : null
 	);
@@ -28,8 +30,10 @@
 	let creatingForProject = $state<string | null>(null);
 	let showAddJob = $state(false);
 	let addJobRepo = $state('');
+	let addJobHarness = $state<'pi' | 'claude-code'>('pi');
 	let showAddReviewJob = $state(false);
 	let addReviewJobRepo = $state('');
+	let addReviewJobHarness = $state<'pi' | 'claude-code'>('pi');
 	let showAllSessionsFor = $state<Set<string>>(new Set());
 
 	// Persist expanded project to localStorage
@@ -149,6 +153,13 @@
 		return 'pi';
 	}
 
+	function openNewSessionForProject(cwd: string) {
+		hapticMedium();
+		newSessionCwd = cwd;
+		newSessionHarness = getLastHarness(cwd);
+		showNewSession = true;
+	}
+
 	async function createSessionForProject(cwd: string, harness?: 'pi' | 'claude-code') {
 		if (creatingForProject) return;
 		hapticMedium();
@@ -177,12 +188,14 @@
 	function openAddJob(repo: string) {
 		hapticMedium();
 		addJobRepo = repo;
+		addJobHarness = getLastHarness(repo);
 		showAddJob = true;
 	}
 
 	function openAddReviewJob(repo: string) {
 		hapticMedium();
 		addReviewJobRepo = repo;
+		addReviewJobHarness = getLastHarness(repo);
 		showAddReviewJob = true;
 	}
 
@@ -396,7 +409,7 @@
 					<span class="sm:hidden">Stop</span>
 				</button>
 			{/if}
-			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showNewSession = true; }}><Icon name="plus" class="w-4 h-4" /> New</button>
+			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); newSessionCwd = ''; newSessionHarness = data.sessions[0]?.harness || 'pi'; showNewSession = true; }}><Icon name="plus" class="w-4 h-4" /> New</button>
 			<!-- Kebab menu -->
 			<div class="dropdown dropdown-end">
 				<div tabindex="0" role="button" class="btn btn-sm btn-ghost btn-circle" aria-label="More actions">
@@ -568,27 +581,14 @@
 						>
 							<span class="opacity-40"><Icon name="cog" class="w-4 h-4" /></span>
 						</button>
-						<div class="hidden md:inline-flex dropdown dropdown-end">
-							<button
-								tabindex="0"
-								class="btn btn-ghost btn-xs"
-								onclick={(e) => e.stopPropagation()}
-								title="New session in {group.shortName}"
-								aria-label="New session"
-								disabled={creatingForProject === group.cwd}
-							>
-								{#if creatingForProject === group.cwd}
-									<span class="loading loading-spinner loading-sm"></span>
-								{:else}
-									<span class="opacity-50"><Icon name="plus" class="w-4 h-4" /></span>
-								{/if}
-							</button>
-							<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-							<ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-50 w-44 p-2 shadow-lg border border-base-300">
-								<li><button onclick={(e) => { e.stopPropagation(); createSessionForProject(group.cwd, 'pi'); }}>π pi</button></li>
-								<li><button onclick={(e) => { e.stopPropagation(); createSessionForProject(group.cwd, 'claude-code'); }}>◆ Claude Code</button></li>
-							</ul>
-						</div>
+						<button
+							class="hidden md:inline-flex btn btn-ghost btn-xs"
+							onclick={(e: MouseEvent) => { e.stopPropagation(); openNewSessionForProject(group.cwd); }}
+							title="New session in {group.shortName}"
+							aria-label="New session"
+						>
+							<span class="opacity-50"><Icon name="plus" class="w-4 h-4" /></span>
+						</button>
 						<button
 							class="hidden md:inline-flex btn btn-ghost btn-xs"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); toggleFavorite(group.cwd); }}
@@ -736,12 +736,14 @@
 <AddJobModal
 	open={showAddJob}
 	defaultRepo={addJobRepo}
+	defaultHarness={addJobHarness}
 	onclose={() => (showAddJob = false)}
 />
 
 <AddReviewJobModal
 	open={showAddReviewJob}
 	defaultRepo={addReviewJobRepo}
+	defaultHarness={addReviewJobHarness}
 	onclose={() => (showAddReviewJob = false)}
 />
 

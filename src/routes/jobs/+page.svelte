@@ -40,6 +40,7 @@
 		no_verdict_retries: number;
 		max_no_verdict_retries: number;
 		model: string | null;
+		harness: string | null;
 	}
 
 	let { data } = $props();
@@ -349,6 +350,11 @@
 				</span>
 			{/if}
 
+			<!-- Harness badge -->
+			{#if job.harness === 'claude-code'}
+				<span class="badge badge-xs badge-outline" title="Claude Code">◆</span>
+			{/if}
+
 			<!-- Review skill badge -->
 			{#if job.review_skill}
 				<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-0.5" title="Review skill: {job.review_skill}">
@@ -400,6 +406,10 @@
 							<span class="truncate">{shortenHome(job.repo)}</span>
 						</div>
 					{/if}
+					<div class="flex gap-2">
+						<span class="text-base-content/50 w-20 flex-shrink-0">Harness</span>
+						<span class="inline-flex items-center gap-1">{#if job.harness === 'claude-code'}◆ Claude Code{:else}π pi{/if}</span>
+					</div>
 					{#if job.model}
 						<div class="flex gap-2">
 							<span class="text-base-content/50 w-20 flex-shrink-0">Model</span>
@@ -689,11 +699,13 @@
 
 <AddJobModal
 	open={showAddJob}
+	defaultHarness={data.defaultHarness}
 	onclose={() => (showAddJob = false)}
 />
 
 <AddReviewJobModal
 	open={showAddReviewJob}
+	defaultHarness={data.defaultHarness}
 	onclose={() => (showAddReviewJob = false)}
 />
 

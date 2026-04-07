@@ -23,10 +23,13 @@
 	let model = $state('');
 	let harness = $state<'pi' | 'claude-code'>(defaultHarness);
 
-	// Pre-fill cwd from defaultCwd when modal opens
+	// Re-fill defaults each time the modal opens
 	$effect(() => {
-		if (open && defaultCwd && !cwd) {
-			cwd = defaultCwd;
+		if (open) {
+			cwd = defaultCwd || '';
+			harness = defaultHarness;
+			model = '';
+			errorMsg = '';
 		}
 	});
 	let creating = $state(false);

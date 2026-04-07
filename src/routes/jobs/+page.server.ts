@@ -1,6 +1,7 @@
 import { getJobs } from '$lib/server/job-queue';
 import { isRunning as isPollerRunning } from '$lib/server/job-poller';
 import { isRunning as isPrPollerRunning, getMonitoredRepos, getPollIntervalMs, getConcurrency } from '$lib/server/github-pr-poller';
+import { getHarness } from '$lib/server/rpc-manager';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async () => {
@@ -18,5 +19,6 @@ export const load: PageServerLoad = async () => {
 		monitoredRepos,
 		prPollIntervalMs,
 		prPollConcurrency,
+		defaultHarness: getHarness(),
 	};
 };

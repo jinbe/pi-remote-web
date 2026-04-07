@@ -101,7 +101,8 @@ export function getDb(): Database {
 			max_no_verdict_retries INTEGER NOT NULL DEFAULT 3,
 			callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
 			review_skill TEXT,
-			model TEXT
+			model TEXT,
+			harness TEXT DEFAULT 'pi'
 		)`);
 
 		// Migrations: add columns if missing (from older schema)
@@ -110,6 +111,7 @@ export function getDb(): Database {
 		try { db.run('ALTER TABLE jobs ADD COLUMN model TEXT'); } catch {}
 		try { db.run('ALTER TABLE jobs ADD COLUMN no_verdict_retries INTEGER NOT NULL DEFAULT 0'); } catch {}
 		try { db.run('ALTER TABLE jobs ADD COLUMN max_no_verdict_retries INTEGER NOT NULL DEFAULT 3'); } catch {}
+		try { db.run("ALTER TABLE jobs ADD COLUMN harness TEXT DEFAULT 'pi'"); } catch {}
 
 		// Migration: Test if 'reviewing' status is allowed by trying a test insert
 		// If it fails, we need to migrate the schema to remove CHECK constraints
@@ -156,7 +158,8 @@ export function getDb(): Database {
 				max_no_verdict_retries INTEGER NOT NULL DEFAULT 3,
 				callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
 				review_skill TEXT,
-				model TEXT
+				model TEXT,
+				harness TEXT DEFAULT 'pi'
 			)`);
 			// Copy existing columns — model may not exist in old schema
 			const oldCols = db.query("PRAGMA table_info(jobs)").all() as { name: string }[];

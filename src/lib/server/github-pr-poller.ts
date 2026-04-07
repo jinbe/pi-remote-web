@@ -15,6 +15,7 @@ import { execFileSync } from 'child_process';
 import { getDb } from './cache';
 import { createJob, findActiveJobByPrUrl } from './job-queue';
 import { REVIEW_SKILL } from './job-prompts';
+import { getHarness } from './rpc-manager';
 import { log } from './logger';
 
 // --- Constants ---
@@ -345,6 +346,7 @@ function processPrs(
 				target_branch: pr.baseRefName,
 				pr_url: prUrl,
 				review_skill: REVIEW_SKILL || undefined,
+				harness: getHarness(),
 			});
 			log.info('github-pr-poller', `created review job ${job.id} for ${repo.owner}/${repo.name}#${pr.number}`);
 			result.created++;

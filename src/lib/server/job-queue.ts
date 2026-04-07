@@ -39,6 +39,7 @@ export interface Job {
 	callback_token: string;
 	review_skill: string | null;
 	model: string | null;
+	harness: string | null;
 }
 
 export interface CreateJobInput {
@@ -56,6 +57,7 @@ export interface CreateJobInput {
 	pr_url?: string;
 	review_skill?: string;
 	model?: string;
+	harness?: string;
 }
 
 export interface UpdateJobInput {
@@ -79,8 +81,8 @@ export interface UpdateJobInput {
 
 function insertJobQuery() {
 	return getDb().query(`
-		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, review_skill, model)
-		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $review_skill, $model)
+		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, review_skill, model, harness)
+		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $review_skill, $model, $harness)
 		RETURNING *
 	`);
 }
@@ -128,6 +130,7 @@ export function createJob(input: CreateJobInput): Job {
 		$pr_url: input.pr_url ?? null,
 		$review_skill: input.review_skill ?? null,
 		$model: input.model ?? null,
+		$harness: input.harness ?? 'pi',
 	}) as Job;
 
 	log.info('job-queue', `created job ${row.id} (${row.type ?? 'task'}): ${row.title}`);
