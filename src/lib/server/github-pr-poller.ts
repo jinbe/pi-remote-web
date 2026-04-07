@@ -269,65 +269,127 @@ const DISMISS_KEYWORDS = [
 ];
 
 /**
+ * Parse NDJSON output from `gh api --paginate --jq`.
+ *
+ * When `--paginate` is used with `--jq` that produces an array per page,
+ * each page emits a separate JSON array on its own line. A single
+ * `JSON.parse()` would fail on multi-page output. This helper splits
+ * on newlines, parses each line independently, and flattens the results.
+ */
+function parseNdjson<T>(raw: string): T[] {
+	if (!raw?.trim()) return [];
+	return raw
+		.split('\n')
+		.filter(line => line.trim() !== '')
+		.flatMap(line => {
+			const parsed = JSON.parse(line);
+			return Array.isArray(parsed) ? parsed : [parsed];
+		}) as T[];
+}
+
+/** A timestamped review event (from PR reviews API). */
+interface ReviewEvent {
+	type: 'review';
+	user: string;
+	state: string;
+	timestamp: string; // submitted_at
+}
+
+/** A timestamped comment event (from issue comments API). */
+interface CommentEvent {
+	type: 'comment';
+	user: string;
+	body: string;
+	timestamp: string; // created_at
+}
+
+type PrEvent = ReviewEvent | CommentEvent;
+
+/**
  * Check whether a PR needs review by inspecting its review state and comments.
+ *
+ * Uses `--paginate` to fetch the full history for both reviews and comments,
+ * then determines the single most-recent activity by comparing timestamps.
+ * Decision logic is based on the true latest event across both lists.
+ *
  * Returns { shouldReview: boolean, reason: string }.
  */
-async function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor: string, ghUser: string): Promise<{ shouldReview: boolean; reason: string }> {
+export async function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor: string, ghUser: string): Promise<{ shouldReview: boolean; reason: string }> {
 	// Belt-and-suspenders: never review your own PRs
 	if (prAuthor && prAuthor.toLowerCase() === ghUser.toLowerCase()) {
 		return { shouldReview: false, reason: `self-authored by ${prAuthor}` };
 	}
 
 	try {
-		// Fetch reviews and comments concurrently — they're independent API calls
+		// Fetch ALL reviews and comments concurrently (paginated).
+		// Neither API supports sort/direction, so we paginate to get
+		// everything and sort client-side by timestamp.
 		const [reviewsJson, commentsJson] = await Promise.all([
 			execGh([
-				'api', `repos/${owner}/${name}/pulls/${prNumber}/reviews`,
-				'--jq', '[.[] | select(.state != "DISMISSED" and .state != "PENDING") | {user: .user.login, state: .state}]',
+				'api', '--paginate',
+				`repos/${owner}/${name}/pulls/${prNumber}/reviews`,
+				'--jq', '[.[] | select(.state != "DISMISSED" and .state != "PENDING") | {user: .user.login, state: .state, submitted_at: .submitted_at}]',
 			]),
 			execGh([
-				'api', `repos/${owner}/${name}/issues/${prNumber}/comments`,
-				'--jq', '[.[] | select(.user.type != "Bot") | {user: .user.login, body: .body}] | last // empty',
+				'api', '--paginate',
+				`repos/${owner}/${name}/issues/${prNumber}/comments`,
+				'--jq', '[.[] | select(.user.type != "Bot") | {user: .user.login, body: .body, created_at: .created_at}]',
 			]),
 		]);
 
-		const reviews = JSON.parse(reviewsJson || '[]') as Array<{ user: string; state: string }>;
-		const lastReview = reviews.length > 0 ? reviews[reviews.length - 1] : null;
+		const rawReviews = parseNdjson<{ user: string; state: string; submitted_at: string }>(reviewsJson);
+		const reviews: ReviewEvent[] = rawReviews.map(r => ({
+			type: 'review' as const,
+			user: r.user,
+			state: r.state,
+			timestamp: r.submitted_at,
+		}));
 
-		// Already approved — skip
-		if (lastReview?.state === 'APPROVED') {
-			return { shouldReview: false, reason: `already approved by ${lastReview.user}` };
-		}
+		const rawComments = parseNdjson<{ user: string; body: string; created_at: string }>(commentsJson);
+		const comments: CommentEvent[] = rawComments.map(c => ({
+			type: 'comment' as const,
+			user: c.user,
+			body: c.body,
+			timestamp: c.created_at,
+		}));
 
-		// My review is the latest — waiting on author
-		if (lastReview && lastReview.user.toLowerCase() === ghUser.toLowerCase()) {
-			return { shouldReview: false, reason: `last review is mine (${lastReview.state}) — waiting on author` };
-		}
+		// Merge and sort all events most-recent-first
+		const allEvents: PrEvent[] = [...reviews, ...comments]
+			.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-		if (commentsJson?.trim()) {
-			const lastComment = JSON.parse(commentsJson) as { user: string; body: string };
-
-			// Last commenter is NOT the PR author — check dismiss keywords
-			if (lastComment.user.toLowerCase() !== prAuthor.toLowerCase()) {
-				const lowerBody = (lastComment.body || '').toLowerCase();
-				const matched = DISMISS_KEYWORDS.find(kw => lowerBody.includes(kw));
-				if (matched) {
-					return { shouldReview: false, reason: `last comment by ${lastComment.user} contains "${matched}"` };
-				}
-				// Non-author commented without dismiss keyword — still skip (they're handling it)
-				return { shouldReview: false, reason: `last comment by ${lastComment.user} (not PR author)` };
-			}
-
-			// Author commented — re-review needed
-			return { shouldReview: true, reason: 'author commented — re-review needed' };
-		}
-
-		// No comments — check if there are any reviews
-		if (!lastReview) {
+		// No activity at all — brand new PR
+		if (allEvents.length === 0) {
 			return { shouldReview: true, reason: 'new PR — needs review' };
 		}
 
-		return { shouldReview: true, reason: `activity from ${lastReview.user} (${lastReview.state})` };
+		const latest = allEvents[0];
+
+		// Decision based on the single most-recent event
+		if (latest.type === 'review') {
+			// Latest activity is a review
+			if (latest.state === 'APPROVED') {
+				return { shouldReview: false, reason: `already approved by ${latest.user}` };
+			}
+			if (latest.user.toLowerCase() === ghUser.toLowerCase()) {
+				return { shouldReview: false, reason: `last review is mine (${latest.state}) — waiting on author` };
+			}
+			// Someone else's non-approval review — may need attention
+			return { shouldReview: true, reason: `activity from ${latest.user} (${latest.state})` };
+		}
+
+		// Latest activity is a comment
+		if (latest.user.toLowerCase() === prAuthor.toLowerCase()) {
+			return { shouldReview: true, reason: 'author commented — re-review needed' };
+		}
+
+		// Non-author comment — check dismiss keywords
+		const lowerBody = (latest.body || '').toLowerCase();
+		const matched = DISMISS_KEYWORDS.find(kw => lowerBody.includes(kw));
+		if (matched) {
+			return { shouldReview: false, reason: `last comment by ${latest.user} contains "${matched}"` };
+		}
+		// Non-author commented without dismiss keyword — they're handling it
+		return { shouldReview: false, reason: `last comment by ${latest.user} (not PR author)` };
 	} catch (err) {
 		log.error('github-pr-poller', `failed to check review state for ${owner}/${name}#${prNumber}: ${err}`);
 		// Fail closed — skip this PR and apply a per-PR backoff to avoid endless re-enqueueing
