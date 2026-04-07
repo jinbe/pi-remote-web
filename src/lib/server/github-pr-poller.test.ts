@@ -11,6 +11,10 @@ import {
 	_resetForTesting,
 	getPollIntervalMs,
 	getConcurrency,
+	getGitHubUser,
+	listOpenPrs,
+	scanRepos,
+	scanAllRepos,
 } from './github-pr-poller';
 import { getDb } from './cache';
 
@@ -36,6 +40,53 @@ describe('github-pr-poller', () => {
 		stop();
 		_resetForTesting();
 		cleanupTestRepos();
+	});
+
+	describe('async GitHub CLI helpers', () => {
+		it('getGitHubUser returns a promise', () => {
+			const result = getGitHubUser();
+			expect(result).toBeInstanceOf(Promise);
+		});
+
+		it('getGitHubUser resolves to a string or null', async () => {
+			const user = await getGitHubUser();
+			// In CI or without gh auth, this may be null; with auth it's a string
+			if (user !== null) {
+				expect(typeof user).toBe('string');
+				expect(user.length).toBeGreaterThan(0);
+			} else {
+				expect(user).toBeNull();
+			}
+		});
+
+		it('listOpenPrs returns a promise', () => {
+			const result = listOpenPrs('nonexistent-owner-xyz', 'nonexistent-repo-xyz');
+			expect(result).toBeInstanceOf(Promise);
+		});
+
+		it('listOpenPrs resolves to an array (empty for non-existent repo)', async () => {
+			const prs = await listOpenPrs('nonexistent-owner-xyz', 'nonexistent-repo-xyz');
+			expect(Array.isArray(prs)).toBe(true);
+			expect(prs).toHaveLength(0);
+		});
+
+		it('scanRepos is async and returns result object', async () => {
+			// With no repos configured for auto-polling, should return zeros
+			const result = await scanRepos();
+			expect(result).toHaveProperty('created');
+			expect(result).toHaveProperty('skipped');
+			expect(result).toHaveProperty('errors');
+			expect(typeof result.created).toBe('number');
+			expect(typeof result.skipped).toBe('number');
+			expect(typeof result.errors).toBe('number');
+		});
+
+		it('scanAllRepos is async and returns result object', async () => {
+			const result = await scanAllRepos();
+			expect(result).toHaveProperty('created');
+			expect(result).toHaveProperty('skipped');
+			expect(result).toHaveProperty('errors');
+		});
 	});
 
 	describe('repo CRUD', () => {

@@ -11,7 +11,6 @@
  *   PI_PR_POLL_INTERVAL_SECONDS — polling interval (default: 600 = 10 minutes)
  *   PI_PR_POLL_CONCURRENCY — max concurrent running jobs (default: 5)
  */
-import { execFileSync } from 'child_process';
 import { getDb } from './cache';
 import { createJob, findActiveJobByPrUrl } from './job-queue';
 import { REVIEW_SKILL } from './job-prompts';
@@ -153,19 +152,58 @@ export function deleteMonitoredRepo(id: string): MonitoredRepo | null {
 	return row;
 }
 
+// --- Async subprocess helper ---
+
+/**
+ * Run `gh` with the given args asynchronously via Bun.spawn.
+ * Returns stdout as a trimmed string, or throws on non-zero exit / timeout.
+ */
+async function execGh(args: string[]): Promise<string> {
+	const proc = Bun.spawn(['gh', ...args], {
+		stdout: 'pipe',
+		stderr: 'pipe',
+		stdin: 'ignore',
+	});
+
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const result = await Promise.race([
+			(async () => {
+				const [stdout, stderr, exitCode] = await Promise.all([
+					new Response(proc.stdout).text(),
+					new Response(proc.stderr).text(),
+					proc.exited,
+				]);
+				return { stdout, stderr, exitCode };
+			})(),
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => {
+					proc.kill();
+					reject(new Error(`gh ${args[0]} timed out after ${GH_TIMEOUT_MS}ms`));
+				}, GH_TIMEOUT_MS);
+			}),
+		]);
+
+		if (result.exitCode !== 0) {
+			throw new Error(`gh ${args[0]} exited with code ${result.exitCode}: ${result.stderr.trim()}`);
+		}
+
+		return result.stdout.trim();
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 // --- GitHub CLI helpers ---
 
 /**
  * Get the authenticated GitHub username via `gh api user`.
  * Returns null if the CLI call fails.
  */
-export function getGitHubUser(): string | null {
+export async function getGitHubUser(): Promise<string | null> {
 	try {
-		const output = execFileSync(
-			'gh', ['api', 'user', '--jq', '.login'],
-			{ timeout: GH_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
-		);
-		return output.trim() || null;
+		const output = await execGh(['api', 'user', '--jq', '.login']);
+		return output || null;
 	} catch (err) {
 		log.warn('github-pr-poller', `failed to get GitHub user: ${err}`);
 		return null;
@@ -175,7 +213,7 @@ export function getGitHubUser(): string | null {
 /**
  * List open PRs for a given repo. Optionally filter by assignee.
  */
-export function listOpenPrs(owner: string, name: string, assignee?: string, excludeAuthor?: string): GitHubPr[] {
+export async function listOpenPrs(owner: string, name: string, assignee?: string, excludeAuthor?: string): Promise<GitHubPr[]> {
 	try {
 		const args = [
 			'pr', 'list',
@@ -189,13 +227,9 @@ export function listOpenPrs(owner: string, name: string, assignee?: string, excl
 			args.push('--assignee', assignee);
 		}
 
-		const output = execFileSync('gh', args, {
-			timeout: GH_TIMEOUT_MS,
-			stdio: ['pipe', 'pipe', 'pipe'],
-			encoding: 'utf-8',
-		});
+		const output = await execGh(args);
 
-		let prs = JSON.parse(output) as any[];
+		let prs = JSON.parse(output || '[]') as any[];
 
 		// Filter out draft PRs
 		prs = prs.filter((pr: any) => !pr.isDraft);
@@ -238,18 +272,24 @@ const DISMISS_KEYWORDS = [
  * Check whether a PR needs review by inspecting its review state and comments.
  * Returns { shouldReview: boolean, reason: string }.
  */
-function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor: string, ghUser: string): { shouldReview: boolean; reason: string } {
+async function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor: string, ghUser: string): Promise<{ shouldReview: boolean; reason: string }> {
 	// Belt-and-suspenders: never review your own PRs
 	if (prAuthor && prAuthor.toLowerCase() === ghUser.toLowerCase()) {
 		return { shouldReview: false, reason: `self-authored by ${prAuthor}` };
 	}
 
 	try {
-		// Fetch reviews
-		const reviewsJson = execFileSync('gh', [
-			'api', `repos/${owner}/${name}/pulls/${prNumber}/reviews`,
-			'--jq', '[.[] | select(.state != "DISMISSED" and .state != "PENDING") | {user: .user.login, state: .state}]',
-		], { timeout: GH_TIMEOUT_MS, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+		// Fetch reviews and comments concurrently — they're independent API calls
+		const [reviewsJson, commentsJson] = await Promise.all([
+			execGh([
+				'api', `repos/${owner}/${name}/pulls/${prNumber}/reviews`,
+				'--jq', '[.[] | select(.state != "DISMISSED" and .state != "PENDING") | {user: .user.login, state: .state}]',
+			]),
+			execGh([
+				'api', `repos/${owner}/${name}/issues/${prNumber}/comments`,
+				'--jq', '[.[] | select(.user.type != "Bot") | {user: .user.login, body: .body}] | last // empty',
+			]),
+		]);
 
 		const reviews = JSON.parse(reviewsJson || '[]') as Array<{ user: string; state: string }>;
 		const lastReview = reviews.length > 0 ? reviews[reviews.length - 1] : null;
@@ -263,12 +303,6 @@ function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor:
 		if (lastReview && lastReview.user.toLowerCase() === ghUser.toLowerCase()) {
 			return { shouldReview: false, reason: `last review is mine (${lastReview.state}) — waiting on author` };
 		}
-
-		// Fetch last human comment
-		const commentsJson = execFileSync('gh', [
-			'api', `repos/${owner}/${name}/issues/${prNumber}/comments`,
-			'--jq', '[.[] | select(.user.type != "Bot") | {user: .user.login, body: .body}] | last // empty',
-		], { timeout: GH_TIMEOUT_MS, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
 
 		if (commentsJson?.trim()) {
 			const lastComment = JSON.parse(commentsJson) as { user: string; body: string };
@@ -306,13 +340,13 @@ function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor:
 /**
  * Process a list of PRs for a repo: check review state, skip duplicates, create jobs.
  */
-function processPrs(
+async function processPrs(
 	prs: GitHubPr[],
 	repo: MonitoredRepo,
 	ghUser: string,
 	concurrency: number,
 	result: { created: number; skipped: number; errors: number }
-): void {
+): Promise<void> {
 	for (const pr of prs) {
 		if (countActiveJobs() >= concurrency) {
 			log.info('github-pr-poller', `concurrency limit reached — stopping PR processing`);
@@ -343,7 +377,7 @@ function processPrs(
 		if (backoffExpiry) prErrorBackoff.delete(prKey); // expired — clean up
 
 		// Check review state — skip if already handled
-		const { shouldReview, reason } = shouldReviewPr(repo.owner, repo.name, pr.number, prAuthor, ghUser);
+		const { shouldReview, reason } = await shouldReviewPr(repo.owner, repo.name, pr.number, prAuthor, ghUser);
 		if (!shouldReview) {
 			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — ${reason}`);
 			result.skipped++;
@@ -395,7 +429,7 @@ export async function scanRepos(manualRepoId?: string): Promise<{ created: numbe
 	const concurrency = getConcurrency();
 
 	// Resolve the GitHub user once for all repos
-	const ghUser = getGitHubUser();
+	const ghUser = await getGitHubUser();
 	if (!ghUser) {
 		log.warn('github-pr-poller', 'cannot determine GitHub user — skipping scan');
 		return result;
@@ -440,14 +474,14 @@ export async function scanRepos(manualRepoId?: string): Promise<{ created: numbe
 
 		let prs: GitHubPr[];
 		try {
-			prs = listOpenPrs(repo.owner, repo.name, assignee, ghUser);
+			prs = await listOpenPrs(repo.owner, repo.name, assignee, ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
 			continue;
 		}
 
-		processPrs(prs, repo, ghUser, concurrency, result);
+		await processPrs(prs, repo, ghUser, concurrency, result);
 	}
 
 	log.info('github-pr-poller', `scan complete: ${result.created} created, ${result.skipped} skipped, ${result.errors} errors`);
@@ -461,7 +495,7 @@ export async function scanAllRepos(): Promise<{ created: number; skipped: number
 	const result = { created: 0, skipped: 0, errors: 0 };
 	const concurrency = getConcurrency();
 
-	const ghUser = getGitHubUser();
+	const ghUser = await getGitHubUser();
 	if (!ghUser) {
 		log.warn('github-pr-poller', 'cannot determine GitHub user — skipping scan');
 		return result;
@@ -488,14 +522,14 @@ export async function scanAllRepos(): Promise<{ created: number; skipped: number
 		const assignee = repo.assigned_only ? ghUser : undefined;
 		let prs: GitHubPr[];
 		try {
-			prs = listOpenPrs(repo.owner, repo.name, assignee, ghUser);
+			prs = await listOpenPrs(repo.owner, repo.name, assignee, ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
 			continue;
 		}
 
-		processPrs(prs, repo, ghUser, concurrency, result);
+		await processPrs(prs, repo, ghUser, concurrency, result);
 	}
 
 	return result;
