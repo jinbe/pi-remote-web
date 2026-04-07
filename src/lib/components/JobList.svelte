@@ -100,11 +100,12 @@
 	async function markJobDone(jobId: string) {
 		hapticMedium();
 		try {
-			await fetch(`/api/jobs/${jobId}`, {
+			const res = await fetch(`/api/jobs/${jobId}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ status: 'done' }),
 			});
+			if (!res.ok) { console.error('Failed to mark job as done:', res.status, await res.text()); return; }
 			invalidateAll();
 		} catch (e) {
 			console.error('Failed to mark job as done:', e);
@@ -115,11 +116,12 @@
 		if (!confirm('Cancel this job? The session will be stopped.')) return;
 		hapticMedium();
 		try {
-			await fetch(`/api/jobs/${jobId}`, {
+			const res = await fetch(`/api/jobs/${jobId}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ status: 'cancelled' }),
 			});
+			if (!res.ok) { console.error('Failed to cancel job:', res.status, await res.text()); return; }
 			invalidateAll();
 		} catch (e) {
 			console.error('Failed to cancel job:', e);
@@ -130,11 +132,12 @@
 		if (!confirm('Force this job as done? The session will be stopped.')) return;
 		hapticMedium();
 		try {
-			await fetch(`/api/jobs/${jobId}`, {
+			const res = await fetch(`/api/jobs/${jobId}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ status: 'done' }),
 			});
+			if (!res.ok) { console.error('Failed to force job done:', res.status, await res.text()); return; }
 			invalidateAll();
 		} catch (e) {
 			console.error('Failed to force job done:', e);
@@ -145,7 +148,8 @@
 		if (!confirm('Delete this job?')) return;
 		hapticMedium();
 		try {
-			await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+			const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+			if (!res.ok) { console.error('Failed to delete job:', res.status, await res.text()); return; }
 			invalidateAll();
 		} catch (e) {
 			console.error('Failed to delete job:', e);
@@ -219,7 +223,13 @@
 					</span>
 
 					<!-- Actions -->
-					{#if job.status === 'running' || job.status === 'reviewing'}
+					{#if job.status === 'claimed'}
+						<button
+							class="btn btn-ghost btn-xs text-error/60"
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+							title="Cancel"
+						><Icon name="close" class="w-3.5 h-3.5" /></button>
+					{:else if job.status === 'running' || job.status === 'reviewing'}
 						<button
 							class="btn btn-ghost btn-xs text-success"
 							onclick={(e) => { e.stopPropagation(); job.status === 'running' ? forceJobDone(job.id) : markJobDone(job.id); }}

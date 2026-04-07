@@ -468,9 +468,16 @@ export async function resumeSession(
 		if (!relayPid) {
 			// Spawn a new relay
 			insertActiveStmt.run(sessionId, filePath, cwd, null, new Date().toISOString(), null, null, 'starting', socketPath);
-			const resumeArgs = harness === 'claude-code'
-				? ['--resume', filePath.match(/([0-9a-f-]{36})\.jsonl$/)?.[1] || filePath]
-				: ['--session', filePath];
+			let resumeArgs: string[];
+			if (harness === 'claude-code') {
+				const uuidMatch = filePath.match(/([0-9a-f-]{36})\.jsonl$/);
+				if (!uuidMatch) {
+					throw new Error(`Cannot extract session UUID from Claude Code file path: ${filePath}`);
+				}
+				resumeArgs = ['--resume', uuidMatch[1]];
+			} else {
+				resumeArgs = ['--session', filePath];
+			}
 			relayPid = await spawnRelay(socketPath, cwd, resumeArgs, harness);
 		}
 
@@ -764,7 +771,7 @@ export async function getCommands(sessionId: string): Promise<any> {
 	if (managed.harness === 'claude-code') {
 		if (!managed.cachedCommands) {
 			const { getSlashCommands } = await import('./slash-commands');
-			managed.cachedCommands = getSlashCommands().map(c => ({
+			managed.cachedCommands = getSlashCommands(managed.cwd).map(c => ({
 				name: c.name,
 				description: c.description,
 				source: c.source === 'built-in' || c.source === 'bundled-skill' ? 'extension' : 'skill',
@@ -790,6 +797,20 @@ export async function getCommands(sessionId: string): Promise<any> {
  */
 function prefetchCommands(managed: ManagedSession): void {
 	if (managed.cachedCommands || managed.isStreaming) return;
+
+	// Claude Code has no get_commands RPC — eagerly populate from slash-commands scanner
+	if (managed.harness === 'claude-code') {
+		import('./slash-commands').then(({ getSlashCommands }) => {
+			managed.cachedCommands = getSlashCommands(managed.cwd).map(c => ({
+				name: c.name,
+				description: c.description,
+				source: c.source === 'built-in' || c.source === 'bundled-skill' ? 'extension' : 'skill',
+			}));
+			log.info('commands', `cached ${managed.cachedCommands.length} slash commands for Claude session ${managed.sessionId}`);
+		}).catch(() => {});
+		return;
+	}
+
 	sendCommand(managed, { type: 'get_commands' }, COMMANDS_QUERY_TIMEOUT_MS)
 		.then((result: any) => {
 			const commands = Array.isArray(result) ? result : (result?.commands ?? []);

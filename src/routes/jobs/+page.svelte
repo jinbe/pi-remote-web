@@ -40,7 +40,7 @@
 		no_verdict_retries: number;
 		max_no_verdict_retries: number;
 		model: string | null;
-		harness: string | null;
+		harness: 'pi' | 'claude-code' | null;
 	}
 
 	let { data } = $props();
@@ -504,7 +504,7 @@
 
 				<!-- Action buttons -->
 				<div class="flex gap-2 pt-1">
-					{#if job.status === 'queued'}
+					{#if job.status === 'queued' || job.status === 'claimed'}
 						<button
 							class="btn btn-xs btn-error btn-outline"
 							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
