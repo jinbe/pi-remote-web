@@ -28,6 +28,8 @@ export type AgentMessage = JournalEntry;
 
 // --- Session Metadata ---
 
+export type HarnessType = 'pi' | 'claude-code';
+
 export interface SessionMeta {
 	id: string;
 	filePath: string;
@@ -37,6 +39,7 @@ export interface SessionMeta {
 	lastModified: Date;
 	messageCount: number;
 	model: string | null;
+	harness?: HarnessType;
 }
 
 export interface ParsedSessionMeta extends SessionMeta {

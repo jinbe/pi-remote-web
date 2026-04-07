@@ -40,40 +40,14 @@
 		no_verdict_retries: number;
 		max_no_verdict_retries: number;
 		model: string | null;
-	}
-
-	interface ExtensionStatus {
-		installed: boolean;
-		isSymlink: boolean;
-		repoVersion: string | null;
-		installedVersion: string | null;
-		upToDate: boolean;
-		repoPath: string;
-		installedPath: string;
+		harness: 'pi' | 'claude-code' | null;
 	}
 
 	let { data } = $props();
 
 	const { theme, toggleTheme } = getContext<{ theme: 'dark' | 'light'; toggleTheme: () => void }>('theme');
 
-	// Extension status
-	let extensionStatus = $state<ExtensionStatus>(data.extensionStatus as ExtensionStatus);
-	let installingExtension = $state(false);
 
-	async function installExtension() {
-		hapticMedium();
-		installingExtension = true;
-		try {
-			const res = await fetch('/api/jobs/extension-status', { method: 'POST' });
-			if (res.ok) {
-				extensionStatus = await res.json();
-			}
-		} catch (e) {
-			console.error('Failed to install extension:', e);
-		} finally {
-			installingExtension = false;
-		}
-	}
 
 	// Filter state
 	let statusFilter = $state<string>('active');
@@ -215,6 +189,7 @@
 	}
 
 	async function cancelJob(jobId: string) {
+		if (!confirm('Cancel this job? The session will be stopped.')) return;
 		hapticMedium();
 		try {
 			await fetch(`/api/jobs/${jobId}`, {
@@ -376,6 +351,11 @@
 				</span>
 			{/if}
 
+			<!-- Harness badge -->
+			{#if job.harness === 'claude-code'}
+				<span class="badge badge-xs badge-outline" title="Claude Code">◆</span>
+			{/if}
+
 			<!-- Review skill badge -->
 			{#if job.review_skill}
 				<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-0.5" title="Review skill: {job.review_skill}">
@@ -427,6 +407,10 @@
 							<span class="truncate">{shortenHome(job.repo)}</span>
 						</div>
 					{/if}
+					<div class="flex gap-2">
+						<span class="text-base-content/50 w-20 flex-shrink-0">Harness</span>
+						<span class="inline-flex items-center gap-1">{#if job.harness === 'claude-code'}◆ Claude Code{:else}π pi{/if}</span>
+					</div>
 					{#if job.model}
 						<div class="flex gap-2">
 							<span class="text-base-content/50 w-20 flex-shrink-0">Model</span>
@@ -520,17 +504,31 @@
 
 				<!-- Action buttons -->
 				<div class="flex gap-2 pt-1">
-					{#if job.status === 'queued'}
+					{#if job.status === 'queued' || job.status === 'claimed'}
 						<button
 							class="btn btn-xs btn-error btn-outline"
 							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
 						>Cancel</button>
+					{/if}
+					{#if job.status === 'running'}
+						<button
+							class="btn btn-xs btn-success btn-outline gap-1"
+							onclick={(e) => { e.stopPropagation(); if (confirm('Force this job as done? The session will be stopped.')) markJobDone(job.id); }}
+						><Icon name="check" class="w-3 h-3" /> Force Done</button>
+						<button
+							class="btn btn-xs btn-error btn-outline gap-1"
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+						><Icon name="close" class="w-3 h-3" /> Cancel</button>
 					{/if}
 					{#if job.status === 'reviewing'}
 						<button
 							class="btn btn-xs btn-success btn-outline gap-1"
 							onclick={(e) => { e.stopPropagation(); markJobDone(job.id); }}
 						><Icon name="check" class="w-3 h-3" /> Done</button>
+						<button
+							class="btn btn-xs btn-error btn-outline gap-1"
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+						><Icon name="close" class="w-3 h-3" /> Cancel</button>
 					{/if}
 					{#if job.status === 'failed'}
 						<button
@@ -538,7 +536,7 @@
 							onclick={(e) => { e.stopPropagation(); retryJob(job.id); }}
 						><Icon name="refresh" class="w-3 h-3" /> Retry</button>
 					{/if}
-					{#if ['queued', 'reviewing', 'done', 'failed', 'cancelled'].includes(job.status)}
+					{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
 						<button
 							class="btn btn-xs btn-error btn-outline"
 							onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
@@ -602,28 +600,6 @@
 							{#if theme === 'dark'}<Icon name="sun" class="w-4 h-4" /> Light Mode{:else}<Icon name="moon" class="w-4 h-4" /> Dark Mode{/if}
 						</button>
 					</li>
-					<div class="divider my-0"></div>
-					<!-- Extension status -->
-					{#if !extensionStatus.installed || !extensionStatus.upToDate}
-						<li>
-							<button onclick={installExtension} disabled={installingExtension}>
-								{#if installingExtension}
-									<span class="loading loading-spinner loading-xs"></span>
-								{:else if extensionStatus.installed}
-									<Icon name="refresh" class="w-4 h-4" />
-								{:else}
-									<Icon name="bolt" class="w-4 h-4" />
-								{/if}
-								{extensionStatus.installed ? 'Update Hook' : 'Install Hook'}
-							</button>
-						</li>
-					{:else}
-						<li class="disabled">
-							<span class="text-success/60">
-								<Icon name="check" class="w-4 h-4" /> Hook v{extensionStatus.repoVersion}
-							</span>
-						</li>
-					{/if}
 					{#if doneCount > 0}
 						<div class="divider my-0"></div>
 						<li>
@@ -709,7 +685,7 @@
 	{:else}
 		<div class="flex flex-col gap-2">
 			{#each filteredJobs as job (job.id)}
-				{@const isDeletable = ['queued', 'reviewing', 'done', 'failed', 'cancelled'].includes(job.status)}
+				{@const isDeletable = ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
 				{#if isDeletable}
 					<SwipeToDelete ondelete={() => deleteJobDirect(job.id)}>
 						{@render jobCard(job)}
@@ -724,11 +700,13 @@
 
 <AddJobModal
 	open={showAddJob}
+	defaultHarness={data.defaultHarness}
 	onclose={() => (showAddJob = false)}
 />
 
 <AddReviewJobModal
 	open={showAddReviewJob}
+	defaultHarness={data.defaultHarness}
 	onclose={() => (showAddReviewJob = false)}
 />
 

@@ -100,14 +100,47 @@
 	async function markJobDone(jobId: string) {
 		hapticMedium();
 		try {
-			await fetch(`/api/jobs/${jobId}`, {
+			const res = await fetch(`/api/jobs/${jobId}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ status: 'done' }),
 			});
+			if (!res.ok) { console.error('Failed to mark job as done:', res.status, await res.text()); return; }
 			invalidateAll();
 		} catch (e) {
 			console.error('Failed to mark job as done:', e);
+		}
+	}
+
+	async function cancelJob(jobId: string) {
+		if (!confirm('Cancel this job? The session will be stopped.')) return;
+		hapticMedium();
+		try {
+			const res = await fetch(`/api/jobs/${jobId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ status: 'cancelled' }),
+			});
+			if (!res.ok) { console.error('Failed to cancel job:', res.status, await res.text()); return; }
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to cancel job:', e);
+		}
+	}
+
+	async function forceJobDone(jobId: string) {
+		if (!confirm('Force this job as done? The session will be stopped.')) return;
+		hapticMedium();
+		try {
+			const res = await fetch(`/api/jobs/${jobId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ status: 'done' }),
+			});
+			if (!res.ok) { console.error('Failed to force job done:', res.status, await res.text()); return; }
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to force job done:', e);
 		}
 	}
 
@@ -115,7 +148,8 @@
 		if (!confirm('Delete this job?')) return;
 		hapticMedium();
 		try {
-			await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+			const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+			if (!res.ok) { console.error('Failed to delete job:', res.status, await res.text()); return; }
 			invalidateAll();
 		} catch (e) {
 			console.error('Failed to delete job:', e);
@@ -189,12 +223,23 @@
 					</span>
 
 					<!-- Actions -->
-					{#if job.status === 'reviewing'}
+					{#if job.status === 'claimed'}
+						<button
+							class="btn btn-ghost btn-xs text-error/60"
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+							title="Cancel"
+						><Icon name="close" class="w-3.5 h-3.5" /></button>
+					{:else if job.status === 'running' || job.status === 'reviewing'}
 						<button
 							class="btn btn-ghost btn-xs text-success"
-							onclick={(e) => { e.stopPropagation(); markJobDone(job.id); }}
-							title="Mark as done"
+							onclick={(e) => { e.stopPropagation(); job.status === 'running' ? forceJobDone(job.id) : markJobDone(job.id); }}
+							title={job.status === 'running' ? 'Force done' : 'Mark as done'}
 						><Icon name="check" class="w-3.5 h-3.5" /></button>
+						<button
+							class="btn btn-ghost btn-xs text-error/60"
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+							title="Cancel"
+						><Icon name="close" class="w-3.5 h-3.5" /></button>
 					{/if}
 					{#if job.status === 'failed'}
 						<button
@@ -203,7 +248,7 @@
 							title="Retry"
 						><Icon name="refresh" class="w-3.5 h-3.5" /></button>
 					{/if}
-					{#if ['queued', 'reviewing', 'done', 'failed', 'cancelled'].includes(job.status)}
+					{#if ['queued', 'done', 'failed', 'cancelled'].includes(job.status)}
 						<button
 							class="btn btn-ghost btn-xs text-error/60"
 							onclick={(e) => { e.stopPropagation(); deleteJob(job.id); }}
@@ -226,16 +271,32 @@
 					</div>
 				{/if}
 
-				<!-- Go to session link (only for running/reviewing jobs with a session) -->
-				{#if expandedJob === job.id && job.session_id && ['running', 'reviewing', 'claimed'].includes(job.status)}
-					<div class="px-3 pb-2">
-						<a
-							href="/session/{job.session_id}"
-							class="btn btn-xs btn-outline btn-primary gap-1"
+				<!-- Go to session link + action buttons for active jobs -->
+				{#if expandedJob === job.id && ['running', 'reviewing'].includes(job.status)}
+					<div class="px-3 pb-2 flex flex-wrap gap-2">
+						{#if job.session_id}
+							<a
+								href="/session/{job.session_id}"
+								class="btn btn-xs btn-outline btn-primary gap-1"
+							>
+								<Icon name="chevron-right" class="w-3 h-3" />
+								View Session
+							</a>
+						{/if}
+						<button
+							class="btn btn-xs btn-outline btn-success gap-1"
+							onclick={(e) => { e.stopPropagation(); job.status === 'running' ? forceJobDone(job.id) : markJobDone(job.id); }}
 						>
-							<Icon name="chevron-right" class="w-3 h-3" />
-							Go to session
-						</a>
+							<Icon name="check" class="w-3 h-3" />
+							{job.status === 'running' ? 'Force Done' : 'Done'}
+						</button>
+						<button
+							class="btn btn-xs btn-outline btn-error gap-1"
+							onclick={(e) => { e.stopPropagation(); cancelJob(job.id); }}
+						>
+							<Icon name="close" class="w-3 h-3" />
+							Cancel
+						</button>
 					</div>
 				{/if}
 

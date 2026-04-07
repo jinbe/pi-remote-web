@@ -39,6 +39,7 @@ export interface Job {
 	callback_token: string;
 	review_skill: string | null;
 	model: string | null;
+	harness: string | null;
 }
 
 export interface CreateJobInput {
@@ -56,6 +57,7 @@ export interface CreateJobInput {
 	pr_url?: string;
 	review_skill?: string;
 	model?: string;
+	harness?: string;
 }
 
 export interface UpdateJobInput {
@@ -79,8 +81,8 @@ export interface UpdateJobInput {
 
 function insertJobQuery() {
 	return getDb().query(`
-		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, review_skill, model)
-		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $review_skill, $model)
+		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, review_skill, model, harness)
+		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $review_skill, $model, $harness)
 		RETURNING *
 	`);
 }
@@ -128,6 +130,7 @@ export function createJob(input: CreateJobInput): Job {
 		$pr_url: input.pr_url ?? null,
 		$review_skill: input.review_skill ?? null,
 		$model: input.model ?? null,
+		$harness: input.harness ?? 'pi',
 	}) as Job;
 
 	log.info('job-queue', `created job ${row.id} (${row.type ?? 'task'}): ${row.title}`);
@@ -270,6 +273,16 @@ export function deleteJob(id: string): Job | null {
 const ACTIVE_STATUSES = ['queued', 'claimed', 'running', 'reviewing'];
 
 /**
+ * Find a running/reviewing job by its session ID.
+ * Used to connect agent_end events to jobs for harnesses without callback hooks.
+ */
+export function findJobBySessionId(sessionId: string): Job | null {
+	return getDb().query(
+		`SELECT * FROM jobs WHERE session_id = ? AND status IN ('running', 'reviewing') LIMIT 1`
+	).get(sessionId) as Job | null;
+}
+
+/**
  * Find an active job that matches the given PR URL.
  * Used to prevent duplicate review jobs for the same pull request.
  */
@@ -278,6 +291,18 @@ export function findActiveJobByPrUrl(prUrl: string): Job | null {
 	return getDb().query(
 		`SELECT * FROM jobs WHERE pr_url = ? AND status IN (${placeholders}) LIMIT 1`
 	).get(prUrl, ...ACTIVE_STATUSES) as Job | null;
+}
+
+/**
+ * Find any job for this PR URL that was completed recently (within the given hours).
+ * Used to prevent re-polling the same PR immediately after a review finishes.
+ */
+export function findRecentJobByPrUrl(prUrl: string, withinHours: number = 4): Job | null {
+	return getDb().query(
+		`SELECT * FROM jobs WHERE pr_url = ? AND status IN ('done', 'cancelled')
+		 AND completed_at > datetime('now', '-' || ? || ' hours')
+		 ORDER BY completed_at DESC LIMIT 1`
+	).get(prUrl, withinHours) as Job | null;
 }
 
 /**

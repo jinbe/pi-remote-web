@@ -6,10 +6,12 @@
 	let {
 		open = false,
 		defaultRepo = '',
+		defaultHarness = 'pi' as 'pi' | 'claude-code',
 		onclose,
 	}: {
 		open: boolean;
 		defaultRepo?: string;
+		defaultHarness?: 'pi' | 'claude-code';
 		onclose: () => void;
 	} = $props();
 
@@ -21,6 +23,7 @@
 	let targetBranch = $state('main');
 	let maxLoops = $state(5);
 	let model = $state('');
+	let harness = $state<'pi' | 'claude-code'>('pi');
 	let skipReview = $state(true);
 	let creating = $state(false);
 	let errorMsg = $state('');
@@ -29,6 +32,7 @@
 	$effect(() => {
 		if (open) {
 			repo = defaultRepo;
+			harness = defaultHarness;
 			title = '';
 			description = '';
 			branch = '';
@@ -60,6 +64,7 @@
 					target_branch: targetBranch.trim() || undefined,
 					max_loops: skipReview ? 0 : maxLoops,
 					model: model.trim() || undefined,
+					harness,
 				}),
 			});
 
@@ -81,7 +86,7 @@
 
 {#if open}
 	<dialog class="modal" {open}>
-		<div class="modal-box max-w-lg">
+		<div class="modal-box max-w-lg max-h-[85vh] overflow-y-auto">
 			<h3 class="font-bold text-lg">New Job</h3>
 
 			<!-- Issue URL -->
@@ -139,6 +144,27 @@
 					placeholder="/path/to/repo"
 					bind:value={repo}
 				/>
+			</div>
+
+			<!-- Harness selector -->
+			<div class="form-control mt-3">
+				<label class="label">
+					<span class="label-text">Harness</span>
+				</label>
+				<div class="flex gap-2">
+					<button
+						class="btn btn-sm flex-1 {harness === 'pi' ? 'btn-primary' : 'btn-ghost'}"
+						onclick={() => { hapticLight(); harness = 'pi'; }}
+					>
+						π pi
+					</button>
+					<button
+						class="btn btn-sm flex-1 {harness === 'claude-code' ? 'btn-primary' : 'btn-ghost'}"
+						onclick={() => { hapticLight(); harness = 'claude-code'; }}
+					>
+						◆ Claude Code
+					</button>
+				</div>
 			</div>
 
 			<!-- Branch (only for review loop mode — auto-created for fire-and-forget) -->

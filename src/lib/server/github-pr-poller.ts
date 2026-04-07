@@ -15,6 +15,7 @@ import { execFileSync } from 'child_process';
 import { getDb } from './cache';
 import { createJob, findActiveJobByPrUrl } from './job-queue';
 import { REVIEW_SKILL } from './job-prompts';
+import { getHarness } from './rpc-manager';
 import { log } from './logger';
 
 // --- Constants ---
@@ -22,6 +23,10 @@ import { log } from './logger';
 const DEFAULT_POLL_INTERVAL_SECONDS = 600;
 const DEFAULT_CONCURRENCY = 5;
 const GH_TIMEOUT_MS = 15_000;
+
+/** Per-PR error backoff: skip PRs that have failed review-state checks recently. */
+const prErrorBackoff = new Map<string, number>(); // prKey → timestamp when backoff expires
+const PR_ERROR_BACKOFF_MS = 30 * 60 * 1000; // 30 minutes
 
 /** Statuses that count towards the concurrency limit. */
 const ACTIVE_JOB_STATUSES = ['queued', 'claimed', 'running', 'reviewing'];
@@ -62,6 +67,7 @@ interface GitHubPr {
 	headRefName: string;
 	baseRefName: string;
 	url: string;
+	author?: { login: string };
 }
 
 // --- Configuration ---
@@ -169,13 +175,13 @@ export function getGitHubUser(): string | null {
 /**
  * List open PRs for a given repo. Optionally filter by assignee.
  */
-export function listOpenPrs(owner: string, name: string, assignee?: string): GitHubPr[] {
+export function listOpenPrs(owner: string, name: string, assignee?: string, excludeAuthor?: string): GitHubPr[] {
 	try {
 		const args = [
 			'pr', 'list',
 			'--repo', `${owner}/${name}`,
 			'--state', 'open',
-			'--json', 'number,title,headRefName,baseRefName,url',
+			'--json', 'number,title,headRefName,baseRefName,url,isDraft,author',
 			'--limit', '30',
 		];
 
@@ -189,10 +195,181 @@ export function listOpenPrs(owner: string, name: string, assignee?: string): Git
 			encoding: 'utf-8',
 		});
 
-		return JSON.parse(output) as GitHubPr[];
+		let prs = JSON.parse(output) as any[];
+
+		// Filter out draft PRs
+		prs = prs.filter((pr: any) => !pr.isDraft);
+
+		// Filter out PRs authored by the current user (don't review your own)
+		if (excludeAuthor) {
+			prs = prs.filter((pr: any) => {
+				const login = pr.author?.login || pr.author?.Login || '';
+				return login.toLowerCase() !== excludeAuthor.toLowerCase();
+			});
+		}
+
+		// Filter out bot authors (check is_bot flag + login patterns)
+		prs = prs.filter((pr: any) => {
+			if (pr.author?.is_bot) return false;
+			const login = (pr.author?.login || pr.author?.Login || '').toLowerCase();
+			return !BOT_LOGIN_PATTERNS.some(pat => login.includes(pat.toLowerCase()));
+		});
+
+		return prs as GitHubPr[];
 	} catch (err) {
 		log.warn('github-pr-poller', `failed to list PRs for ${owner}/${name}: ${err}`);
 		return [];
+	}
+}
+
+// --- Bot author patterns to exclude ---
+// gh pr list returns login as 'app/snyk-io' for GitHub Apps, not 'snyk-io[bot]'
+const BOT_LOGIN_PATTERNS = ['dependabot', 'snyk-io', 'renovate', 'github-actions'];
+
+// --- Dismiss keywords: if the last non-author comment contains one, skip ---
+const DISMISS_KEYWORDS = [
+	'approve', 'lgtm', 'ship it', 'shipit', 'looks good',
+	'needs work', 'needs changes', 'changes requested',
+	'wip', 'work in progress', 'not ready',
+	'hold off', "don't merge", 'do not merge', '+1',
+];
+
+/**
+ * Check whether a PR needs review by inspecting its review state and comments.
+ * Returns { shouldReview: boolean, reason: string }.
+ */
+function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor: string, ghUser: string): { shouldReview: boolean; reason: string } {
+	// Belt-and-suspenders: never review your own PRs
+	if (prAuthor && prAuthor.toLowerCase() === ghUser.toLowerCase()) {
+		return { shouldReview: false, reason: `self-authored by ${prAuthor}` };
+	}
+
+	try {
+		// Fetch reviews
+		const reviewsJson = execFileSync('gh', [
+			'api', `repos/${owner}/${name}/pulls/${prNumber}/reviews`,
+			'--jq', '[.[] | select(.state != "DISMISSED" and .state != "PENDING") | {user: .user.login, state: .state}]',
+		], { timeout: GH_TIMEOUT_MS, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+
+		const reviews = JSON.parse(reviewsJson || '[]') as Array<{ user: string; state: string }>;
+		const lastReview = reviews.length > 0 ? reviews[reviews.length - 1] : null;
+
+		// Already approved — skip
+		if (lastReview?.state === 'APPROVED') {
+			return { shouldReview: false, reason: `already approved by ${lastReview.user}` };
+		}
+
+		// My review is the latest — waiting on author
+		if (lastReview && lastReview.user.toLowerCase() === ghUser.toLowerCase()) {
+			return { shouldReview: false, reason: `last review is mine (${lastReview.state}) — waiting on author` };
+		}
+
+		// Fetch last human comment
+		const commentsJson = execFileSync('gh', [
+			'api', `repos/${owner}/${name}/issues/${prNumber}/comments`,
+			'--jq', '[.[] | select(.user.type != "Bot") | {user: .user.login, body: .body}] | last // empty',
+		], { timeout: GH_TIMEOUT_MS, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+
+		if (commentsJson?.trim()) {
+			const lastComment = JSON.parse(commentsJson) as { user: string; body: string };
+
+			// Last commenter is NOT the PR author — check dismiss keywords
+			if (lastComment.user.toLowerCase() !== prAuthor.toLowerCase()) {
+				const lowerBody = (lastComment.body || '').toLowerCase();
+				const matched = DISMISS_KEYWORDS.find(kw => lowerBody.includes(kw));
+				if (matched) {
+					return { shouldReview: false, reason: `last comment by ${lastComment.user} contains "${matched}"` };
+				}
+				// Non-author commented without dismiss keyword — still skip (they're handling it)
+				return { shouldReview: false, reason: `last comment by ${lastComment.user} (not PR author)` };
+			}
+
+			// Author commented — re-review needed
+			return { shouldReview: true, reason: 'author commented — re-review needed' };
+		}
+
+		// No comments — check if there are any reviews
+		if (!lastReview) {
+			return { shouldReview: true, reason: 'new PR — needs review' };
+		}
+
+		return { shouldReview: true, reason: `activity from ${lastReview.user} (${lastReview.state})` };
+	} catch (err) {
+		log.error('github-pr-poller', `failed to check review state for ${owner}/${name}#${prNumber}: ${err}`);
+		// Fail closed — skip this PR and apply a per-PR backoff to avoid endless re-enqueueing
+		const prKey = `${owner}/${name}#${prNumber}`;
+		prErrorBackoff.set(prKey, Date.now() + PR_ERROR_BACKOFF_MS);
+		return { shouldReview: false, reason: 'review state check failed — skipping with backoff' };
+	}
+}
+
+/**
+ * Process a list of PRs for a repo: check review state, skip duplicates, create jobs.
+ */
+function processPrs(
+	prs: GitHubPr[],
+	repo: MonitoredRepo,
+	ghUser: string,
+	concurrency: number,
+	result: { created: number; skipped: number; errors: number }
+): void {
+	for (const pr of prs) {
+		if (countActiveJobs() >= concurrency) {
+			log.info('github-pr-poller', `concurrency limit reached — stopping PR processing`);
+			break;
+		}
+
+		const prUrl = pr.url;
+		const prAuthor = pr.author?.login || '';
+
+		// Skip if there's already an active job for this PR
+		const existing = findActiveJobByPrUrl(prUrl);
+		if (existing) {
+			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — active job exists (${existing.status})`);
+			result.skipped++;
+			continue;
+		}
+
+
+
+		// Check per-PR error backoff — skip if a recent review-state check failed
+		const prKey = `${repo.owner}/${repo.name}#${pr.number}`;
+		const backoffExpiry = prErrorBackoff.get(prKey);
+		if (backoffExpiry && Date.now() < backoffExpiry) {
+			log.info('github-pr-poller', `skipping ${prKey} — in error backoff until ${new Date(backoffExpiry).toISOString()}`);
+			result.skipped++;
+			continue;
+		}
+		if (backoffExpiry) prErrorBackoff.delete(prKey); // expired — clean up
+
+		// Check review state — skip if already handled
+		const { shouldReview, reason } = shouldReviewPr(repo.owner, repo.name, pr.number, prAuthor, ghUser);
+		if (!shouldReview) {
+			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — ${reason}`);
+			result.skipped++;
+			continue;
+		}
+
+		log.info('github-pr-poller', `${repo.owner}/${repo.name}#${pr.number}: ${reason}`);
+
+		// Create a review job
+		try {
+			const job = createJob({
+				type: 'review',
+				title: pr.title || `PR #${pr.number}`,
+				repo: repo.local_path ?? undefined,
+				branch: pr.headRefName,
+				target_branch: pr.baseRefName,
+				pr_url: prUrl,
+				review_skill: REVIEW_SKILL || undefined,
+				harness: getHarness(),
+			});
+			log.info('github-pr-poller', `created review job ${job.id} for ${repo.owner}/${repo.name}#${pr.number}`);
+			result.created++;
+		} catch (err) {
+			log.error('github-pr-poller', `failed to create job for ${repo.owner}/${repo.name}#${pr.number}: ${err}`);
+			result.errors++;
+		}
 	}
 }
 
@@ -263,49 +440,14 @@ export async function scanRepos(manualRepoId?: string): Promise<{ created: numbe
 
 		let prs: GitHubPr[];
 		try {
-			prs = listOpenPrs(repo.owner, repo.name, assignee);
+			prs = listOpenPrs(repo.owner, repo.name, assignee, ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
 			continue;
 		}
 
-		for (const pr of prs) {
-			// Re-check concurrency for each PR
-			if (countActiveJobs() >= concurrency) {
-				log.info('github-pr-poller', `concurrency limit reached — stopping PR processing`);
-				break;
-			}
-
-			const prUrl = pr.url;
-
-			// Skip if there's already an active job for this PR
-			const existing = findActiveJobByPrUrl(prUrl);
-			if (existing) {
-				log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — active job exists (${existing.status})`);
-				result.skipped++;
-				continue;
-			}
-
-			// Create a review job
-			try {
-				const job = createJob({
-					type: 'review',
-					title: pr.title || `PR #${pr.number}`,
-					repo: repo.local_path ?? undefined,
-					branch: pr.headRefName,
-					target_branch: pr.baseRefName,
-					pr_url: prUrl,
-					review_skill: REVIEW_SKILL || undefined,
-				});
-
-				log.info('github-pr-poller', `created review job ${job.id} for ${repo.owner}/${repo.name}#${pr.number}`);
-				result.created++;
-			} catch (err) {
-				log.error('github-pr-poller', `failed to create job for ${repo.owner}/${repo.name}#${pr.number}: ${err}`);
-				result.errors++;
-			}
-		}
+		processPrs(prs, repo, ghUser, concurrency, result);
 	}
 
 	log.info('github-pr-poller', `scan complete: ${result.created} created, ${result.skipped} skipped, ${result.errors} errors`);
@@ -346,41 +488,14 @@ export async function scanAllRepos(): Promise<{ created: number; skipped: number
 		const assignee = repo.assigned_only ? ghUser : undefined;
 		let prs: GitHubPr[];
 		try {
-			prs = listOpenPrs(repo.owner, repo.name, assignee);
+			prs = listOpenPrs(repo.owner, repo.name, assignee, ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
 			continue;
 		}
 
-		for (const pr of prs) {
-			if (countActiveJobs() >= concurrency) {
-				log.info('github-pr-poller', `concurrency limit reached — stopping PR processing`);
-				break;
-			}
-
-			const prUrl = pr.url;
-			const existing = findActiveJobByPrUrl(prUrl);
-			if (existing) {
-				result.skipped++;
-				continue;
-			}
-
-			try {
-				createJob({
-					type: 'review',
-					title: pr.title || `PR #${pr.number}`,
-					repo: repo.local_path ?? undefined,
-					branch: pr.headRefName,
-					target_branch: pr.baseRefName,
-					pr_url: prUrl,
-					review_skill: REVIEW_SKILL || undefined,
-				});
-				result.created++;
-			} catch (err) {
-				result.errors++;
-			}
-		}
+		processPrs(prs, repo, ghUser, concurrency, result);
 	}
 
 	return result;

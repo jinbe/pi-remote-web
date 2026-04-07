@@ -1,15 +1,17 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { hapticMedium } from '$lib/haptics';
+	import { hapticLight, hapticMedium } from '$lib/haptics';
 	import PathInput from '$lib/components/PathInput.svelte';
 
 	let {
 		open = false,
 		defaultRepo = '',
+		defaultHarness = 'pi' as 'pi' | 'claude-code',
 		onclose,
 	}: {
 		open: boolean;
 		defaultRepo?: string;
+		defaultHarness?: 'pi' | 'claude-code';
 		onclose: () => void;
 	} = $props();
 
@@ -19,6 +21,7 @@
 	let targetBranch = $state('');
 	let reviewSkill = $state('');
 	let model = $state('');
+	let harness = $state<'pi' | 'claude-code'>('pi');
 	let maxLoops = $state(1);
 	let creating = $state(false);
 	let errorMsg = $state('');
@@ -27,6 +30,7 @@
 	$effect(() => {
 		if (open) {
 			repo = defaultRepo;
+			harness = defaultHarness;
 			prUrl = '';
 			branch = '';
 			targetBranch = '';
@@ -56,6 +60,7 @@
 					max_loops: maxLoops,
 					review_skill: reviewSkill.trim() || undefined,
 					model: model.trim() || undefined,
+					harness,
 				}),
 			});
 
@@ -77,7 +82,7 @@
 
 {#if open}
 	<dialog class="modal" {open}>
-		<div class="modal-box max-w-lg">
+		<div class="modal-box max-w-lg max-h-[85vh] overflow-y-auto">
 			<h3 class="font-bold text-lg">New Review Job</h3>
 
 			<!-- PR URL (primary field) -->
@@ -108,6 +113,27 @@
 					placeholder="/path/to/repo"
 					bind:value={repo}
 				/>
+			</div>
+
+			<!-- Harness selector -->
+			<div class="form-control mt-3">
+				<label class="label">
+					<span class="label-text">Harness</span>
+				</label>
+				<div class="flex gap-2">
+					<button
+						class="btn btn-sm flex-1 {harness === 'pi' ? 'btn-primary' : 'btn-ghost'}"
+						onclick={() => { hapticLight(); harness = 'pi'; }}
+					>
+						π pi
+					</button>
+					<button
+						class="btn btn-sm flex-1 {harness === 'claude-code' ? 'btn-primary' : 'btn-ghost'}"
+						onclick={() => { hapticLight(); harness = 'claude-code'; }}
+					>
+						◆ Claude Code
+					</button>
+				</div>
 			</div>
 
 			<!-- Branch -->

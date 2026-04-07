@@ -22,7 +22,7 @@ export const GET: RequestHandler = async ({ url }) => {
 export const POST: RequestHandler = async ({ request }) => {
 	try {
 		const body = await request.json();
-		const { type, title, description, repo, branch, issue_url, target_branch, priority, max_loops, pr_url, review_skill, model } = body;
+		const { type, title, description, repo, branch, issue_url, target_branch, priority, max_loops, pr_url, review_skill, model, harness } = body;
 
 		// Type is now optional (defaults to 'task' in createJob)
 		if (type && !['task', 'review'].includes(type)) {
@@ -96,6 +96,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			pr_url: trimmedPrUrl,
 			review_skill: review_skill?.trim() || undefined,
 			model: model?.trim() || undefined,
+			harness: harness || undefined,
 		});
 
 		return json({ job }, { status: 201 });

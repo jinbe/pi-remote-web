@@ -6,7 +6,7 @@
  */
 import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
 import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt, buildNudgeVerdictPrompt } from './job-prompts';
-import { createSession, sendMessage, stopSession, isActive } from './rpc-manager';
+import { createSession, sendMessage, stopSession, isActive, getHarness, type HarnessType } from './rpc-manager';
 import { log } from './logger';
 import { getDb } from './cache';
 import { existsSync } from 'fs';
@@ -171,14 +171,15 @@ async function dispatchJob(job: Job): Promise<void> {
 
 		updateJobStatus(job.id, { status: 'running' });
 
-		// Create a Pi session (with optional model override)
-		const sessionId = await createSession(sessionCwd, job.model ?? undefined);
+		// Create a session using the job's harness preference (falls back to global default)
+		const jobHarness = (job.harness as HarnessType) || getHarness();
+		const sessionId = await createSession(sessionCwd, job.model ?? undefined, jobHarness);
 
 		// Update job with session ID
 		updateJobStatus(job.id, { session_id: sessionId });
 
 		// Send the appropriate prompt
-		const prompt = isReview ? buildReviewPrompt(job) : buildTaskPrompt(job);
+		const prompt = isReview ? buildReviewPrompt(job, jobHarness) : buildTaskPrompt(job, jobHarness);
 		await sendMessage(sessionId, prompt);
 
 		log.info('job-poller', `dispatched ${isReview ? 'review' : 'task'} job ${job.id} → session ${sessionId}`);
@@ -304,7 +305,8 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 			// to continue the automated review cycle in the same session.
 			if (job.max_loops > 0 && job.session_id) {
 				try {
-					const reviewPrompt = buildReviewPrompt(job);
+					const harness = (job.harness as HarnessType) || getHarness();
+					const reviewPrompt = buildReviewPrompt(job, harness);
 					await sendMessage(job.session_id, reviewPrompt);
 				} catch (err) {
 					log.warn('job-poller', `failed to send review prompt for job ${jobId}: ${err}`);

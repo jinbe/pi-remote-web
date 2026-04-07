@@ -15,6 +15,7 @@ interface ManagedSession {
 	sessionId: string;
 	sessionPath: string;
 	cwd: string;
+	harness: HarnessType;
 	relayPid: number;
 	socketPath: string;
 	socket: Socket<undefined> | null;
@@ -58,8 +59,34 @@ const PROMPT_TIMEOUT_MS = 10_000;
 // so they need a longer timeout.
 const STEER_TIMEOUT_MS = 60_000;
 
-const RELAY_SCRIPT = join(__dirname, 'pi-relay.ts');
+const PI_RELAY_SCRIPT = join(__dirname, 'pi-relay.ts');
+const CLAUDE_RELAY_SCRIPT = join(__dirname, 'claude-relay.ts');
 const SOCKET_DIR = join(tmpdir(), 'pi-remote-web');
+
+// --- Harness selection ---
+
+export type HarnessType = 'pi' | 'claude-code';
+
+/**
+ * Determine which coding harness to use.
+ * Set PI_HARNESS=claude-code in .env to use Claude Code instead of pi.
+ */
+export function getHarness(): HarnessType {
+	const envVal = process.env.PI_HARNESS?.toLowerCase();
+	if (envVal === 'claude-code' || envVal === 'claude') return 'claude-code';
+	return 'pi';
+}
+
+/** Detect harness from session file path — Claude Code sessions live under ~/.claude/ */
+function detectHarnessFromPath(filePath: string): HarnessType {
+	const claudeDir = join(homedir(), '.claude');
+	return filePath.startsWith(claudeDir) ? 'claude-code' : 'pi';
+}
+
+function getRelayScript(harness: HarnessType): string {
+	log.info('harness', `using harness: ${harness}`);
+	return harness === 'claude-code' ? CLAUDE_RELAY_SCRIPT : PI_RELAY_SCRIPT;
+}
 
 // --- State (stored on globalThis to survive Vite HMR module re-evaluation) ---
 
@@ -265,6 +292,10 @@ function processData(managed: ManagedSession, raw: Buffer | Uint8Array) {
 				managed.streamingAssistantText = '';
 				managed.streamingThinkingText = '';
 				insertSessionEvent(managed.sessionId, 'agent_end');
+
+				// Trigger job completion for any harness — pi uses a callback
+				// extension but Claude Code doesn't, so we detect it here.
+				triggerJobCompletion(managed.sessionId, parsed._lastAssistantText);
 			}
 			if (parsed.type === 'session_ended') {
 				handleSessionEnded(managed);
@@ -334,14 +365,16 @@ function handleSessionEnded(managed: ManagedSession) {
 async function spawnRelay(
 	socketPath: string,
 	cwd: string,
-	piArgs: string[]
+	piArgs: string[],
+	harness: HarnessType = 'pi'
 ): Promise<number> {
-	log.info('relay', `spawning: ${RELAY_SCRIPT} ${socketPath} ${cwd} ${piArgs.join(' ')}`);
+	const relayScript = getRelayScript(harness);
+	log.info('relay', `spawning: ${relayScript} ${socketPath} ${cwd} ${piArgs.join(' ')}`);
 
 	// Spawn relay as a detached process that survives our exit.
 	// Use stdin/stdout/stderr: 'ignore' so no pipe ties us to the child.
 	// The relay writes a PID file and creates the socket — we poll for those.
-	const proc = Bun.spawn(['bun', 'run', RELAY_SCRIPT, socketPath, cwd, ...piArgs], {
+	const proc = Bun.spawn(['bun', 'run', relayScript, socketPath, cwd, ...piArgs], {
 		cwd,
 		stdin: 'ignore',
 		stdout: 'ignore',
@@ -418,7 +451,8 @@ async function connectToRelay(managed: ManagedSession): Promise<void> {
 export async function resumeSession(
 	sessionId: string,
 	filePath: string,
-	cwd: string
+	cwd: string,
+	harness: HarnessType = 'pi'
 ): Promise<void> {
 	if (activeSessions.has(sessionId) || resumingSessionIds.has(sessionId)) {
 		return;
@@ -434,13 +468,24 @@ export async function resumeSession(
 		if (!relayPid) {
 			// Spawn a new relay
 			insertActiveStmt.run(sessionId, filePath, cwd, null, new Date().toISOString(), null, null, 'starting', socketPath);
-			relayPid = await spawnRelay(socketPath, cwd, ['--session', filePath]);
+			let resumeArgs: string[];
+			if (harness === 'claude-code') {
+				const uuidMatch = filePath.match(/([0-9a-f-]{36})\.jsonl$/);
+				if (!uuidMatch) {
+					throw new Error(`Cannot extract session UUID from Claude Code file path: ${filePath}`);
+				}
+				resumeArgs = ['--resume', uuidMatch[1]];
+			} else {
+				resumeArgs = ['--session', filePath];
+			}
+			relayPid = await spawnRelay(socketPath, cwd, resumeArgs, harness);
 		}
 
 		const managed: ManagedSession = {
 			sessionId,
 			sessionPath: filePath,
 			cwd,
+			harness,
 			relayPid,
 			socketPath,
 			socket: null,
@@ -485,19 +530,21 @@ export async function resumeSession(
 	}
 }
 
-export async function createSession(cwd: string, model?: string): Promise<string> {
+export async function createSession(cwd: string, model?: string, harness?: HarnessType): Promise<string> {
+	const effectiveHarness = harness || getHarness();
 	const tempId = crypto.randomUUID();
 	const socketPath = socketPathFor(tempId);
 
 	const piArgs: string[] = [];
 	if (model) piArgs.push('--model', model);
 
-	const relayPid = await spawnRelay(socketPath, cwd, piArgs);
+	const relayPid = await spawnRelay(socketPath, cwd, piArgs, effectiveHarness);
 
 	const managed: ManagedSession = {
 		sessionId: '',
 		sessionPath: '',
 		cwd,
+		harness: effectiveHarness,
 		relayPid,
 		socketPath,
 		socket: null,
@@ -615,6 +662,12 @@ export async function getState(sessionId: string): Promise<any> {
 	return sendCommand(managed, { type: 'get_state' });
 }
 
+export async function getMessages(sessionId: string): Promise<any> {
+	const managed = activeSessions.get(sessionId);
+	if (!managed) throw new Error('Session not active');
+	return sendCommand(managed, { type: 'get_messages' });
+}
+
 export async function abortSession(sessionId: string): Promise<void> {
 	const managed = activeSessions.get(sessionId);
 	if (!managed) throw new Error('Session not active');
@@ -714,6 +767,19 @@ export async function getCommands(sessionId: string): Promise<any> {
 	const managed = activeSessions.get(sessionId);
 	if (!managed) throw new Error('Session not active');
 
+	// Claude Code has no get_commands RPC — return discovered slash commands instead
+	if (managed.harness === 'claude-code') {
+		if (!managed.cachedCommands) {
+			const { getSlashCommands } = await import('./slash-commands');
+			managed.cachedCommands = getSlashCommands(managed.cwd).map(c => ({
+				name: c.name,
+				description: c.description,
+				source: c.source === 'built-in' || c.source === 'bundled-skill' ? 'extension' : 'skill',
+			}));
+		}
+		return { commands: managed.cachedCommands };
+	}
+
 	// Return cached commands instantly — commands don't change during a session
 	if (managed.cachedCommands) {
 		return { commands: managed.cachedCommands };
@@ -731,6 +797,20 @@ export async function getCommands(sessionId: string): Promise<any> {
  */
 function prefetchCommands(managed: ManagedSession): void {
 	if (managed.cachedCommands || managed.isStreaming) return;
+
+	// Claude Code has no get_commands RPC — eagerly populate from slash-commands scanner
+	if (managed.harness === 'claude-code') {
+		import('./slash-commands').then(({ getSlashCommands }) => {
+			managed.cachedCommands = getSlashCommands(managed.cwd).map(c => ({
+				name: c.name,
+				description: c.description,
+				source: c.source === 'built-in' || c.source === 'bundled-skill' ? 'extension' : 'skill',
+			}));
+			log.info('commands', `cached ${managed.cachedCommands.length} slash commands for Claude session ${managed.sessionId}`);
+		}).catch(() => {});
+		return;
+	}
+
 	sendCommand(managed, { type: 'get_commands' }, COMMANDS_QUERY_TIMEOUT_MS)
 		.then((result: any) => {
 			const commands = Array.isArray(result) ? result : (result?.commands ?? []);
@@ -808,6 +888,7 @@ export async function recoverActiveSessions() {
 					sessionId: row.session_id,
 					sessionPath: row.file_path,
 					cwd: row.cwd,
+					harness: detectHarnessFromPath(row.file_path),
 					relayPid,
 					socketPath,
 					socket: null,
@@ -821,7 +902,7 @@ export async function recoverActiveSessions() {
 					autoStopTimer: null,
 					writeQueue: [],
 					writing: false,
-			cachedCommands: null,
+					cachedCommands: null,
 				};
 
 				await connectToRelay(managed);
@@ -855,9 +936,10 @@ export async function recoverActiveSessions() {
 			}
 		}
 
-		log.info('recovery', `recovering session: ${row.session_id} (${row.cwd})`);
+		const harness = detectHarnessFromPath(row.file_path);
+		log.info('recovery', `recovering session: ${row.session_id} (${row.cwd}) harness=${harness}`);
 		try {
-			await resumeSession(row.session_id, row.file_path, row.cwd);
+			await resumeSession(row.session_id, row.file_path, row.cwd, harness);
 			recovered++;
 		} catch (err) {
 			log.error('recovery', `failed to recover ${row.session_id}: ${err}`);
@@ -867,6 +949,33 @@ export async function recoverActiveSessions() {
 
 	if (rows.length > 0) {
 		log.info('recovery', `${reconnected} reconnected, ${recovered} respawned (of ${rows.length} total)`);
+	}
+}
+
+// --- Job completion trigger ---
+
+/**
+ * Check if a session belongs to a job and trigger the completion handler.
+ * This is the universal path — works for both pi (backup to callback extension)
+ * and Claude Code (primary path since it has no callback hook).
+ */
+function triggerJobCompletion(sessionId: string, assistantText: string): void {
+	try {
+		// Dynamic import to avoid circular deps at module load time
+		Promise.all([
+			import('./job-queue'),
+			import('./job-poller'),
+		]).then(([{ findJobBySessionId }, { handleJobAgentEnd }]) => {
+			const job = findJobBySessionId(sessionId);
+			if (job) {
+				log.info('job-trigger', `agent_end for job ${job.id} (session ${sessionId}) — triggering completion`);
+				handleJobAgentEnd(job.id, assistantText).catch((err) => {
+					log.error('job-trigger', `failed to handle job completion for ${job.id}: ${err}`);
+				});
+			}
+		}).catch(() => {});
+	} catch {
+		// Best effort — don't crash the event loop
 	}
 }
 

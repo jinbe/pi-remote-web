@@ -8,22 +8,28 @@
 		defaultCwd = '',
 		recentCwds = [],
 		recentModels = [],
+		defaultHarness = 'pi' as 'pi' | 'claude-code',
 		onclose
 	}: {
 		open: boolean;
 		defaultCwd?: string;
 		recentCwds?: string[];
 		recentModels?: string[];
+		defaultHarness?: 'pi' | 'claude-code';
 		onclose: () => void;
 	} = $props();
 
 	let cwd = $state('');
 	let model = $state('');
+	let harness = $state<'pi' | 'claude-code'>(defaultHarness);
 
-	// Pre-fill cwd from defaultCwd when modal opens
+	// Re-fill defaults each time the modal opens
 	$effect(() => {
-		if (open && defaultCwd && !cwd) {
-			cwd = defaultCwd;
+		if (open) {
+			cwd = defaultCwd || '';
+			harness = defaultHarness;
+			model = '';
+			errorMsg = '';
 		}
 	});
 	let creating = $state(false);
@@ -41,7 +47,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					cwd: cwd.trim(),
-					model: model.trim() || undefined
+					model: model.trim() || undefined,
+					harness
 				})
 			});
 
@@ -106,6 +113,26 @@
 						{/each}
 					</div>
 				{/if}
+			</div>
+
+			<div class="form-control mt-4">
+				<label class="label">
+					<span class="label-text">Harness</span>
+				</label>
+				<div class="flex gap-2">
+					<button
+						class="btn btn-sm flex-1 {harness === 'pi' ? 'btn-primary' : 'btn-ghost'}"
+						onclick={() => { hapticLight(); harness = 'pi'; }}
+					>
+						π pi
+					</button>
+					<button
+						class="btn btn-sm flex-1 {harness === 'claude-code' ? 'btn-primary' : 'btn-ghost'}"
+						onclick={() => { hapticLight(); harness = 'claude-code'; }}
+					>
+						◆ Claude Code
+					</button>
+				</div>
 			</div>
 
 			{#if errorMsg}
