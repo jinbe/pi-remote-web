@@ -11,7 +11,8 @@
  *   PI_PR_POLL_INTERVAL_SECONDS — polling interval (default: 600 = 10 minutes)
  *   PI_PR_POLL_CONCURRENCY — max concurrent running jobs (default: 5)
  */
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { getDb } from './cache';
 import { createJob, findActiveJobByPrUrl } from './job-queue';
 import { REVIEW_SKILL } from './job-prompts';
@@ -22,6 +23,8 @@ import { log } from './logger';
 const DEFAULT_POLL_INTERVAL_SECONDS = 600;
 const DEFAULT_CONCURRENCY = 5;
 const GH_TIMEOUT_MS = 15_000;
+
+const execFileAsync = promisify(execFile);
 
 /** Statuses that count towards the concurrency limit. */
 const ACTIVE_JOB_STATUSES = ['queued', 'claimed', 'running', 'reviewing'];
@@ -153,13 +156,13 @@ export function deleteMonitoredRepo(id: string): MonitoredRepo | null {
  * Get the authenticated GitHub username via `gh api user`.
  * Returns null if the CLI call fails.
  */
-export function getGitHubUser(): string | null {
+export async function getGitHubUser(): Promise<string | null> {
 	try {
-		const output = execFileSync(
+		const { stdout } = await execFileAsync(
 			'gh', ['api', 'user', '--jq', '.login'],
-			{ timeout: GH_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
+			{ timeout: GH_TIMEOUT_MS, encoding: 'utf-8' },
 		);
-		return output.trim() || null;
+		return stdout.trim() || null;
 	} catch (err) {
 		log.warn('github-pr-poller', `failed to get GitHub user: ${err}`);
 		return null;
@@ -169,7 +172,7 @@ export function getGitHubUser(): string | null {
 /**
  * List open PRs for a given repo. Optionally filter by assignee.
  */
-export function listOpenPrs(owner: string, name: string, assignee?: string): GitHubPr[] {
+export async function listOpenPrs(owner: string, name: string, assignee?: string): Promise<GitHubPr[]> {
 	try {
 		const args = [
 			'pr', 'list',
@@ -183,13 +186,12 @@ export function listOpenPrs(owner: string, name: string, assignee?: string): Git
 			args.push('--assignee', assignee);
 		}
 
-		const output = execFileSync('gh', args, {
+		const { stdout } = await execFileAsync('gh', args, {
 			timeout: GH_TIMEOUT_MS,
-			stdio: ['pipe', 'pipe', 'pipe'],
 			encoding: 'utf-8',
 		});
 
-		return JSON.parse(output) as GitHubPr[];
+		return JSON.parse(stdout) as GitHubPr[];
 	} catch (err) {
 		log.warn('github-pr-poller', `failed to list PRs for ${owner}/${name}: ${err}`);
 		return [];
@@ -218,7 +220,7 @@ export async function scanRepos(manualRepoId?: string): Promise<{ created: numbe
 	const concurrency = getConcurrency();
 
 	// Resolve the GitHub user once for all repos
-	const ghUser = getGitHubUser();
+	const ghUser = await getGitHubUser();
 	if (!ghUser) {
 		log.warn('github-pr-poller', 'cannot determine GitHub user — skipping scan');
 		return result;
@@ -263,7 +265,7 @@ export async function scanRepos(manualRepoId?: string): Promise<{ created: numbe
 
 		let prs: GitHubPr[];
 		try {
-			prs = listOpenPrs(repo.owner, repo.name, assignee);
+			prs = await listOpenPrs(repo.owner, repo.name, assignee);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
@@ -319,7 +321,7 @@ export async function scanAllRepos(): Promise<{ created: number; skipped: number
 	const result = { created: 0, skipped: 0, errors: 0 };
 	const concurrency = getConcurrency();
 
-	const ghUser = getGitHubUser();
+	const ghUser = await getGitHubUser();
 	if (!ghUser) {
 		log.warn('github-pr-poller', 'cannot determine GitHub user — skipping scan');
 		return result;
@@ -346,7 +348,7 @@ export async function scanAllRepos(): Promise<{ created: number; skipped: number
 		const assignee = repo.assigned_only ? ghUser : undefined;
 		let prs: GitHubPr[];
 		try {
-			prs = listOpenPrs(repo.owner, repo.name, assignee);
+			prs = await listOpenPrs(repo.owner, repo.name, assignee);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
