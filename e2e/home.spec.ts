@@ -1,19 +1,14 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Home Page', () => {
-	test('loads and shows the sessions heading', async ({ page }) => {
+	test('loads and shows the logo', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.locator('h1')).toContainText('Pi Sessions');
+		await expect(page.locator('img[alt="Pi"]')).toBeVisible();
 	});
 
 	test('shows the New button', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.locator('button', { hasText: '+ New' })).toBeVisible();
-	});
-
-	test('shows the refresh button', async ({ page }) => {
-		await page.goto('/');
-		await expect(page.locator('button', { hasText: '↻' })).toBeVisible();
+		await expect(page.locator('button', { hasText: 'New' })).toBeVisible();
 	});
 
 	test('has a search input', async ({ page }) => {
@@ -34,20 +29,11 @@ test.describe('Home Page', () => {
 
 	test('opens New Session modal', async ({ page }) => {
 		await page.goto('/');
-		await page.locator('button', { hasText: '+ New' }).click();
+		await page.locator('button', { hasText: 'New' }).click();
 		// The NewSessionModal dialog should appear with heading
 		await expect(page.getByRole('heading', { name: 'New Session' })).toBeVisible({
 			timeout: 3000
 		});
-	});
-
-	test('refresh button triggers data reload', async ({ page }) => {
-		await page.goto('/');
-		// Click refresh and verify page doesn't error
-		const refreshBtn = page.locator('button', { hasText: '↻' });
-		await refreshBtn.click();
-		// Page should still show the heading
-		await expect(page.locator('h1')).toContainText('Pi Sessions');
 	});
 
 	test('project groups are displayed when sessions exist', async ({ page }) => {
@@ -73,18 +59,42 @@ test.describe('Home Page', () => {
 });
 
 test.describe('Home Page - Empty State', () => {
-	test('shows empty state message when no sessions exist', async ({ page }) => {
+	test('shows empty state or session list', async ({ page }) => {
 		await page.goto('/');
-		// Either shows sessions or empty state — both are valid
-		const heading = page.locator('h1');
-		await expect(heading).toContainText('Pi Sessions');
+		// The page must render either project group cards or the empty-state message
+		const hasGroups = await page.locator('.project-card').count();
+		const hasEmpty = await page.locator('text=No sessions found').count();
+		expect(hasGroups > 0 || hasEmpty > 0).toBe(true);
 	});
 });
 
 test.describe('Home Page - Navigation', () => {
-	test('page has correct title or heading', async ({ page }) => {
+	test('page renders header, search, and content area', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.locator('h1')).toBeVisible();
+		// Header bar with logo and New button
+		await expect(page.locator('img[alt="Pi"]')).toBeVisible();
+		await expect(page.locator('button', { hasText: 'New' })).toBeVisible();
+		// Search input
+		await expect(page.locator('input[placeholder="Search sessions..."]')).toBeVisible();
+		// Content area: either project cards or empty state
+		const hasContent = await page.locator('.project-card').or(page.locator('text=No sessions found')).count();
+		expect(hasContent).toBeGreaterThan(0);
+	});
+
+	test('kebab menu refresh reloads data without errors', async ({ page }) => {
+		const errors: string[] = [];
+		page.on('pageerror', (err) => errors.push(err.message));
+
+		await page.goto('/');
+		// Open the kebab dropdown (trigger is a div[role="button"], not <button>)
+		await page.getByRole('button', { name: 'More actions' }).click();
+		// Click the Refresh item inside the dropdown menu
+		await page.locator('.dropdown-content button', { hasText: 'Refresh' }).click();
+		// Wait for invalidateAll to settle
+		await page.waitForTimeout(500);
+		// Page should still render correctly
+		await expect(page.locator('img[alt="Pi"]')).toBeVisible();
+		expect(errors).toEqual([]);
 	});
 
 	test('page loads without JS errors', async ({ page }) => {
