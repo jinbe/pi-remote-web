@@ -3,249 +3,23 @@
  *
  * These tests verify that Claude Code stream-json events are correctly
  * translated into the pi RPC event format that rpc-manager.ts expects.
+ *
+ * The translation logic lives in claude-event-translator.ts and is shared
+ * with the relay daemon, so tests exercise the real production code path.
  */
 import { describe, test, expect } from 'bun:test';
-
-// --- Helpers ---
-
-/**
- * Simulate the translation logic from claude-relay.ts.
- * We extract the core translation into a testable function rather than
- * spawning actual processes.
- */
-
-interface TranslatorState {
-	sessionId: string;
-	model: string | null;
-	isStreaming: boolean;
-	messages: any[];
-	totalInputTokens: number;
-	totalOutputTokens: number;
-	totalCacheReadTokens: number;
-	totalCacheWriteTokens: number;
-	totalCost: number;
-	currentAssistantText: string;
-	currentThinkingText: string;
-	currentToolCalls: Map<string, { name: string; args: any; text: string }>;
-	prevAssistantText: string;
-	prevThinkingText: string;
-}
-
-function createState(): TranslatorState {
-	return {
-		sessionId: 'test-session-id',
-		model: null,
-		isStreaming: false,
-		messages: [],
-		totalInputTokens: 0,
-		totalOutputTokens: 0,
-		totalCacheReadTokens: 0,
-		totalCacheWriteTokens: 0,
-		totalCost: 0,
-		currentAssistantText: '',
-		currentThinkingText: '',
-		currentToolCalls: new Map(),
-		prevAssistantText: '',
-		prevThinkingText: '',
-	};
-}
-
-/**
- * Core translation function extracted from claude-relay.ts for testability.
- * Returns an array of pi RPC events that would be broadcast.
- */
-function translateClaudeEvent(state: TranslatorState, event: any): any[] {
-	const output: any[] = [];
-
-	switch (event.type) {
-		case 'system': {
-			if (event.subtype === 'init') {
-				state.model = event.model || null;
-				if (event.session_id) state.sessionId = event.session_id;
-			}
-			break;
-		}
-
-		case 'assistant': {
-			const msg = event.message;
-			if (!msg || !msg.content) break;
-
-			if (!state.isStreaming) {
-				state.isStreaming = true;
-				state.currentAssistantText = '';
-				state.currentThinkingText = '';
-				state.prevAssistantText = '';
-				state.prevThinkingText = '';
-				state.currentToolCalls.clear();
-				output.push({ type: 'agent_start' });
-				output.push({ type: 'turn_start' });
-				output.push({ type: 'message_start', message: { role: 'assistant' } });
-			}
-
-			if (!state.model && msg.model) {
-				state.model = msg.model;
-			}
-
-			for (const block of msg.content) {
-				if (block.type === 'text') {
-					const fullText = block.text || '';
-					const delta = fullText.slice(state.prevAssistantText.length);
-					if (delta) {
-						state.currentAssistantText = fullText;
-						state.prevAssistantText = fullText;
-						output.push({
-							type: 'message_update',
-							message: { role: 'assistant' },
-							assistantMessageEvent: {
-								type: 'text_delta',
-								contentIndex: 0,
-								delta,
-							},
-						});
-					}
-				} else if (block.type === 'thinking') {
-					const fullThinking = block.thinking || '';
-					const delta = fullThinking.slice(state.prevThinkingText.length);
-					if (delta) {
-						state.currentThinkingText = fullThinking;
-						state.prevThinkingText = fullThinking;
-						output.push({
-							type: 'message_update',
-							message: { role: 'assistant' },
-							assistantMessageEvent: {
-								type: 'thinking_delta',
-								contentIndex: 0,
-								delta,
-							},
-						});
-					}
-				} else if (block.type === 'tool_use') {
-					const toolCallId = block.id;
-					const toolName = block.name;
-					const toolInput = block.input || {};
-
-					if (!state.currentToolCalls.has(toolCallId)) {
-						state.currentToolCalls.set(toolCallId, {
-							name: toolName,
-							args: toolInput,
-							text: '',
-						});
-						output.push({
-							type: 'tool_execution_start',
-							toolCallId,
-							toolName,
-							args: toolInput,
-						});
-					}
-				}
-			}
-			break;
-		}
-
-		case 'user': {
-			const msg = event.message;
-			if (!msg || !msg.content) break;
-
-			for (const block of (Array.isArray(msg.content) ? msg.content : [msg.content])) {
-				if (block.type === 'tool_result') {
-					const toolCallId = block.tool_use_id;
-					const toolInfo = state.currentToolCalls.get(toolCallId);
-					const toolName = toolInfo?.name || 'unknown';
-
-					let resultText = '';
-					if (typeof block.content === 'string') {
-						resultText = block.content;
-					} else if (Array.isArray(block.content)) {
-						resultText = block.content
-							.filter((c: any) => c.type === 'text')
-							.map((c: any) => c.text)
-							.join('\n');
-					}
-
-					if (event.tool_use_result?.stdout) {
-						resultText = event.tool_use_result.stdout;
-					}
-
-					output.push({
-						type: 'tool_execution_end',
-						toolCallId,
-						toolName,
-						result: {
-							content: [{ type: 'text', text: resultText }],
-							details: {},
-						},
-						isError: block.is_error || false,
-					});
-
-					state.currentToolCalls.delete(toolCallId);
-					state.messages.push({
-						role: 'toolResult',
-						toolCallId,
-						toolName,
-						content: [{ type: 'text', text: resultText }],
-						isError: block.is_error || false,
-						timestamp: Date.now(),
-					});
-				}
-			}
-
-			state.prevAssistantText = '';
-			state.prevThinkingText = '';
-			state.currentAssistantText = '';
-			state.currentThinkingText = '';
-			output.push({ type: 'turn_start' });
-			output.push({ type: 'message_start', message: { role: 'assistant' } });
-			break;
-		}
-
-		case 'result': {
-			const usage = event.usage || {};
-			state.totalInputTokens += usage.input_tokens || 0;
-			state.totalOutputTokens += usage.output_tokens || 0;
-			state.totalCacheReadTokens += usage.cache_read_input_tokens || 0;
-			state.totalCacheWriteTokens += usage.cache_creation_input_tokens || 0;
-			state.totalCost += event.total_cost_usd || 0;
-
-			if (event.session_id) state.sessionId = event.session_id;
-
-			if (state.currentAssistantText) {
-				state.messages.push({
-					role: 'assistant',
-					content: [{ type: 'text', text: state.currentAssistantText }],
-					model: state.model,
-					timestamp: Date.now(),
-				});
-			}
-
-			output.push({ type: 'message_end', message: { role: 'assistant' } });
-			output.push({ type: 'turn_end', message: { role: 'assistant' }, toolResults: [] });
-
-			const agentEnd: any = {
-				type: 'agent_end',
-				messages: state.messages.slice(-10),
-			};
-			agentEnd._lastAssistantText = state.currentAssistantText;
-			output.push(agentEnd);
-
-			state.isStreaming = false;
-			state.currentAssistantText = '';
-			state.currentThinkingText = '';
-			state.prevAssistantText = '';
-			state.prevThinkingText = '';
-			state.currentToolCalls.clear();
-			break;
-		}
-	}
-
-	return output;
-}
+import {
+	translateClaudeEvent,
+	createSyntheticState,
+	type SyntheticState,
+} from './claude-event-translator.js';
 
 // --- Tests ---
 
 describe('Claude Code → pi RPC translation', () => {
 
 	test('system init extracts model and session ID', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 		const events = translateClaudeEvent(state, {
 			type: 'system',
 			subtype: 'init',
@@ -259,7 +33,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('system hook events are ignored', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 		const events = translateClaudeEvent(state, {
 			type: 'system',
 			subtype: 'hook_started',
@@ -270,7 +44,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('first assistant event emits agent_start + turn_start + message_start', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 		const events = translateClaudeEvent(state, {
 			type: 'assistant',
 			message: {
@@ -290,7 +64,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('incremental text deltas are computed from snapshots', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		// First chunk
 		const events1 = translateClaudeEvent(state, {
@@ -316,7 +90,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('duplicate text snapshots produce no delta', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		translateClaudeEvent(state, {
 			type: 'assistant',
@@ -334,7 +108,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('thinking blocks produce thinking_delta events', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 		const events = translateClaudeEvent(state, {
 			type: 'assistant',
 			message: {
@@ -353,7 +127,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('tool_use blocks produce tool_execution_start events', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 		const events = translateClaudeEvent(state, {
 			type: 'assistant',
 			message: {
@@ -374,7 +148,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('duplicate tool_use IDs do not emit duplicate events', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		translateClaudeEvent(state, {
 			type: 'assistant',
@@ -405,7 +179,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('tool_result events produce tool_execution_end', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		// First emit tool start
 		translateClaudeEvent(state, {
@@ -443,7 +217,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('tool_result with stdout from tool_use_result', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		translateClaudeEvent(state, {
 			type: 'assistant',
@@ -478,7 +252,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('tool_result resets text tracking for next assistant turn', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		// Initial assistant text
 		translateClaudeEvent(state, {
@@ -499,7 +273,7 @@ describe('Claude Code → pi RPC translation', () => {
 			},
 		});
 
-		// Tool result — should reset prevAssistantText
+		// Tool result — should reset prevAssistantText and persist pre-tool text
 		translateClaudeEvent(state, {
 			type: 'user',
 			message: {
@@ -512,6 +286,11 @@ describe('Claude Code → pi RPC translation', () => {
 			},
 		});
 
+		// Pre-tool text should have been persisted
+		const assistantMsgs = state.messages.filter(m => m.role === 'assistant');
+		expect(assistantMsgs).toHaveLength(1);
+		expect(assistantMsgs[0].content[0].text).toBe('Let me check.');
+
 		// New assistant text after tool result
 		const events = translateClaudeEvent(state, {
 			type: 'assistant',
@@ -523,7 +302,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('result event emits message_end + turn_end + agent_end', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		// Start streaming
 		translateClaudeEvent(state, {
@@ -553,7 +332,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('agent_end includes _lastAssistantText for job-poller extraction', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		translateClaudeEvent(state, {
 			type: 'assistant',
@@ -571,7 +350,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('full multi-turn conversation flow', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 		const allEvents: any[] = [];
 
 		// 1. System init
@@ -657,7 +436,7 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 
 	test('error tool results set isError flag', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		translateClaudeEvent(state, {
 			type: 'assistant',
@@ -686,15 +465,101 @@ describe('Claude Code → pi RPC translation', () => {
 		const toolEnd = events.find(e => e.type === 'tool_execution_end');
 		expect(toolEnd!.isError).toBe(true);
 	});
+
+	test('onSessionId callback is invoked for first event with session_id', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+		let capturedId: string | undefined;
+
+		translateClaudeEvent(state, {
+			type: 'system',
+			subtype: 'init',
+			model: 'claude-sonnet-4-20250514',
+			session_id: 'captured-123',
+		}, (id) => { capturedId = id; });
+
+		expect(capturedId).toBe('captured-123');
+		expect(state.sessionId).toBe('captured-123');
+		expect(state.sessionIdCaptured).toBe(true);
+	});
+
+	test('onSessionId callback is invoked only once per translator instance', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+		let callCount = 0;
+		const onSessionId = () => { callCount++; };
+
+		// First event with session_id — should invoke
+		translateClaudeEvent(state, {
+			type: 'system',
+			subtype: 'init',
+			model: 'claude-sonnet-4-20250514',
+			session_id: 'first-id',
+		}, onSessionId);
+
+		// Second event with session_id — should NOT invoke again
+		translateClaudeEvent(state, {
+			type: 'assistant',
+			session_id: 'second-id',
+			message: { content: [{ type: 'text', text: 'hi' }] },
+		}, onSessionId);
+
+		expect(callCount).toBe(1);
+		expect(state.sessionId).toBe('first-id');
+	});
+
+	test('pre-tool assistant text is persisted to messages before reset', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		// Assistant produces text before tool use
+		translateClaudeEvent(state, {
+			type: 'assistant',
+			message: { content: [{ type: 'text', text: 'Let me check that file.' }] },
+		});
+
+		// Tool use
+		translateClaudeEvent(state, {
+			type: 'assistant',
+			message: {
+				content: [{
+					type: 'tool_use',
+					id: 'toolu_persist',
+					name: 'Read',
+					input: { path: 'file.txt' },
+				}],
+			},
+		});
+
+		// Tool result — should persist the pre-tool text
+		translateClaudeEvent(state, {
+			type: 'user',
+			message: {
+				content: [{
+					type: 'tool_result',
+					tool_use_id: 'toolu_persist',
+					content: 'file contents here',
+					is_error: false,
+				}],
+			},
+		});
+
+		// The pre-tool text should be in messages
+		const assistantMsgs = state.messages.filter(m => m.role === 'assistant');
+		expect(assistantMsgs).toHaveLength(1);
+		expect(assistantMsgs[0].content[0].text).toBe('Let me check that file.');
+
+		// Tool result should also be in messages
+		const toolMsgs = state.messages.filter(m => m.role === 'toolResult');
+		expect(toolMsgs).toHaveLength(1);
+	});
 });
 
 describe('Synthetic state (get_state / get_session_stats)', () => {
 
 	test('get_state response shape matches pi RPC format', () => {
-		const state = createState();
-		state.model = 'claude-sonnet-4-20250514';
-		state.sessionId = 'test-123';
-		state.isStreaming = true;
+		const state = createSyntheticState({
+			sessionId: 'test-123',
+			model: 'claude-sonnet-4-20250514',
+			isStreaming: true,
+		});
 
 		// Simulate what the relay would return for get_state
 		const response = {
@@ -723,7 +588,7 @@ describe('Synthetic state (get_state / get_session_stats)', () => {
 	});
 
 	test('get_session_stats accumulates across multiple result events', () => {
-		const state = createState();
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
 
 		// First turn
 		translateClaudeEvent(state, {
