@@ -1,4 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+
+// Mock rpc-manager so tests are isolated from cross-file mock.module leaks
+// (cmux-manager.test.ts mocks isActive to return true, which poisons the
+// global module cache when bun runs tests in the same process).
+const mockIsActive = mock(() => false);
+const mockSendMessage = mock(() => Promise.reject(new Error('no real session')));
+const mockStopSession = mock(() => Promise.resolve());
+const mockCreateSession = mock(() => Promise.resolve('mock-session'));
+const mockGetHarness = mock(() => 'pi' as const);
+
+mock.module('./rpc-manager', () => ({
+	isActive: mockIsActive,
+	sendMessage: mockSendMessage,
+	stopSession: mockStopSession,
+	createSession: mockCreateSession,
+	getHarness: mockGetHarness,
+}));
+
 import { start, stop, isRunning, handleJobAgentEnd, recoverOrphanedJobs, _resetForTesting } from './job-poller';
 import { getJob, updateJobStatus } from './job-queue';
 import { createTestJob, getTestJobs, cleanupTestJobs } from './test-helpers';
