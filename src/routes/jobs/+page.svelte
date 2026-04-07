@@ -42,38 +42,11 @@
 		model: string | null;
 	}
 
-	interface ExtensionStatus {
-		installed: boolean;
-		isSymlink: boolean;
-		repoVersion: string | null;
-		installedVersion: string | null;
-		upToDate: boolean;
-		repoPath: string;
-		installedPath: string;
-	}
-
 	let { data } = $props();
 
 	const { theme, toggleTheme } = getContext<{ theme: 'dark' | 'light'; toggleTheme: () => void }>('theme');
 
-	// Extension status
-	let extensionStatus = $state<ExtensionStatus>(data.extensionStatus as ExtensionStatus);
-	let installingExtension = $state(false);
 
-	async function installExtension() {
-		hapticMedium();
-		installingExtension = true;
-		try {
-			const res = await fetch('/api/jobs/extension-status', { method: 'POST' });
-			if (res.ok) {
-				extensionStatus = await res.json();
-			}
-		} catch (e) {
-			console.error('Failed to install extension:', e);
-		} finally {
-			installingExtension = false;
-		}
-	}
 
 	// Filter state
 	let statusFilter = $state<string>('active');
@@ -616,28 +589,6 @@
 							{#if theme === 'dark'}<Icon name="sun" class="w-4 h-4" /> Light Mode{:else}<Icon name="moon" class="w-4 h-4" /> Dark Mode{/if}
 						</button>
 					</li>
-					<div class="divider my-0"></div>
-					<!-- Extension status -->
-					{#if !extensionStatus.installed || !extensionStatus.upToDate}
-						<li>
-							<button onclick={installExtension} disabled={installingExtension}>
-								{#if installingExtension}
-									<span class="loading loading-spinner loading-xs"></span>
-								{:else if extensionStatus.installed}
-									<Icon name="refresh" class="w-4 h-4" />
-								{:else}
-									<Icon name="bolt" class="w-4 h-4" />
-								{/if}
-								{extensionStatus.installed ? 'Update Hook' : 'Install Hook'}
-							</button>
-						</li>
-					{:else}
-						<li class="disabled">
-							<span class="text-success/60">
-								<Icon name="check" class="w-4 h-4" /> Hook v{extensionStatus.repoVersion}
-							</span>
-						</li>
-					{/if}
 					{#if doneCount > 0}
 						<div class="divider my-0"></div>
 						<li>

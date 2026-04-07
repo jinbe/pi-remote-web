@@ -9,7 +9,7 @@
  * to approach the work using its own system prompt and tools.
  */
 import type { Job } from './job-queue';
-import { getOrigin } from './origin';
+
 // --- Skill configuration from environment ---
 
 /** Skill for fire-and-forget tasks (max_loops=0). e.g. 'issue-worker' */
@@ -21,13 +21,10 @@ export const REVIEW_SKILL = process.env.PI_JOB_REVIEW_SKILL || '';
 
 // --- Metadata header injected at the top of every job prompt ---
 
-function metadataHeader(job: Job): string {
-	const callbackUrl = `${getOrigin()}/api/jobs/${job.id}/complete`;
-	return [
-		`JOB_ID: ${job.id}`,
-		`CALLBACK_URL: ${callbackUrl}`,
-		`CALLBACK_TOKEN: ${job.callback_token}`,
-	].join('\n');
+function metadataHeader(_job: Job): string {
+	// Job completion is now handled server-side in rpc-manager (agent_end → findJobBySessionId).
+	// No callback metadata needed in the prompt.
+	return '';
 }
 
 /** Build the common task context lines (title, description, issue, branch). */
