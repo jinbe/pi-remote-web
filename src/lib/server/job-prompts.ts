@@ -140,7 +140,7 @@ export function buildReviewPrompt(job: Job, harness: string = 'pi'): string {
 
 	parts.push('');
 	parts.push('=== CRITICAL: REQUIRED STEPS ===');
-	parts.push('After completing the review, you MUST do BOTH of these steps:');
+	parts.push('After completing the review, you MUST do BOTH of these steps IN ORDER:');
 	parts.push('');
 	parts.push('1. SUBMIT the review to GitHub using gh pr review:');
 	parts.push('   - Approve: gh pr review <number> --approve --body "your review summary"');
@@ -148,13 +148,18 @@ export function buildReviewPrompt(job: Job, harness: string = 'pi'): string {
 	parts.push('   Include your review summary (strengths, issues, suggestions) in the --body.');
 	parts.push('   Do NOT skip this step. The review MUST be visible on the GitHub PR.');
 	parts.push('');
-	parts.push('2. THEN output EXACTLY one of these two lines as the VERY LAST thing in your response:');
+	parts.push('2. Check that the gh pr review command succeeded. ONLY if it succeeded,');
+	parts.push('   output EXACTLY one of these two lines as the VERY LAST thing in your response:');
 	parts.push('');
 	parts.push('VERDICT: approved');
 	parts.push('VERDICT: changes_requested');
 	parts.push('');
-	parts.push('The VERDICT line is a machine-parsed marker. The job will FAIL if you do not include it.');
-	parts.push('Do NOT paraphrase, reword, or wrap it in a code block. Output the exact line on its own.');
+	parts.push('If the gh pr review command FAILED (non-zero exit, error output, permission denied),');
+	parts.push('do NOT output a VERDICT line. Instead output:');
+	parts.push('');
+	parts.push('REVIEW_SUBMIT_FAILED: <reason>');
+	parts.push('');
+	parts.push('These are machine-parsed markers. Do NOT paraphrase, reword, or wrap in a code block.');
 	parts.push('=================================');
 
 	return parts.join('\n');

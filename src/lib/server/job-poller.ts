@@ -29,6 +29,9 @@ const VERDICT_FALLBACK_CHANGES = /\b(?:gh pr review \d+ --request-changes|reques
 /** Pattern for the agent to signal an unrecoverable error and abort the job. */
 const ABORT_JOB_PATTERN = /ABORT_JOB:\s*(.+)/;
 
+/** Pattern for the agent to signal that gh pr review submission failed. */
+const REVIEW_SUBMIT_FAILED_PATTERN = /REVIEW_SUBMIT_FAILED:\s*(.+)/;
+
 // --- State ---
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -250,7 +253,9 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 			? assistantText.match(ABORT_JOB_PATTERN)
 			: null;
 
-		log.info('job-poller', `agent_end for job ${jobId} (status=${job.status}) — prUrl=${prUrlMatch?.[1] ?? 'none'}, verdict=${verdictMatch?.[1] ?? 'none'}, abort=${abortMatch ? 'yes' : 'no'}`);
+		const reviewSubmitFailed = assistantText.match(REVIEW_SUBMIT_FAILED_PATTERN);
+
+		log.info('job-poller', `agent_end for job ${jobId} (status=${job.status}) — prUrl=${prUrlMatch?.[1] ?? 'none'}, verdict=${verdictMatch?.[1] ?? 'none'}, abort=${abortMatch ? 'yes' : 'no'}, reviewSubmitFailed=${reviewSubmitFailed ? 'yes' : 'no'}`);
 
 		// ABORT_JOB short-circuits all state transitions — fail immediately
 		if (abortMatch) {
@@ -270,6 +275,18 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 			// Review-type jobs: dispatched with a review prompt, so agent_end
 			// means the review is complete. Extract the verdict and finish.
 			if (job.type === 'review') {
+				// If the agent reported that gh pr review failed, fail the job
+				if (reviewSubmitFailed) {
+					const reason = reviewSubmitFailed[1].trim();
+					log.warn('job-poller', `review job ${jobId} — gh pr review submission failed: ${reason}`);
+					updateJobStatus(jobId, {
+						status: 'failed',
+						error: `Review submission to GitHub failed: ${reason}`,
+					});
+					await stopJobSession(job);
+					return;
+				}
+
 				const verdict = extractVerdict(assistantText, verdictMatch);
 				if (verdict) {
 					updateJobStatus(jobId, {
@@ -331,6 +348,18 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 			// The user manually reviews the PR and marks the job done via the dashboard.
 			if (job.max_loops === 0) {
 				log.info('job-poller', `agent_end for fire-and-forget job ${jobId} in reviewing — ignoring (manual review only)`);
+				return;
+			}
+
+			// If the agent reported that gh pr review failed, fail the job
+			if (reviewSubmitFailed) {
+				const reason = reviewSubmitFailed[1].trim();
+				log.warn('job-poller', `job ${jobId} — gh pr review submission failed during review phase: ${reason}`);
+				updateJobStatus(jobId, {
+					status: 'failed',
+					error: `Review submission to GitHub failed: ${reason}`,
+				});
+				await stopJobSession(job);
 				return;
 			}
 
