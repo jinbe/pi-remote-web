@@ -139,13 +139,21 @@ export function buildReviewPrompt(job: Job, harness: string = 'pi'): string {
 	}
 
 	parts.push('');
-	parts.push('=== CRITICAL: REQUIRED OUTPUT ===');
-	parts.push('After completing the review, you MUST output EXACTLY one of these two lines as the VERY LAST thing in your response:');
+	parts.push('=== CRITICAL: REQUIRED STEPS ===');
+	parts.push('After completing the review, you MUST do BOTH of these steps:');
+	parts.push('');
+	parts.push('1. SUBMIT the review to GitHub using gh pr review:');
+	parts.push('   - Approve: gh pr review <number> --approve --body "your review summary"');
+	parts.push('   - Request changes: gh pr review <number> --request-changes --body "your review summary"');
+	parts.push('   Include your review summary (strengths, issues, suggestions) in the --body.');
+	parts.push('   Do NOT skip this step. The review MUST be visible on the GitHub PR.');
+	parts.push('');
+	parts.push('2. THEN output EXACTLY one of these two lines as the VERY LAST thing in your response:');
 	parts.push('');
 	parts.push('VERDICT: approved');
 	parts.push('VERDICT: changes_requested');
 	parts.push('');
-	parts.push('This is a machine-parsed marker. The job will FAIL if you do not include it.');
+	parts.push('The VERDICT line is a machine-parsed marker. The job will FAIL if you do not include it.');
 	parts.push('Do NOT paraphrase, reword, or wrap it in a code block. Output the exact line on its own.');
 	parts.push('=================================');
 
