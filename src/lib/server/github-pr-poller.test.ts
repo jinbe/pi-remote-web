@@ -11,6 +11,9 @@ import {
 	_resetForTesting,
 	getPollIntervalMs,
 	getConcurrency,
+	getPrMaxAgeDays,
+	getPrReviewState,
+	upsertPrReviewState,
 	getGitHubUser,
 	listOpenPrs,
 	scanRepos,
@@ -267,6 +270,87 @@ describe('github-pr-poller', () => {
 			} else {
 				delete process.env.PI_PR_POLL_CONCURRENCY;
 			}
+		});
+
+		it('returns default PR max age (30 days) when env is unset', () => {
+			const original = process.env.PI_PR_MAX_AGE_DAYS;
+			delete process.env.PI_PR_MAX_AGE_DAYS;
+
+			expect(getPrMaxAgeDays()).toBe(30);
+
+			if (original !== undefined) process.env.PI_PR_MAX_AGE_DAYS = original;
+		});
+
+		it('reads PR max age from env', () => {
+			const original = process.env.PI_PR_MAX_AGE_DAYS;
+			process.env.PI_PR_MAX_AGE_DAYS = '7';
+
+			expect(getPrMaxAgeDays()).toBe(7);
+
+			if (original !== undefined) {
+				process.env.PI_PR_MAX_AGE_DAYS = original;
+			} else {
+				delete process.env.PI_PR_MAX_AGE_DAYS;
+			}
+		});
+
+		it('falls back to default for invalid PR max age', () => {
+			const original = process.env.PI_PR_MAX_AGE_DAYS;
+			process.env.PI_PR_MAX_AGE_DAYS = 'not-a-number';
+
+			expect(getPrMaxAgeDays()).toBe(30);
+
+			if (original !== undefined) {
+				process.env.PI_PR_MAX_AGE_DAYS = original;
+			} else {
+				delete process.env.PI_PR_MAX_AGE_DAYS;
+			}
+		});
+
+		it('rejects zero or negative PR max age', () => {
+			const original = process.env.PI_PR_MAX_AGE_DAYS;
+			process.env.PI_PR_MAX_AGE_DAYS = '0';
+			expect(getPrMaxAgeDays()).toBe(30);
+			process.env.PI_PR_MAX_AGE_DAYS = '-5';
+			expect(getPrMaxAgeDays()).toBe(30);
+
+			if (original !== undefined) {
+				process.env.PI_PR_MAX_AGE_DAYS = original;
+			} else {
+				delete process.env.PI_PR_MAX_AGE_DAYS;
+			}
+		});
+	});
+
+	describe('pr review state persistence', () => {
+		const TEST_PR_URL = 'https://github.com/acme/test-state/pull/999';
+		const CLEANUP_URLS: string[] = [TEST_PR_URL];
+
+		afterEach(() => {
+			const db = getDb();
+			for (const url of CLEANUP_URLS) {
+				db.run('DELETE FROM pr_review_state WHERE pr_url = ?', [url]);
+			}
+		});
+
+		it('returns null for unknown PR URLs', () => {
+			expect(getPrReviewState('https://github.com/acme/nope/pull/1')).toBeNull();
+		});
+
+		it('upserts and reads back review state', () => {
+			upsertPrReviewState(TEST_PR_URL, 'deadbeef', '2026-04-01T10:00:00Z');
+			const state = getPrReviewState(TEST_PR_URL);
+			expect(state).not.toBeNull();
+			expect(state!.last_reviewed_head_sha).toBe('deadbeef');
+			expect(state!.last_reviewed_at).toBe('2026-04-01T10:00:00Z');
+		});
+
+		it('upsert overwrites existing state', () => {
+			upsertPrReviewState(TEST_PR_URL, 'sha-one', '2026-04-01T10:00:00Z');
+			upsertPrReviewState(TEST_PR_URL, 'sha-two', '2026-04-02T10:00:00Z');
+			const state = getPrReviewState(TEST_PR_URL);
+			expect(state!.last_reviewed_head_sha).toBe('sha-two');
+			expect(state!.last_reviewed_at).toBe('2026-04-02T10:00:00Z');
 		});
 	});
 });

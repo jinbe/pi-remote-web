@@ -11,9 +11,7 @@ let apiResponses: Map<string, string> = new Map();
 let spawnCalls: string[][] = [];
 
 // Patch Bun.spawn globally — execGh calls Bun.spawn(['gh', ...args], ...)
-const originalSpawn = Bun.spawn;
-
-function mockSpawn(cmd: string | string[], opts?: any): any {
+function mockSpawn(cmd: string | string[], _opts?: any): any {
 	const args = Array.isArray(cmd) ? cmd : [cmd];
 	// Record the gh args (skip the 'gh' binary itself)
 	if (args[0] === 'gh') {
@@ -57,6 +55,7 @@ mock.module('./logger', () => ({
 
 // Import after mocking
 const { shouldReviewPr } = await import('./github-pr-poller');
+type PrReviewState = import('./github-pr-poller').PrReviewState;
 
 // --- Helpers ---
 
@@ -65,21 +64,19 @@ const REPO = 'widget';
 const PR_NUM = 42;
 const PR_AUTHOR = 'alice';
 const GH_USER = 'bob';
-
-function reviewsEndpoint() {
-	return `repos/${OWNER}/${REPO}/pulls/${PR_NUM}/reviews`;
-}
+const SHA_A = 'aaaaaaa1111111111111111111111111111aaaaa';
+const SHA_B = 'bbbbbbb2222222222222222222222222222bbbbb';
 
 function commentsEndpoint() {
 	return `repos/${OWNER}/${REPO}/issues/${PR_NUM}/comments`;
 }
 
-function setReviews(reviews: Array<{ user: string; state: string; submitted_at: string }>) {
-	apiResponses.set(reviewsEndpoint(), JSON.stringify(reviews));
+function setComments(comments: Array<{ user: string; created_at: string }>) {
+	apiResponses.set(commentsEndpoint(), JSON.stringify(comments));
 }
 
-function setComments(comments: Array<{ user: string; body: string; created_at: string }>) {
-	apiResponses.set(commentsEndpoint(), JSON.stringify(comments));
+function state(sha: string, reviewedAt: string): PrReviewState {
+	return { last_reviewed_head_sha: sha, last_reviewed_at: reviewedAt };
 }
 
 describe('shouldReviewPr', () => {
@@ -89,193 +86,125 @@ describe('shouldReviewPr', () => {
 	});
 
 	it('skips self-authored PRs', async () => {
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, GH_USER, GH_USER);
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, GH_USER, GH_USER, SHA_A, null);
 		expect(result.shouldReview).toBe(false);
 		expect(result.reason).toContain('self-authored');
 	});
 
-	it('returns needs review for new PR with no activity', async () => {
-		setReviews([]);
-		setComments([]);
+	it('is case-insensitive for self-authored check', async () => {
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, 'Bob', 'bob', SHA_A, null);
+		expect(result.shouldReview).toBe(false);
+		expect(result.reason).toContain('self-authored');
+	});
 
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
+	it('triggers review when there is no prior state (new PR)', async () => {
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, null);
 		expect(result.shouldReview).toBe(true);
 		expect(result.reason).toContain('new PR');
 	});
 
-	it('skips when latest activity is an approval', async () => {
-		setReviews([
-			{ user: 'carol', state: 'CHANGES_REQUESTED', submitted_at: '2025-01-01T10:00:00Z' },
-			{ user: 'carol', state: 'APPROVED', submitted_at: '2025-01-01T12:00:00Z' },
-		]);
-		setComments([]);
-
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
-		expect(result.shouldReview).toBe(false);
-		expect(result.reason).toContain('approved');
-		expect(result.reason).toContain('carol');
+	it('does not fetch comments when there is no prior state', async () => {
+		await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, null);
+		// No gh calls should have been made — brand-new PR short-circuits
+		expect(spawnCalls.length).toBe(0);
 	});
 
-	it('skips when my review is the latest activity', async () => {
-		setReviews([
-			{ user: GH_USER, state: 'CHANGES_REQUESTED', submitted_at: '2025-01-01T12:00:00Z' },
-		]);
-		setComments([]);
-
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
-		expect(result.shouldReview).toBe(false);
-		expect(result.reason).toContain('last review is mine');
-		expect(result.reason).toContain('waiting on author');
+	it('triggers review when head SHA has changed (new commits)', async () => {
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_B, prior);
+		expect(result.shouldReview).toBe(true);
+		expect(result.reason).toContain('new commits');
 	});
 
-	it('triggers re-review when author comments after my review', async () => {
-		setReviews([
-			{ user: GH_USER, state: 'CHANGES_REQUESTED', submitted_at: '2025-01-01T10:00:00Z' },
-		]);
+	it('does not fetch comments when head SHA has changed', async () => {
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_B, prior);
+		// SHA change short-circuits — no need to check comments
+		expect(spawnCalls.length).toBe(0);
+	});
+
+	it('triggers review when author has commented since last review', async () => {
 		setComments([
-			{ user: PR_AUTHOR, body: 'Fixed the issues', created_at: '2025-01-01T12:00:00Z' },
+			{ user: PR_AUTHOR, created_at: '2025-01-01T12:00:00Z' },
 		]);
-
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, prior);
 		expect(result.shouldReview).toBe(true);
 		expect(result.reason).toContain('author commented');
 	});
 
-	it('skips when non-author comment contains dismiss keyword', async () => {
-		setReviews([]);
+	it('skips when author comment is older than last review', async () => {
 		setComments([
-			{ user: 'carol', body: 'LGTM, ship it!', created_at: '2025-01-01T12:00:00Z' },
+			{ user: PR_AUTHOR, created_at: '2025-01-01T08:00:00Z' },
 		]);
-
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, prior);
 		expect(result.shouldReview).toBe(false);
-		expect(result.reason).toContain('lgtm');
+		expect(result.reason).toContain('no new commits or author comments');
 	});
 
-	it('skips when non-author comments without dismiss keyword', async () => {
-		setReviews([]);
+	it('skips when only non-author has commented since last review', async () => {
 		setComments([
-			{ user: 'carol', body: "I'll handle this review", created_at: '2025-01-01T12:00:00Z' },
+			{ user: 'carol', created_at: '2025-01-01T12:00:00Z' },
+			{ user: GH_USER, created_at: '2025-01-01T13:00:00Z' },
 		]);
-
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, prior);
 		expect(result.shouldReview).toBe(false);
-		expect(result.reason).toContain('not PR author');
+		expect(result.reason).toContain('no new commits or author comments');
 	});
 
-	it('uses chronological ordering: author comment after approval triggers re-review', async () => {
-		setReviews([
-			{ user: 'carol', state: 'APPROVED', submitted_at: '2025-01-01T10:00:00Z' },
-		]);
-		setComments([
-			{ user: PR_AUTHOR, body: 'Wait, I pushed more changes', created_at: '2025-01-01T14:00:00Z' },
-		]);
+	it('skips when no comments exist and head SHA is unchanged', async () => {
+		setComments([]);
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, prior);
+		expect(result.shouldReview).toBe(false);
+		expect(result.reason).toContain('no new commits or author comments');
+	});
 
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
+	it('author comparison is case-insensitive', async () => {
+		setComments([
+			{ user: 'Alice', created_at: '2025-01-01T12:00:00Z' },
+		]);
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, prior);
 		expect(result.shouldReview).toBe(true);
 		expect(result.reason).toContain('author commented');
 	});
 
-	it('uses chronological ordering: approval after author comment skips', async () => {
-		setComments([
-			{ user: PR_AUTHOR, body: 'Fixed the issues', created_at: '2025-01-01T10:00:00Z' },
-		]);
-		setReviews([
-			{ user: 'carol', state: 'APPROVED', submitted_at: '2025-01-01T14:00:00Z' },
-		]);
-
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
-		expect(result.shouldReview).toBe(false);
-		expect(result.reason).toContain('approved');
-	});
-
-	it('handles many events and picks the most recent one', async () => {
-		setReviews([
-			{ user: GH_USER, state: 'CHANGES_REQUESTED', submitted_at: '2025-01-01T08:00:00Z' },
-			{ user: 'carol', state: 'COMMENTED', submitted_at: '2025-01-01T09:00:00Z' },
-		]);
-		setComments([
-			{ user: PR_AUTHOR, body: 'Addressed feedback', created_at: '2025-01-01T10:00:00Z' },
-			{ user: 'dave', body: 'Looks good to me, lgtm', created_at: '2025-01-01T11:00:00Z' },
-			{ user: PR_AUTHOR, body: 'One more fix pushed', created_at: '2025-01-01T15:00:00Z' },
-		]);
-
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
-		// Most recent is author's comment at 15:00
-		expect(result.shouldReview).toBe(true);
-		expect(result.reason).toContain('author commented');
-	});
-
-	it('treats someone else\'s non-approval review as needing attention', async () => {
-		setReviews([
-			{ user: 'carol', state: 'CHANGES_REQUESTED', submitted_at: '2025-01-01T12:00:00Z' },
-		]);
+	it('uses --paginate flag when fetching comments', async () => {
 		setComments([]);
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, prior);
 
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
-		expect(result.shouldReview).toBe(true);
-		expect(result.reason).toContain('carol');
-		expect(result.reason).toContain('CHANGES_REQUESTED');
-	});
-
-	it('is case-insensitive for user comparison', async () => {
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, 'Bob', 'bob');
-		expect(result.shouldReview).toBe(false);
-		expect(result.reason).toContain('self-authored');
-	});
-
-	it('uses --paginate flag in API calls', async () => {
-		setReviews([]);
-		setComments([]);
-
-		await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
-
-		// Both gh calls should include --paginate
-		expect(spawnCalls.length).toBe(2);
-		for (const args of spawnCalls) {
-			expect(args).toContain('--paginate');
-		}
-	});
-
-	it('dismiss keyword match is case-insensitive', async () => {
-		setReviews([]);
-		setComments([
-			{ user: 'carol', body: 'APPROVED, Looks Good To Me', created_at: '2025-01-01T12:00:00Z' },
-		]);
-
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
-		expect(result.shouldReview).toBe(false);
-		expect(result.reason).toContain('approve');
-	});
-
-	it('my review followed by dismiss-keyword comment from another user skips', async () => {
-		setReviews([
-			{ user: GH_USER, state: 'CHANGES_REQUESTED', submitted_at: '2025-01-01T10:00:00Z' },
-		]);
-		setComments([
-			{ user: 'carol', body: "Don't merge this yet, wip", created_at: '2025-01-01T12:00:00Z' },
-		]);
-
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
-		expect(result.shouldReview).toBe(false);
-		expect(result.reason).toContain('wip');
+		expect(spawnCalls.length).toBe(1);
+		expect(spawnCalls[0]).toContain('--paginate');
 	});
 
 	it('parses NDJSON multi-page responses from --paginate', async () => {
-		// Simulate gh api --paginate output: each page emits a separate JSON array
 		const page1 = JSON.stringify([
-			{ user: 'carol', state: 'CHANGES_REQUESTED', submitted_at: '2025-01-01T08:00:00Z' },
+			{ user: 'carol', created_at: '2025-01-01T08:00:00Z' },
 		]);
 		const page2 = JSON.stringify([
-			{ user: 'dave', state: 'APPROVED', submitted_at: '2025-01-01T14:00:00Z' },
+			{ user: PR_AUTHOR, created_at: '2025-01-01T14:00:00Z' },
 		]);
-		apiResponses.set(reviewsEndpoint(), `${page1}\n${page2}`);
-		setComments([]);
+		apiResponses.set(commentsEndpoint(), `${page1}\n${page2}`);
 
-		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER);
-		// Most recent review (page 2) is an approval by dave
-		expect(result.shouldReview).toBe(false);
-		expect(result.reason).toContain('approved');
-		expect(result.reason).toContain('dave');
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, prior);
+		expect(result.shouldReview).toBe(true);
+		expect(result.reason).toContain('author commented');
+	});
+
+	it('picks a new author comment even when older non-author comments exist', async () => {
+		setComments([
+			{ user: 'carol', created_at: '2025-01-01T11:00:00Z' },
+			{ user: 'dave', created_at: '2025-01-01T11:30:00Z' },
+			{ user: PR_AUTHOR, created_at: '2025-01-01T15:00:00Z' },
+		]);
+		const prior = state(SHA_A, '2025-01-01T10:00:00Z');
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, prior);
+		expect(result.shouldReview).toBe(true);
+		expect(result.reason).toContain('author commented');
 	});
 });
