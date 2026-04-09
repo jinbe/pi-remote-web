@@ -38,12 +38,7 @@ Open [http://localhost:4020](http://localhost:4020) in your browser.
 
 ## Environment Variables
 
-| Variable           | Default     | Description                                                            |
-| ------------------ | ----------- | ---------------------------------------------------------------------- |
-| `PI_BIN`           | `pi`        | Path to the Pi binary                                                  |
-| `PORT`             | `3000`      | Port for the standalone server                                         |
-| `HOST`             | `0.0.0.0`  | Host for the standalone server                                         |
-| `PI_AUTH_PASSWORD`  | _(unset)_   | Password to protect the dashboard. Supports plaintext or bcrypt hash.  |
+See [Agent Setup § Environment Configuration](#3-environment-configuration) for the full env var reference.
 
 ### Authentication
 
@@ -95,6 +90,13 @@ cp .env.example .env
 ```
 
 Edit `.env` and set values as needed. All variables are optional and have sensible defaults:
+
+**Server (standalone/production only — dev server always uses port 4020):**
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `4020` | Port for the standalone/production server |
+| `HOST` | `0.0.0.0` | Host to bind the standalone/production server |
 
 **Authentication:**
 
