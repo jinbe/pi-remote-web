@@ -191,6 +191,12 @@ export function getDb(): Database {
 
 		db.run('CREATE INDEX IF NOT EXISTS idx_monitored_repos_enabled ON monitored_repos(enabled)');
 
+		db.run(`CREATE TABLE IF NOT EXISTS pr_review_state (
+			pr_url TEXT PRIMARY KEY,
+			last_reviewed_head_sha TEXT NOT NULL,
+			last_reviewed_at TEXT NOT NULL
+		)`);
+
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_parent ON jobs(parent_job_id)');

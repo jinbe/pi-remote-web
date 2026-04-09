@@ -7,9 +7,15 @@
  *   - manual_only: skip during automatic polling, only check on manual trigger (default: on)
  *   - enabled: master toggle (default: on)
  *
+ * Per-PR review state is tracked in the `pr_review_state` table so we can
+ * detect whether there are new commits or new author comments since our
+ * last review job.
+ *
  * Configuration via environment:
  *   PI_PR_POLL_INTERVAL_SECONDS — polling interval (default: 600 = 10 minutes)
  *   PI_PR_POLL_CONCURRENCY — max concurrent running jobs (default: 5)
+ *   PI_PR_MAX_AGE_DAYS — only consider PRs created within this many days when
+ *     assigned_only is off (default: 30). Ignored when assigned_only is on.
  */
 import { getDb } from './cache';
 import { createJob, findActiveJobByPrUrl } from './job-queue';
@@ -21,6 +27,7 @@ import { log } from './logger';
 
 const DEFAULT_POLL_INTERVAL_SECONDS = 600;
 const DEFAULT_CONCURRENCY = 5;
+const DEFAULT_PR_MAX_AGE_DAYS = 30;
 const GH_TIMEOUT_MS = 15_000;
 
 /** Per-PR error backoff: skip PRs that have failed review-state checks recently. */
@@ -64,9 +71,15 @@ interface GitHubPr {
 	number: number;
 	title: string;
 	headRefName: string;
+	headRefOid: string;
 	baseRefName: string;
 	url: string;
 	author?: { login: string };
+}
+
+export interface PrReviewState {
+	last_reviewed_head_sha: string;
+	last_reviewed_at: string;
 }
 
 // --- Configuration ---
@@ -79,6 +92,32 @@ export function getPollIntervalMs(): number {
 export function getConcurrency(): number {
 	const val = parseInt(process.env.PI_PR_POLL_CONCURRENCY ?? '', 10);
 	return Number.isFinite(val) && val > 0 ? val : DEFAULT_CONCURRENCY;
+}
+
+export function getPrMaxAgeDays(): number {
+	const val = parseInt(process.env.PI_PR_MAX_AGE_DAYS ?? '', 10);
+	return Number.isFinite(val) && val > 0 ? val : DEFAULT_PR_MAX_AGE_DAYS;
+}
+
+// --- PR review state persistence ---
+
+/** Look up the last review we ran for a given PR URL. */
+export function getPrReviewState(prUrl: string): PrReviewState | null {
+	return getDb().query(
+		'SELECT last_reviewed_head_sha, last_reviewed_at FROM pr_review_state WHERE pr_url = ?'
+	).get(prUrl) as PrReviewState | null;
+}
+
+/** Record that we just ran (or are about to run) a review for a PR. */
+export function upsertPrReviewState(prUrl: string, headSha: string, reviewedAt: string): void {
+	getDb().run(
+		`INSERT INTO pr_review_state (pr_url, last_reviewed_head_sha, last_reviewed_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(pr_url) DO UPDATE SET
+		   last_reviewed_head_sha = excluded.last_reviewed_head_sha,
+		   last_reviewed_at = excluded.last_reviewed_at`,
+		[prUrl, headSha, reviewedAt]
+	);
 }
 
 // --- State ---
@@ -212,6 +251,10 @@ export async function getGitHubUser(): Promise<string | null> {
 
 /**
  * List open PRs for a given repo. Optionally filter by assignee.
+ *
+ * When `assignee` is not provided, the result is timeboxed to PRs created
+ * within the last `PI_PR_MAX_AGE_DAYS` days (default 30) to avoid spinning
+ * up reviews on stale PRs in busy repos.
  */
 export async function listOpenPrs(owner: string, name: string, assignee?: string, excludeAuthor?: string): Promise<GitHubPr[]> {
 	try {
@@ -219,12 +262,18 @@ export async function listOpenPrs(owner: string, name: string, assignee?: string
 			'pr', 'list',
 			'--repo', `${owner}/${name}`,
 			'--state', 'open',
-			'--json', 'number,title,headRefName,baseRefName,url,isDraft,author',
+			'--json', 'number,title,headRefName,headRefOid,baseRefName,url,isDraft,author',
 			'--limit', '30',
 		];
 
 		if (assignee) {
 			args.push('--assignee', assignee);
+		} else {
+			// Timebox unfiltered searches so we don't review stale PRs.
+			const maxAgeDays = getPrMaxAgeDays();
+			const cutoff = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
+			const cutoffStr = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
+			args.push('--search', `created:>=${cutoffStr}`);
 		}
 
 		const output = await execGh(args);
@@ -260,14 +309,6 @@ export async function listOpenPrs(owner: string, name: string, assignee?: string
 // gh pr list returns login as 'app/snyk-io' for GitHub Apps, not 'snyk-io[bot]'
 const BOT_LOGIN_PATTERNS = ['dependabot', 'snyk-io', 'renovate', 'github-actions'];
 
-// --- Dismiss keywords: if the last non-author comment contains one, skip ---
-const DISMISS_KEYWORDS = [
-	'approve', 'lgtm', 'ship it', 'shipit', 'looks good',
-	'needs work', 'needs changes', 'changes requested',
-	'wip', 'work in progress', 'not ready',
-	'hold off', "don't merge", 'do not merge', '+1',
-];
-
 /**
  * Parse NDJSON output from `gh api --paginate --jq`.
  *
@@ -287,109 +328,61 @@ function parseNdjson<T>(raw: string): T[] {
 		}) as T[];
 }
 
-/** A timestamped review event (from PR reviews API). */
-interface ReviewEvent {
-	type: 'review';
-	user: string;
-	state: string;
-	timestamp: string; // submitted_at
-}
-
-/** A timestamped comment event (from issue comments API). */
-interface CommentEvent {
-	type: 'comment';
-	user: string;
-	body: string;
-	timestamp: string; // created_at
-}
-
-type PrEvent = ReviewEvent | CommentEvent;
-
 /**
- * Check whether a PR needs review by inspecting its review state and comments.
+ * Decide whether a PR needs a (re-)review.
  *
- * Uses `--paginate` to fetch the full history for both reviews and comments,
- * then determines the single most-recent activity by comparing timestamps.
- * Decision logic is based on the true latest event across both lists.
+ * Triggers iff:
+ *   - PR is not self-authored AND
+ *     - we have no prior review state for it (brand-new PR), OR
+ *     - the PR's head SHA has changed since our last review (new commits), OR
+ *     - the PR author has commented since our last review
  *
- * Returns { shouldReview: boolean, reason: string }.
+ * Callers are responsible for skipping drafts and PRs with an active job.
  */
-export async function shouldReviewPr(owner: string, name: string, prNumber: number, prAuthor: string, ghUser: string): Promise<{ shouldReview: boolean; reason: string }> {
+export async function shouldReviewPr(
+	owner: string,
+	name: string,
+	prNumber: number,
+	prAuthor: string,
+	ghUser: string,
+	headSha: string,
+	priorState: PrReviewState | null
+): Promise<{ shouldReview: boolean; reason: string }> {
 	// Belt-and-suspenders: never review your own PRs
 	if (prAuthor && prAuthor.toLowerCase() === ghUser.toLowerCase()) {
 		return { shouldReview: false, reason: `self-authored by ${prAuthor}` };
 	}
 
+	// Brand-new PR — no prior state
+	if (!priorState) {
+		return { shouldReview: true, reason: 'new PR — needs review' };
+	}
+
+	// New commits pushed since last review
+	if (headSha && headSha !== priorState.last_reviewed_head_sha) {
+		return { shouldReview: true, reason: `new commits since last review (${priorState.last_reviewed_head_sha.slice(0, 7)} → ${headSha.slice(0, 7)})` };
+	}
+
+	// Check for new author comments since last review
 	try {
-		// Fetch ALL reviews and comments concurrently (paginated).
-		// Neither API supports sort/direction, so we paginate to get
-		// everything and sort client-side by timestamp.
-		const [reviewsJson, commentsJson] = await Promise.all([
-			execGh([
-				'api', '--paginate',
-				`repos/${owner}/${name}/pulls/${prNumber}/reviews`,
-				'--jq', '[.[] | select(.state != "DISMISSED" and .state != "PENDING") | {user: .user.login, state: .state, submitted_at: .submitted_at}]',
-			]),
-			execGh([
-				'api', '--paginate',
-				`repos/${owner}/${name}/issues/${prNumber}/comments`,
-				'--jq', '[.[] | select(.user.type != "Bot") | {user: .user.login, body: .body, created_at: .created_at}]',
-			]),
+		const commentsJson = await execGh([
+			'api', '--paginate',
+			`repos/${owner}/${name}/issues/${prNumber}/comments`,
+			'--jq', '[.[] | select(.user.type != "Bot") | {user: .user.login, created_at: .created_at}]',
 		]);
+		const comments = parseNdjson<{ user: string; created_at: string }>(commentsJson);
 
-		const rawReviews = parseNdjson<{ user: string; state: string; submitted_at: string }>(reviewsJson);
-		const reviews: ReviewEvent[] = rawReviews.map(r => ({
-			type: 'review' as const,
-			user: r.user,
-			state: r.state,
-			timestamp: r.submitted_at,
-		}));
+		const lastReviewedAt = new Date(priorState.last_reviewed_at).getTime();
+		const newerAuthorComment = comments.find(c =>
+			c.user.toLowerCase() === prAuthor.toLowerCase() &&
+			new Date(c.created_at).getTime() > lastReviewedAt
+		);
 
-		const rawComments = parseNdjson<{ user: string; body: string; created_at: string }>(commentsJson);
-		const comments: CommentEvent[] = rawComments.map(c => ({
-			type: 'comment' as const,
-			user: c.user,
-			body: c.body,
-			timestamp: c.created_at,
-		}));
-
-		// Merge and sort all events most-recent-first
-		const allEvents: PrEvent[] = [...reviews, ...comments]
-			.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-		// No activity at all — brand new PR
-		if (allEvents.length === 0) {
-			return { shouldReview: true, reason: 'new PR — needs review' };
+		if (newerAuthorComment) {
+			return { shouldReview: true, reason: `author commented since last review (${newerAuthorComment.created_at})` };
 		}
 
-		const latest = allEvents[0];
-
-		// Decision based on the single most-recent event
-		if (latest.type === 'review') {
-			// Latest activity is a review
-			if (latest.state === 'APPROVED') {
-				return { shouldReview: false, reason: `already approved by ${latest.user}` };
-			}
-			if (latest.user.toLowerCase() === ghUser.toLowerCase()) {
-				return { shouldReview: false, reason: `last review is mine (${latest.state}) — waiting on author` };
-			}
-			// Someone else's non-approval review — may need attention
-			return { shouldReview: true, reason: `activity from ${latest.user} (${latest.state})` };
-		}
-
-		// Latest activity is a comment
-		if (latest.user.toLowerCase() === prAuthor.toLowerCase()) {
-			return { shouldReview: true, reason: 'author commented — re-review needed' };
-		}
-
-		// Non-author comment — check dismiss keywords
-		const lowerBody = (latest.body || '').toLowerCase();
-		const matched = DISMISS_KEYWORDS.find(kw => lowerBody.includes(kw));
-		if (matched) {
-			return { shouldReview: false, reason: `last comment by ${latest.user} contains "${matched}"` };
-		}
-		// Non-author commented without dismiss keyword — they're handling it
-		return { shouldReview: false, reason: `last comment by ${latest.user} (not PR author)` };
+		return { shouldReview: false, reason: 'no new commits or author comments since last review' };
 	} catch (err) {
 		log.error('github-pr-poller', `failed to check review state for ${owner}/${name}#${prNumber}: ${err}`);
 		// Fail closed — skip this PR and apply a per-PR backoff to avoid endless re-enqueueing
@@ -439,7 +432,10 @@ async function processPrs(
 		if (backoffExpiry) prErrorBackoff.delete(prKey); // expired — clean up
 
 		// Check review state — skip if already handled
-		const { shouldReview, reason } = await shouldReviewPr(repo.owner, repo.name, pr.number, prAuthor, ghUser);
+		const priorState = getPrReviewState(prUrl);
+		const { shouldReview, reason } = await shouldReviewPr(
+			repo.owner, repo.name, pr.number, prAuthor, ghUser, pr.headRefOid, priorState
+		);
 		if (!shouldReview) {
 			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — ${reason}`);
 			result.skipped++;
@@ -460,6 +456,9 @@ async function processPrs(
 				review_skill: REVIEW_SKILL || undefined,
 				harness: getHarness(),
 			});
+			// Record that we kicked off a review so we don't re-trigger on the
+			// same head SHA or pre-existing author comments.
+			upsertPrReviewState(prUrl, pr.headRefOid, new Date().toISOString());
 			log.info('github-pr-poller', `created review job ${job.id} for ${repo.owner}/${repo.name}#${pr.number}`);
 			result.created++;
 		} catch (err) {
