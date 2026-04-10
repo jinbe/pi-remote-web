@@ -10,6 +10,7 @@ import { createSession, sendMessage, stopSession, isActive, getHarness, type Har
 import { log } from './logger';
 import { getDb } from './cache';
 import { existsSync } from 'fs';
+import { arePrChecksReady } from './gh-utils';
 
 // --- Constants ---
 
@@ -145,6 +146,22 @@ export async function pollOnce(): Promise<void> {
 		while (dispatched < MAX_CONCURRENT_CLAIMS) {
 			const job = claimNextJob();
 			if (!job) break; // No more queued jobs
+
+			// Gate: jobs with a PR must wait for all CI checks to pass before dispatch
+			if (job.pr_url) {
+				const ciStatus = await arePrChecksReady(job.pr_url);
+				if (!ciStatus.ready) {
+					// Re-queue the job so it gets picked up in a later poll cycle
+					getDb().query(`
+						UPDATE jobs
+						SET status = 'queued', claimed_at = NULL, updated_at = datetime('now')
+						WHERE id = ? AND status = 'claimed'
+					`).run(job.id);
+					log.info('job-poller', `re-queued job ${job.id} — CI not ready: ${ciStatus.reason}`);
+					dispatched++;
+					continue;
+				}
+			}
 
 			await dispatchJob(job);
 			dispatched++;

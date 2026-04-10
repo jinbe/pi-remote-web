@@ -22,13 +22,13 @@ import { createJob, findActiveJobByPrUrl } from './job-queue';
 import { REVIEW_SKILL } from './job-prompts';
 import { getHarness } from './rpc-manager';
 import { log } from './logger';
+import { execGh } from './gh-utils';
 
 // --- Constants ---
 
 const DEFAULT_POLL_INTERVAL_SECONDS = 600;
 const DEFAULT_CONCURRENCY = 5;
 const DEFAULT_PR_MAX_AGE_DAYS = 30;
-const GH_TIMEOUT_MS = 15_000;
 
 /** Per-PR error backoff: skip PRs that have failed review-state checks recently. */
 const prErrorBackoff = new Map<string, number>(); // prKey → timestamp when backoff expires
@@ -189,48 +189,6 @@ export function deleteMonitoredRepo(id: string): MonitoredRepo | null {
 		log.info('github-pr-poller', `removed repo ${row.owner}/${row.name}`);
 	}
 	return row;
-}
-
-// --- Async subprocess helper ---
-
-/**
- * Run `gh` with the given args asynchronously via Bun.spawn.
- * Returns stdout as a trimmed string, or throws on non-zero exit / timeout.
- */
-async function execGh(args: string[]): Promise<string> {
-	const proc = Bun.spawn(['gh', ...args], {
-		stdout: 'pipe',
-		stderr: 'pipe',
-		stdin: 'ignore',
-	});
-
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	try {
-		const result = await Promise.race([
-			(async () => {
-				const [stdout, stderr, exitCode] = await Promise.all([
-					new Response(proc.stdout).text(),
-					new Response(proc.stderr).text(),
-					proc.exited,
-				]);
-				return { stdout, stderr, exitCode };
-			})(),
-			new Promise<never>((_, reject) => {
-				timer = setTimeout(() => {
-					proc.kill();
-					reject(new Error(`gh ${args[0]} timed out after ${GH_TIMEOUT_MS}ms`));
-				}, GH_TIMEOUT_MS);
-			}),
-		]);
-
-		if (result.exitCode !== 0) {
-			throw new Error(`gh ${args[0]} exited with code ${result.exitCode}: ${result.stderr.trim()}`);
-		}
-
-		return result.stdout.trim();
-	} finally {
-		clearTimeout(timer);
-	}
 }
 
 // --- GitHub CLI helpers ---
