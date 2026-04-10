@@ -155,7 +155,7 @@ export async function pollOnce(): Promise<void> {
 					getDb().query(`
 						UPDATE jobs
 						SET status = 'queued', claimed_at = NULL, updated_at = datetime('now')
-						WHERE id = ?
+						WHERE id = ? AND status = 'claimed'
 					`).run(job.id);
 					log.info('job-poller', `re-queued job ${job.id} — CI not ready: ${ciStatus.reason}`);
 					dispatched++;
