@@ -1,6 +1,7 @@
 /**
  * Shared helpers for invoking the GitHub CLI (`gh`).
  */
+import { log } from './logger';
 
 const GH_TIMEOUT_MS = 15_000;
 
@@ -86,27 +87,29 @@ export async function arePrChecksReady(prUrl: string): Promise<{ ready: boolean;
 			return { ready: true };
 		}
 
-		const pending = checks.filter(c => c.state === 'PENDING' || c.state === 'QUEUED' || c.state === 'IN_PROGRESS');
-		const failed = checks.filter(c => c.state === 'FAILURE' || c.state === 'ERROR');
+		const passingStates = ['SUCCESS', 'NEUTRAL', 'SKIPPED'];
+		const nonPassing = checks.filter(c => !passingStates.includes(c.state));
 
-		if (pending.length > 0) {
+		if (nonPassing.length === 0) {
+			return { ready: true };
+		}
+
+		const running = nonPassing.filter(c => ['PENDING', 'QUEUED', 'IN_PROGRESS'].includes(c.state));
+
+		if (running.length > 0) {
 			return {
 				ready: false,
-				reason: `${pending.length} check(s) still running: ${pending.map(c => c.name).join(', ')}`,
+				reason: `${running.length} check(s) still running: ${running.map(c => c.name).join(', ')}`,
 			};
 		}
 
-		if (failed.length > 0) {
-			return {
-				ready: false,
-				reason: `${failed.length} check(s) failed: ${failed.map(c => c.name).join(', ')}`,
-			};
-		}
-
-		// All checks completed with SUCCESS/NEUTRAL/SKIPPED
-		return { ready: true };
-	} catch (err) {
+		return {
+			ready: false,
+			reason: `${nonPassing.length} check(s) failed: ${nonPassing.map(c => `${c.name} (${c.state})`).join(', ')}`,
+		};
+	} catch (err: any) {
 		// If gh CLI fails, log but don't block — fail open
+		log.warn('gh-utils', `CI check query failed for ${prUrl}, proceeding without gate: ${err.message ?? err}`);
 		return { ready: true };
 	}
 }

@@ -147,7 +147,7 @@ export async function pollOnce(): Promise<void> {
 			const job = claimNextJob();
 			if (!job) break; // No more queued jobs
 
-			// Gate: review jobs must wait for all CI checks to pass before dispatch
+			// Gate: jobs with a PR must wait for all CI checks to pass before dispatch
 			if (job.pr_url) {
 				const ciStatus = await arePrChecksReady(job.pr_url);
 				if (!ciStatus.ready) {
@@ -158,6 +158,7 @@ export async function pollOnce(): Promise<void> {
 						WHERE id = ?
 					`).run(job.id);
 					log.info('job-poller', `re-queued job ${job.id} — CI not ready: ${ciStatus.reason}`);
+					dispatched++;
 					continue;
 				}
 			}
