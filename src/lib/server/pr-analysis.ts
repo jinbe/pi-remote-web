@@ -261,7 +261,7 @@ async function classifyWithOpenRouter(diff: string, prUrl: string): Promise<PrAn
 			return null;
 		}
 
-		const classification = JSON.parse(content) as PrClassification;
+		const classification = normalizeClassification(JSON.parse(content));
 
 		// Step 2: Generate review instructions guided by code review principles
 		const modelInstructions = await generateReviewInstructions(classification, diff);
@@ -335,6 +335,34 @@ async function generateReviewInstructions(
 		log.warn('pr-analysis', `OpenRouter analysis failed: ${err}`);
 		return null;
 	}
+}
+
+// --- Classification normalization ---
+
+/** Ensure all required fields exist so buildReviewInstructions won't throw. */
+function normalizeClassification(raw: any): PrClassification {
+	return {
+		type: raw.type || 'unknown',
+		risk: ['low', 'medium', 'high', 'critical'].includes(raw.risk) ? raw.risk : 'medium',
+		area: raw.area || 'mixed',
+		estimated_review_depth: raw.estimated_review_depth || 'standard',
+		summary: raw.summary || '',
+		languages: Array.isArray(raw.languages) ? raw.languages : [],
+		primary_language: raw.primary_language || '',
+		stack: {
+			frontend: Array.isArray(raw.stack?.frontend) ? raw.stack.frontend : undefined,
+			backend: Array.isArray(raw.stack?.backend) ? raw.stack.backend : undefined,
+			database: Array.isArray(raw.stack?.database) ? raw.stack.database : undefined,
+			infra: Array.isArray(raw.stack?.infra) ? raw.stack.infra : undefined,
+			ci_cd: Array.isArray(raw.stack?.ci_cd) ? raw.stack.ci_cd : undefined,
+		},
+		hosting: raw.hosting ? {
+			platform: raw.hosting.platform || 'unknown',
+			confidence: raw.hosting.confidence || 'low',
+			signals: Array.isArray(raw.hosting.signals) ? raw.hosting.signals : [],
+			gotchas: Array.isArray(raw.hosting.gotchas) ? raw.hosting.gotchas : [],
+		} : undefined,
+	};
 }
 
 // --- Build review instructions from classification (fallback) ---
