@@ -35,6 +35,8 @@ function makeJob(overrides?: Partial<Job>): Job {
 		callback_token: 'test-token',
 		model: null,
 		harness: 'pi',
+		analysis_json: null,
+		review_prompt: null,
 		...overrides,
 	};
 }

@@ -40,6 +40,8 @@
 		max_no_verdict_retries: number;
 		model: string | null;
 		harness: 'pi' | 'claude-code' | null;
+		analysis_json: string | null;
+		review_prompt: string | null;
 	}
 
 	let { data } = $props();
@@ -470,6 +472,22 @@
 						<div class="text-xs font-semibold text-error/70 mb-1">Error</div>
 						<div class="bg-error/10 rounded-lg p-3 text-error whitespace-pre-wrap">{job.error}</div>
 					</div>
+				{/if}
+
+				<!-- PR Analysis -->
+				{#if job.analysis_json}
+					<details class="text-sm">
+						<summary class="text-xs font-semibold text-base-content/50 cursor-pointer select-none hover:text-base-content/70">PR Analysis</summary>
+						<pre class="bg-base-100/50 rounded-lg p-3 mt-1 overflow-x-auto text-xs font-mono whitespace-pre-wrap">{JSON.stringify(JSON.parse(job.analysis_json), null, 2)}</pre>
+					</details>
+				{/if}
+
+				<!-- Review Prompt -->
+				{#if job.review_prompt}
+					<details class="text-sm">
+						<summary class="text-xs font-semibold text-base-content/50 cursor-pointer select-none hover:text-base-content/70">Review Prompt</summary>
+						<div class="bg-base-100/50 rounded-lg p-3 mt-1 whitespace-pre-wrap text-xs">{job.review_prompt}</div>
+					</details>
 				{/if}
 
 				<!-- PR link -->

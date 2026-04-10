@@ -220,6 +220,14 @@ async function dispatchJob(job: Job): Promise<void> {
 			: buildTaskPrompt(job, jobHarness);
 		await sendMessage(sessionId, prompt);
 
+		// Persist analysis result and prompt on the job for debugging/auditing
+		if (isReview) {
+			updateJobStatus(job.id, {
+				analysis_json: analysis?.classification ? JSON.stringify(analysis.classification) : undefined,
+				review_prompt: prompt,
+			});
+		}
+
 		log.info('job-poller', `dispatched ${isReview ? 'review' : 'task'} job ${job.id} → session ${sessionId}`);
 	} catch (err: any) {
 		log.error('job-poller', `failed to dispatch job ${job.id}: ${err.message}`);
@@ -236,7 +244,9 @@ async function dispatchJob(job: Job): Promise<void> {
  */
 function leanFlagsForHarness(harness: HarnessType): string[] {
 	if (harness === 'claude-code') {
-		return ['--bare'];
+		// Note: --bare disables OAuth/keychain auth (requires ANTHROPIC_API_KEY).
+		// Omit it so that normal claude login credentials are used.
+		return [];
 	}
 	// pi: strip extensions, skills, templates, themes (keep tools for gh CLI)
 	return ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes'];
@@ -376,6 +386,10 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 					}
 					const reviewPrompt = buildReviewPrompt(job, harness, loopAnalysis ?? undefined);
 					await sendMessage(job.session_id, reviewPrompt);
+					updateJobStatus(jobId, {
+						analysis_json: loopAnalysis?.classification ? JSON.stringify(loopAnalysis.classification) : undefined,
+						review_prompt: reviewPrompt,
+					});
 				} catch (err) {
 					log.warn('job-poller', `failed to send review prompt for job ${jobId}: ${err}`);
 				}

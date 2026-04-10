@@ -39,6 +39,8 @@ export interface Job {
 	callback_token: string;
 	model: string | null;
 	harness: string | null;
+	analysis_json: string | null;
+	review_prompt: string | null;
 }
 
 export interface CreateJobInput {
@@ -69,6 +71,8 @@ export interface UpdateJobInput {
 	branch?: string;
 	loop_count?: number;
 	no_verdict_retries?: number;
+	analysis_json?: string;
+	review_prompt?: string;
 }
 
 // --- Query helpers ---
@@ -173,6 +177,8 @@ export function updateJobStatus(id: string, updates: UpdateJobInput): Job | null
 	if (updates.branch !== undefined) { setClauses.push('branch = $branch'); params.$branch = updates.branch; }
 	if (updates.loop_count !== undefined) { setClauses.push('loop_count = $loop_count'); params.$loop_count = updates.loop_count; }
 	if (updates.no_verdict_retries !== undefined) { setClauses.push('no_verdict_retries = $no_verdict_retries'); params.$no_verdict_retries = updates.no_verdict_retries; }
+	if (updates.analysis_json !== undefined) { setClauses.push('analysis_json = $analysis_json'); params.$analysis_json = updates.analysis_json; }
+	if (updates.review_prompt !== undefined) { setClauses.push('review_prompt = $review_prompt'); params.$review_prompt = updates.review_prompt; }
 
 	const sql = `UPDATE jobs SET ${setClauses.join(', ')} WHERE id = $id RETURNING *`;
 	const row = getDb().query(sql).get(params) as Job | null;

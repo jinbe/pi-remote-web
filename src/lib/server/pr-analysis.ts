@@ -1,13 +1,18 @@
 /**
  * PR pre-analysis — examines a PR's diff to produce tailored review instructions.
  *
- * Before dispatching a review session, we run a cheap one-shot LLM call
- * (via the active harness CLI) to classify the PR's stack, nature of work,
- * and key areas of concern. The output is injected into the review prompt
- * so the reviewer focuses on what actually matters for that specific PR.
+ * Before dispatching a review session, we classify the PR's stack, nature of
+ * work, risk level, and hosting platform. The classification output is converted
+ * into tailored review instructions injected into the review prompt.
  *
- * Falls back gracefully: if the CLI isn't available or the call fails,
- * analyzePr returns null and the review uses the default generic prompt.
+ * Two backends are supported:
+ *   1. OpenRouter API (preferred) — when OPEN_ROUTER_API_KEY is set, calls
+ *      OpenRouter with tiered model selection for structured JSON classification.
+ *   2. Harness CLI fallback — spawns the active harness (claude/pi) in one-shot
+ *      mode for a free-text classification.
+ *
+ * Falls back gracefully: if all backends fail, analyzePr returns null and the
+ * review uses the default generic prompt.
  */
 import { execGh, parsePrUrl } from './gh-utils';
 import { log } from './logger';
@@ -15,20 +20,106 @@ import type { HarnessType } from './rpc-manager';
 
 // --- Types ---
 
+export interface PrClassification {
+	type: string;
+	risk: 'low' | 'medium' | 'high' | 'critical';
+	area: string;
+	estimated_review_depth: string;
+	summary: string;
+	languages: string[];
+	primary_language: string;
+	stack: {
+		frontend?: string[];
+		backend?: string[];
+		database?: string[];
+		infra?: string[];
+		ci_cd?: string[];
+	};
+	hosting?: {
+		platform: string;
+		confidence: string;
+		signals: string[];
+		gotchas: string[];
+	};
+}
+
 export interface PrAnalysis {
-	/** Tailored review instructions produced by the pre-analysis LLM. */
+	/** Tailored review instructions for the review agent. */
 	reviewPrompt: string;
+	/** Structured classification (available when OpenRouter is used). */
+	classification?: PrClassification;
 }
 
 // --- Configuration ---
 
+const OPEN_ROUTER_API_KEY = process.env.OPEN_ROUTER_API_KEY || '';
+const OPEN_ROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+
+/** Model overrides — defaults follow the tiered strategy. */
+const CLASSIFIER_MODEL = process.env.PI_CLASSIFIER_MODEL || 'mistralai/mistral-small-2603';
 const ANALYSIS_MODEL = process.env.PI_ANALYSIS_MODEL || '';
+
 const ANALYSIS_TIMEOUT_MS = 30_000;
 
 /** Max diff size (in characters) to send to the analysis LLM. */
 const MAX_DIFF_LENGTH = 100_000;
 
-const ANALYSIS_SYSTEM_PROMPT = `You are a PR analysis agent. Given a git diff, produce tailored code review instructions.
+// --- OpenRouter classifier system prompt ---
+
+const CLASSIFIER_SYSTEM_PROMPT = `You are a PR classification agent. Given a git diff, PR title, and branch info, produce a structured JSON classification.
+
+Analyze the diff and output a JSON object with these fields:
+
+{
+  "type": "feature | bugfix | refactor | chore | docs | test | hotfix",
+  "risk": "low | medium | high | critical",
+  "area": "frontend | backend | infra | data | auth | payments | api | ci-cd | mixed",
+  "estimated_review_depth": "quick_scan | standard | deep_review",
+  "summary": "1-2 sentence description of what this PR does",
+  "languages": ["typescript", "python", ...],
+  "primary_language": "typescript",
+  "stack": {
+    "frontend": ["next.js", "react", ...],
+    "backend": ["express", "bun", ...],
+    "database": ["postgres", "sqlite", ...],
+    "infra": ["terraform", "docker", ...],
+    "ci_cd": ["github-actions", ...]
+  },
+  "hosting": {
+    "platform": "vercel | cloudflare | aws | azure | gcp | fly | railway | render | self-hosted | unknown",
+    "confidence": "high | medium | low",
+    "signals": ["vercel.json found", ...],
+    "gotchas": ["Vercel: edge functions have 128KB code size limit", ...]
+  }
+}
+
+Risk assessment guide:
+- "low": docs, tests, small config changes, style fixes
+- "medium": new features, moderate refactors, dependency updates
+- "high": auth/security changes, database migrations, API contract changes, payment logic
+- "critical": production hotfixes, security patches, data migration scripts
+
+Hosting detection — look for these signals in file paths and diff content:
+- Vercel: vercel.json, next.config.*, .vercel/, NEXT_PUBLIC_VERCEL_* env vars
+- Cloudflare: wrangler.toml, wrangler.json, _worker.js, @cloudflare/* packages
+- AWS: serverless.yml, template.yaml (SAM), cdk.json, amplify.yml, @aws-sdk/*
+- Azure: azure-pipelines.yml, host.json, .azure/, bicep files
+- GCP: app.yaml, cloudbuild.yaml, firebase.json, @google-cloud/*
+- Fly.io: fly.toml
+- Railway: railway.json, railway.toml
+- Docker/K8s: Dockerfile, docker-compose.yml, k8s/, helm/, Chart.yaml
+
+Platform-specific gotchas to flag:
+- Vercel edge functions: 128KB code limit, no Node.js fs/net/child_process
+- Cloudflare Workers: no Node.js built-in APIs by default, D1 has no ALTER TABLE DROP COLUMN
+- AWS Lambda: 15min timeout, 250MB deploy package, API Gateway 30s hard timeout
+- Azure Functions: consumption plan cold starts (5-10s)
+
+Output ONLY valid JSON. No markdown, no explanation, no code fences.`;
+
+// --- Harness CLI fallback system prompt ---
+
+const CLI_ANALYSIS_SYSTEM_PROMPT = `You are a PR analysis agent. Given a git diff, produce tailored code review instructions.
 
 Analyze the diff and output:
 
@@ -44,7 +135,8 @@ Output plain text instructions that a code reviewer will follow. No JSON, no mar
 
 /**
  * Analyze a PR and produce tailored review instructions.
- * Returns null if analysis fails or the harness CLI is unavailable.
+ * Prefers OpenRouter when OPEN_ROUTER_API_KEY is set, falls back to harness CLI.
+ * Returns null if all backends fail.
  */
 export async function analyzePr(prUrl: string, harness: HarnessType = 'pi'): Promise<PrAnalysis | null> {
 	try {
@@ -54,12 +146,18 @@ export async function analyzePr(prUrl: string, harness: HarnessType = 'pi'): Pro
 			return null;
 		}
 
-		const reviewPrompt = await classifyPr(diff, harness);
-		if (!reviewPrompt) {
-			return null;
+		// Prefer OpenRouter when API key is available
+		if (OPEN_ROUTER_API_KEY) {
+			const result = await classifyWithOpenRouter(diff, prUrl);
+			if (result) return result;
+			log.warn('pr-analysis', 'OpenRouter classification failed, falling back to harness CLI');
 		}
 
-		log.info('pr-analysis', `analysis complete for ${prUrl} (${reviewPrompt.length} chars)`);
+		// Fallback: harness CLI one-shot
+		const reviewPrompt = await classifyWithCli(diff, harness);
+		if (!reviewPrompt) return null;
+
+		log.info('pr-analysis', `CLI analysis complete for ${prUrl} (${reviewPrompt.length} chars)`);
 		return { reviewPrompt };
 	} catch (err) {
 		log.warn('pr-analysis', `analysis failed for ${prUrl}: ${err}`);
@@ -67,36 +165,202 @@ export async function analyzePr(prUrl: string, harness: HarnessType = 'pi'): Pro
 	}
 }
 
-// --- Internal ---
+// --- OpenRouter classification ---
 
 /**
- * Fetch the full diff for a PR via `gh pr diff`.
+ * Classify a PR via OpenRouter API. Returns structured classification
+ * and generated review instructions.
  */
-async function fetchPrDiff(prUrl: string): Promise<string | null> {
-	const parsed = parsePrUrl(prUrl);
-	if (!parsed) {
-		log.warn('pr-analysis', `cannot parse PR URL: ${prUrl}`);
+async function classifyWithOpenRouter(diff: string, prUrl: string): Promise<PrAnalysis | null> {
+	const truncatedDiff = truncateDiff(diff);
+
+	try {
+		const response = await fetch(`${OPEN_ROUTER_BASE_URL}/chat/completions`, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${OPEN_ROUTER_API_KEY}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				model: CLASSIFIER_MODEL,
+				messages: [
+					{ role: 'system', content: CLASSIFIER_SYSTEM_PROMPT },
+					{ role: 'user', content: truncatedDiff },
+				],
+				temperature: 0.1,
+				response_format: { type: 'json_object' },
+			}),
+			signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
+		});
+
+		if (!response.ok) {
+			const body = await response.text().catch(() => '');
+			log.warn('pr-analysis', `OpenRouter returned ${response.status}: ${body.slice(0, 200)}`);
+			return null;
+		}
+
+		const data = await response.json() as any;
+		const content = data?.choices?.[0]?.message?.content;
+		if (!content) {
+			log.warn('pr-analysis', 'OpenRouter returned empty content');
+			return null;
+		}
+
+		const classification = JSON.parse(content) as PrClassification;
+		const reviewPrompt = buildReviewInstructions(classification);
+
+		log.info('pr-analysis', `OpenRouter classification for ${prUrl}: risk=${classification.risk}, area=${classification.area}, type=${classification.type}`);
+
+		return { reviewPrompt, classification };
+	} catch (err) {
+		log.warn('pr-analysis', `OpenRouter call failed: ${err}`);
 		return null;
 	}
-
-	const diff = await execGh([
-		'pr', 'diff', String(parsed.number),
-		'--repo', `${parsed.owner}/${parsed.repo}`,
-	]);
-
-	return diff || null;
 }
 
-/**
- * Run the harness CLI in one-shot mode to classify the PR diff
- * and produce tailored review instructions.
- */
-async function classifyPr(diff: string, harness: HarnessType): Promise<string | null> {
-	const truncatedDiff = diff.length > MAX_DIFF_LENGTH
-		? diff.slice(0, MAX_DIFF_LENGTH) + '\n\n[diff truncated]'
-		: diff;
+// --- Build review instructions from classification ---
 
-	const { bin, args } = buildAnalysisCommand(harness);
+/**
+ * Convert a structured PrClassification into tailored review instructions
+ * that get prepended to the review prompt.
+ */
+function buildReviewInstructions(c: PrClassification): string {
+	const lines: string[] = [];
+
+	// Summary and classification
+	lines.push(`PR Summary: ${c.summary}`);
+	lines.push(`Classification: ${c.type} | Risk: ${c.risk} | Area: ${c.area} | Depth: ${c.estimated_review_depth}`);
+	lines.push('');
+
+	// Stack context
+	lines.push(`Primary language: ${c.primary_language}`);
+	if (c.languages.length > 1) {
+		lines.push(`Languages: ${c.languages.join(', ')}`);
+	}
+
+	const stackParts: string[] = [];
+	if (c.stack.frontend?.length) stackParts.push(`Frontend: ${c.stack.frontend.join(', ')}`);
+	if (c.stack.backend?.length) stackParts.push(`Backend: ${c.stack.backend.join(', ')}`);
+	if (c.stack.database?.length) stackParts.push(`Database: ${c.stack.database.join(', ')}`);
+	if (c.stack.infra?.length) stackParts.push(`Infra: ${c.stack.infra.join(', ')}`);
+	if (c.stack.ci_cd?.length) stackParts.push(`CI/CD: ${c.stack.ci_cd.join(', ')}`);
+	if (stackParts.length) {
+		lines.push(`Stack: ${stackParts.join(' | ')}`);
+	}
+	lines.push('');
+
+	// Hosting context and gotchas
+	if (c.hosting && c.hosting.platform !== 'unknown') {
+		lines.push(`Hosting: ${c.hosting.platform} (confidence: ${c.hosting.confidence})`);
+		if (c.hosting.signals.length) {
+			lines.push(`Signals: ${c.hosting.signals.join(', ')}`);
+		}
+		if (c.hosting.gotchas.length) {
+			lines.push('');
+			lines.push('PLATFORM-SPECIFIC GOTCHAS — check for these:');
+			for (const gotcha of c.hosting.gotchas) {
+				lines.push(`  - ${gotcha}`);
+			}
+		}
+		lines.push('');
+	}
+
+	// Risk-based review focus
+	lines.push('Review focus:');
+	switch (c.risk) {
+		case 'critical':
+			lines.push('  - CRITICAL RISK: This PR requires thorough security and correctness review.');
+			lines.push('  - Verify no regressions in production-critical paths.');
+			lines.push('  - Check for data integrity, auth bypass, and injection vulnerabilities.');
+			lines.push('  - Validate rollback strategy exists.');
+			break;
+		case 'high':
+			lines.push('  - HIGH RISK: Pay close attention to security, data integrity, and API contracts.');
+			lines.push('  - Check for breaking changes, missing migrations, and edge cases.');
+			lines.push('  - Verify test coverage for critical paths.');
+			break;
+		case 'medium':
+			lines.push('  - MEDIUM RISK: Standard review depth.');
+			lines.push('  - Check logic correctness, error handling, and test coverage.');
+			lines.push('  - Look for performance implications and maintainability.');
+			break;
+		case 'low':
+			lines.push('  - LOW RISK: Quick scan for obvious issues.');
+			lines.push('  - Verify changes match the stated intent.');
+			lines.push('  - Check for typos, style consistency, and documentation accuracy.');
+			break;
+	}
+
+	// Area-specific guidance
+	const areaGuidance = getAreaGuidance(c.area);
+	if (areaGuidance.length) {
+		lines.push('');
+		lines.push('Area-specific checks:');
+		for (const item of areaGuidance) {
+			lines.push(`  - ${item}`);
+		}
+	}
+
+	return lines.join('\n');
+}
+
+function getAreaGuidance(area: string): string[] {
+	switch (area) {
+		case 'auth':
+			return [
+				'Verify no credentials or tokens are hardcoded or logged.',
+				'Check session handling, token expiry, and privilege escalation.',
+				'Ensure auth checks cannot be bypassed.',
+			];
+		case 'payments':
+			return [
+				'Verify idempotency of payment operations.',
+				'Check for race conditions in balance/charge logic.',
+				'Ensure proper error handling for payment provider failures.',
+			];
+		case 'api':
+			return [
+				'Check for breaking changes to request/response contracts.',
+				'Verify input validation and error response formats.',
+				'Look for missing rate limiting or auth middleware.',
+			];
+		case 'infra':
+			return [
+				'Verify no secrets or credentials in config files.',
+				'Check for destructive operations (resource deletion, data loss).',
+				'Validate IAM/permission changes are least-privilege.',
+			];
+		case 'data':
+			return [
+				'Check migration safety (reversibility, data preservation).',
+				'Verify query performance (indexes, N+1 queries).',
+				'Look for SQL injection or unsafe query construction.',
+			];
+		case 'frontend':
+			return [
+				'Check for XSS vulnerabilities in user-rendered content.',
+				'Verify accessibility (ARIA, keyboard navigation, contrast).',
+				'Look for performance issues (large bundles, unnecessary re-renders).',
+			];
+		case 'backend':
+			return [
+				'Check error handling and logging.',
+				'Verify concurrent access safety (race conditions, deadlocks).',
+				'Look for resource leaks (unclosed connections, file handles).',
+			];
+		default:
+			return [];
+	}
+}
+
+// --- Harness CLI fallback ---
+
+/**
+ * Run the harness CLI in one-shot mode to produce free-text review instructions.
+ */
+async function classifyWithCli(diff: string, harness: HarnessType): Promise<string | null> {
+	const truncatedDiff = truncateDiff(diff);
+	const { bin, args } = buildCliCommand(harness);
 
 	try {
 		const proc = Bun.spawn([bin, ...args], {
@@ -140,10 +404,7 @@ async function classifyPr(diff: string, harness: HarnessType): Promise<string | 
 	}
 }
 
-/**
- * Build the harness-specific command for the analysis one-shot.
- */
-function buildAnalysisCommand(harness: HarnessType): { bin: string; args: string[] } {
+function buildCliCommand(harness: HarnessType): { bin: string; args: string[] } {
 	if (harness === 'claude-code') {
 		const bin = process.env.CLAUDE_BIN || 'claude';
 		const model = ANALYSIS_MODEL || 'haiku';
@@ -151,14 +412,12 @@ function buildAnalysisCommand(harness: HarnessType): { bin: string; args: string
 			bin,
 			args: [
 				'-p',
-				'--bare',
 				'--model', model,
-				'--system-prompt', ANALYSIS_SYSTEM_PROMPT,
+				'--system-prompt', CLI_ANALYSIS_SYSTEM_PROMPT,
 			],
 		};
 	}
 
-	// pi harness
 	const bin = process.env.PI_BIN || 'pi';
 	const model = ANALYSIS_MODEL || 'gemini-2.0-flash';
 	return {
@@ -172,7 +431,33 @@ function buildAnalysisCommand(harness: HarnessType): { bin: string; args: string
 			'--no-tools',
 			'--no-session',
 			'--model', model,
-			'--system-prompt', ANALYSIS_SYSTEM_PROMPT,
+			'--system-prompt', CLI_ANALYSIS_SYSTEM_PROMPT,
 		],
 	};
+}
+
+// --- Shared helpers ---
+
+/**
+ * Fetch the full diff for a PR via `gh pr diff`.
+ */
+async function fetchPrDiff(prUrl: string): Promise<string | null> {
+	const parsed = parsePrUrl(prUrl);
+	if (!parsed) {
+		log.warn('pr-analysis', `cannot parse PR URL: ${prUrl}`);
+		return null;
+	}
+
+	const diff = await execGh([
+		'pr', 'diff', String(parsed.number),
+		'--repo', `${parsed.owner}/${parsed.repo}`,
+	]);
+
+	return diff || null;
+}
+
+function truncateDiff(diff: string): string {
+	return diff.length > MAX_DIFF_LENGTH
+		? diff.slice(0, MAX_DIFF_LENGTH) + '\n\n[diff truncated]'
+		: diff;
 }

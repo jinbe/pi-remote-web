@@ -21,6 +21,8 @@
 		created_at: string;
 		updated_at: string;
 		error: string | null;
+		analysis_json?: string | null;
+		review_prompt?: string | null;
 	}
 
 	/** Statuses considered active (in-progress). */
@@ -261,6 +263,26 @@
 							{job.pr_url}
 						</a>
 					</div>
+				{/if}
+
+				<!-- PR Analysis & Review Prompt -->
+				{#if expandedJob === job.id}
+					{#if job.analysis_json}
+						<div class="px-3 pb-2">
+							<details class="text-xs">
+								<summary class="text-base-content/50 cursor-pointer select-none hover:text-base-content/70">PR Analysis</summary>
+								<pre class="bg-base-200/50 rounded p-2 mt-1 overflow-x-auto font-mono whitespace-pre-wrap">{JSON.stringify(JSON.parse(job.analysis_json), null, 2)}</pre>
+							</details>
+						</div>
+					{/if}
+					{#if job.review_prompt}
+						<div class="px-3 pb-2">
+							<details class="text-xs">
+								<summary class="text-base-content/50 cursor-pointer select-none hover:text-base-content/70">Review Prompt</summary>
+								<div class="bg-base-200/50 rounded p-2 mt-1 whitespace-pre-wrap">{job.review_prompt}</div>
+							</details>
+						</div>
+					{/if}
 				{/if}
 
 				<!-- Go to session link + action buttons for active jobs -->
