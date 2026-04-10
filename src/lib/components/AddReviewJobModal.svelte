@@ -19,7 +19,6 @@
 	let prUrl = $state('');
 	let branch = $state('');
 	let targetBranch = $state('');
-	let reviewSkill = $state('');
 	let model = $state('');
 	let harness = $state<'pi' | 'claude-code'>('pi');
 	let maxLoops = $state(1);
@@ -34,7 +33,6 @@
 			prUrl = '';
 			branch = '';
 			targetBranch = '';
-			reviewSkill = '';
 			model = '';
 			maxLoops = 1;
 			errorMsg = '';
@@ -58,7 +56,6 @@
 					branch: branch.trim() || undefined,
 					target_branch: targetBranch.trim() || undefined,
 					max_loops: maxLoops,
-					review_skill: reviewSkill.trim() || undefined,
 					model: model.trim() || undefined,
 					harness,
 				}),
@@ -174,24 +171,6 @@
 						max="20"
 						bind:value={maxLoops}
 					/>
-				</div>
-			</div>
-
-			<!-- Review skill -->
-			<div class="form-control mt-3">
-				<label class="label" for="review-skill">
-					<span class="label-text">Review Skill (optional)</span>
-				</label>
-				<input
-					id="review-skill"
-					class="input w-full"
-					placeholder="e.g. review"
-					bind:value={reviewSkill}
-				/>
-				<div class="label pt-0">
-					<span class="label-text-alt text-base-content/40">
-						Overrides PI_JOB_REVIEW_SKILL for this job
-					</span>
 				</div>
 			</div>
 

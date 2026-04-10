@@ -24,7 +24,6 @@
 		pr_url: string | null;
 		pr_number: number | null;
 		review_verdict: string | null;
-		review_skill: string | null;
 		loop_count: number;
 		max_loops: number;
 		parent_job_id: string | null;
@@ -354,13 +353,6 @@
 			<!-- Harness badge -->
 			{#if job.harness === 'claude-code'}
 				<span class="badge badge-xs badge-outline" title="Claude Code">◆</span>
-			{/if}
-
-			<!-- Review skill badge -->
-			{#if job.review_skill}
-				<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-0.5" title="Review skill: {job.review_skill}">
-					<Icon name="target" class="w-3 h-3" /> {job.review_skill}
-				</span>
 			{/if}
 
 			<!-- Verdict badge -->

@@ -7,6 +7,7 @@
 import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
 import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt, buildNudgeVerdictPrompt } from './job-prompts';
 import { createSession, sendMessage, stopSession, isActive, getHarness, type HarnessType } from './rpc-manager';
+import { analyzePr } from './pr-analysis';
 import { log } from './logger';
 import { getDb } from './cache';
 import { existsSync } from 'fs';
@@ -188,18 +189,35 @@ async function dispatchJob(job: Job): Promise<void> {
 		}
 
 		const sessionCwd = repoPath;
+		const jobHarness = (job.harness as HarnessType) || getHarness();
 
 		updateJobStatus(job.id, { status: 'running' });
 
-		// Create a session using the job's harness preference (falls back to global default)
-		const jobHarness = (job.harness as HarnessType) || getHarness();
-		const sessionId = await createSession(sessionCwd, job.model ?? undefined, jobHarness);
+		// Pre-analyze the PR for review jobs to produce tailored review instructions
+		let analysis: Awaited<ReturnType<typeof analyzePr>> = null;
+		if (isReview && job.pr_url) {
+			try {
+				analysis = await analyzePr(job.pr_url, jobHarness);
+				if (analysis) {
+					log.info('job-poller', `PR analysis complete for job ${job.id}`);
+				}
+			} catch (err) {
+				log.warn('job-poller', `PR analysis failed for job ${job.id}, proceeding without: ${err}`);
+			}
+		}
+
+		// Review sessions use lean flags to skip unnecessary startup overhead
+		const extraArgs = isReview ? leanFlagsForHarness(jobHarness) : [];
+
+		const sessionId = await createSession(sessionCwd, job.model ?? undefined, jobHarness, extraArgs);
 
 		// Update job with session ID
 		updateJobStatus(job.id, { session_id: sessionId });
 
 		// Send the appropriate prompt
-		const prompt = isReview ? buildReviewPrompt(job, jobHarness) : buildTaskPrompt(job, jobHarness);
+		const prompt = isReview
+			? buildReviewPrompt(job, jobHarness, analysis ?? undefined)
+			: buildTaskPrompt(job, jobHarness);
 		await sendMessage(sessionId, prompt);
 
 		log.info('job-poller', `dispatched ${isReview ? 'review' : 'task'} job ${job.id} → session ${sessionId}`);
@@ -210,6 +228,18 @@ async function dispatchJob(job: Job): Promise<void> {
 			error: `Dispatch failed: ${err.message}`,
 		});
 	}
+}
+
+/**
+ * Return harness-specific flags to strip unnecessary startup overhead
+ * for review sessions.
+ */
+function leanFlagsForHarness(harness: HarnessType): string[] {
+	if (harness === 'claude-code') {
+		return ['--bare'];
+	}
+	// pi: strip extensions, skills, templates, themes (keep tools for gh CLI)
+	return ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes'];
 }
 
 /**
@@ -340,7 +370,11 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 			if (job.max_loops > 0 && job.session_id) {
 				try {
 					const harness = (job.harness as HarnessType) || getHarness();
-					const reviewPrompt = buildReviewPrompt(job, harness);
+					let loopAnalysis: Awaited<ReturnType<typeof analyzePr>> = null;
+					if (job.pr_url) {
+						try { loopAnalysis = await analyzePr(job.pr_url, harness); } catch {}
+					}
+					const reviewPrompt = buildReviewPrompt(job, harness, loopAnalysis ?? undefined);
 					await sendMessage(job.session_id, reviewPrompt);
 				} catch (err) {
 					log.warn('job-poller', `failed to send review prompt for job ${jobId}: ${err}`);

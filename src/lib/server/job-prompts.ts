@@ -3,12 +3,16 @@
  * Each prompt type injects JOB_ID + CALLBACK_URL metadata so the
  * job-callback extension can report results back.
  *
- * When PI_JOB_TASK_SKILL, PI_JOB_LOOP_TASK_SKILL, or PI_JOB_REVIEW_SKILL
- * env vars are set, the prompts invoke the named skill. Otherwise the agent
- * receives only the bare task context and output markers — it decides how
- * to approach the work using its own system prompt and tools.
+ * When PI_JOB_TASK_SKILL or PI_JOB_LOOP_TASK_SKILL env vars are set,
+ * the prompts invoke the named skill. Otherwise the agent receives only
+ * the bare task context and output markers — it decides how to approach
+ * the work using its own system prompt and tools.
+ *
+ * Review prompts are enhanced by an optional PrAnalysis from pr-analysis.ts
+ * which tailors the review focus to the PR's stack and nature of changes.
  */
 import type { Job } from './job-queue';
+import type { PrAnalysis } from './pr-analysis';
 
 // --- Skill configuration from environment ---
 
@@ -16,8 +20,6 @@ import type { Job } from './job-queue';
 export const TASK_SKILL = process.env.PI_JOB_TASK_SKILL || '';
 /** Skill for the task/fix phase inside a review loop (max_loops>0). e.g. 'issue-worker' */
 export const LOOP_TASK_SKILL = process.env.PI_JOB_LOOP_TASK_SKILL || '';
-/** Skill for the review phase inside a review loop. e.g. 'review' */
-export const REVIEW_SKILL = process.env.PI_JOB_REVIEW_SKILL || '';
 
 // --- Metadata header injected at the top of every job prompt ---
 
@@ -119,24 +121,21 @@ export function buildNudgeVerdictPrompt(job: Job, attempt: number): string {
 
 // --- Review prompt ---
 
-export function buildReviewPrompt(job: Job, harness: string = 'pi'): string {
+export function buildReviewPrompt(job: Job, _harness: string = 'pi', analysis?: PrAnalysis): string {
 	const header = metadataHeader(job);
 	const parts = [header, ''];
 
-	if (REVIEW_SKILL && harness === 'pi') {
-		const context: string[] = [];
-		context.push(`Review: ${job.title}`);
-		context.push(`Loop ${job.loop_count}/${job.max_loops}`);
-		if (job.pr_url) context.push(`PR: ${job.pr_url}`);
-		if (job.branch) context.push(`Branch: ${job.branch}`);
-		if (job.target_branch) context.push(`Target branch: ${job.target_branch}`);
-
-		parts.push(`/skill:${REVIEW_SKILL} ${context.join('\n')}`);
-	} else {
-		parts.push(`Review the changes for: ${job.title}`);
-		parts.push(`Loop ${job.loop_count}/${job.max_loops}`);
-		if (job.pr_url) parts.push(`PR: ${job.pr_url}`);
+	// When analysis is available, prepend tailored review instructions
+	if (analysis) {
+		parts.push(analysis.reviewPrompt);
+		parts.push('');
+		parts.push('---');
+		parts.push('');
 	}
+
+	parts.push(`Review the changes for: ${job.title}`);
+	parts.push(`Loop ${job.loop_count}/${job.max_loops}`);
+	if (job.pr_url) parts.push(`PR: ${job.pr_url}`);
 
 	parts.push('');
 	parts.push('=== CRITICAL: REQUIRED STEPS ===');

@@ -14,7 +14,6 @@
 		branch: string | null;
 		pr_url: string | null;
 		review_verdict: string | null;
-		review_skill: string | null;
 		loop_count: number;
 		max_loops: number;
 		parent_job_id: string | null;
@@ -195,13 +194,6 @@
 					{#if job.loop_count > 0 || job.parent_job_id}
 						<span class="badge badge-xs badge-outline inline-flex items-center gap-0.5" title="Loop {job.loop_count}/{job.max_loops}">
 							<Icon name="refresh" class="w-2.5 h-2.5" /> {job.loop_count}/{job.max_loops}
-						</span>
-					{/if}
-
-					<!-- Review skill badge -->
-					{#if job.review_skill}
-						<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-1" title="Review skill: {job.review_skill}">
-							<Icon name="target" class="w-3 h-3" /> {job.review_skill}
 						</span>
 					{/if}
 
