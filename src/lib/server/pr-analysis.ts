@@ -2,12 +2,16 @@
  * PR pre-analysis — examines a PR's diff to produce tailored review instructions.
  *
  * Before dispatching a review session, we classify the PR's stack, nature of
- * work, risk level, and hosting platform. The classification output is converted
- * into tailored review instructions injected into the review prompt.
+ * work, risk level, and hosting platform, then generate tailored review
+ * instructions guided by the Code Review Principles (SOLID, DRY, naming,
+ * error handling, scale, etc.).
  *
  * Two backends are supported:
- *   1. OpenRouter API (preferred) — when OPEN_ROUTER_API_KEY is set, calls
- *      OpenRouter with tiered model selection for structured JSON classification.
+ *   1. OpenRouter API (preferred) — when OPEN_ROUTER_API_KEY is set, runs a
+ *      two-step pipeline: (a) fast structured JSON classification, then
+ *      (b) model-generated review instructions informed by the classification,
+ *      the diff, and the Code Review Principles. Falls back to rules-based
+ *      instruction generation if step (b) fails.
  *   2. Harness CLI fallback — spawns the active harness (claude/pi) in one-shot
  *      mode for a free-text classification.
  *
@@ -58,6 +62,14 @@ const OPEN_ROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 /** Model overrides — defaults follow the tiered strategy. */
 const CLASSIFIER_MODEL = process.env.PI_CLASSIFIER_MODEL || 'mistralai/mistral-small-2603';
 const ANALYSIS_MODEL = process.env.PI_ANALYSIS_MODEL || '';
+
+/** Tiered analysis models — selected by PR risk level. */
+const ANALYSIS_MODEL_MATRIX: Record<string, string> = {
+	low: CLASSIFIER_MODEL,
+	medium: 'mistralai/devstral-2512',
+	high: 'google/gemini-3-flash-preview',
+	critical: 'google/gemini-3.1-pro-preview',
+};
 
 const ANALYSIS_TIMEOUT_MS = 30_000;
 
@@ -130,6 +142,49 @@ Analyze the diff and output:
 
 Be concrete and specific to THIS diff. Do not give generic advice.
 Output plain text instructions that a code reviewer will follow. No JSON, no markdown headers.`;
+
+// --- Code Review Principles ---
+// Distilled from: https://levelup.gitconnected.com/the-ultimate-guideline-for-a-good-code-review-1588bc2979fc
+
+const CODE_REVIEW_PRINCIPLES = `Code Review Principles:
+
+1. SOLID Principles — Check that classes/modules have clear, single responsibilities. Flag if-else/switch chains that should use polymorphism (Strategy pattern). Verify code is open for extension without requiring modification of existing logic. Check that dependencies point toward abstractions.
+
+2. DRY (Don't Repeat Yourself) — Flag duplicated logic across the diff. Look for copy-pasted code with minor parameter differences that should be unified through shared abstractions, generics, or helper functions.
+
+3. Meaningful Names — Verify that new/changed identifiers faithfully represent domain semantics. A first-time reader should understand what each class, method, and variable represents without guessing.
+
+4. No Magic Numbers — Flag hardcoded literals that lack named constants. Numeric and string values should be extracted into well-named constants that explain their purpose and enable reuse.
+
+5. Specific Error Handling — Check that exceptions/errors are caught specifically, not generically. Empty catch blocks and swallowed errors are unacceptable. Each error type should have appropriate handling.
+
+6. Readability Over Brevity — Less code does not mean better code. Complex one-liners should be broken into named intermediate steps. Code should be easy to debug and modify without breaking adjacent logic.
+
+7. Think at Scale — Consider what happens with large datasets. Check for unbounded queries, missing pagination, eager loading of large collections, and operations that assume small input sizes.
+
+8. Tell Don't Ask — Objects should own their behaviour. If code queries an object's state to decide what to do, that logic likely belongs inside the object itself.
+
+9. YAGNI (You Ain't Gonna Need It) — Flag dead code, unused imports, and over-engineered abstractions built for hypothetical future needs. Remove what is not needed now.
+
+10. Null Safety — Check for defensive programming. Look for unguarded calls on potentially null/undefined values. Verify proper use of Optional, null coalescing, or other null-safety patterns appropriate to the language.`;
+
+// --- OpenRouter review analysis system prompt ---
+
+const REVIEW_ANALYSIS_SYSTEM_PROMPT = `You are a senior code reviewer producing tailored review instructions for a pull request.
+
+You will receive a structured PR classification and the PR diff. Generate specific, actionable review instructions that another code reviewer will follow when reviewing this PR.
+
+${CODE_REVIEW_PRINCIPLES}
+
+Instructions for generating your output:
+- Determine which principles are most relevant to the changes in this PR.
+- Generate specific, actionable review instructions — reference files, patterns, or code constructs from the diff.
+- Do NOT mechanically list all 10 principles. Focus only on those that clearly apply to the changes.
+- Include the PR summary, stack context, risk level, and any platform-specific concerns from the classification.
+- Be concrete: "Check null handling in the new fetchUser() return path" is better than "Review null safety."
+- Keep instructions concise but thorough.
+
+Output plain text review instructions. No JSON, no markdown formatting.`;
 
 // --- Public API ---
 
@@ -207,9 +262,12 @@ async function classifyWithOpenRouter(diff: string, prUrl: string): Promise<PrAn
 		}
 
 		const classification = JSON.parse(content) as PrClassification;
-		const reviewPrompt = buildReviewInstructions(classification);
 
-		log.info('pr-analysis', `OpenRouter classification for ${prUrl}: risk=${classification.risk}, area=${classification.area}, type=${classification.type}`);
+		// Step 2: Generate review instructions guided by code review principles
+		const modelInstructions = await generateReviewInstructions(classification, diff);
+		const reviewPrompt = modelInstructions || buildReviewInstructions(classification);
+
+		log.info('pr-analysis', `OpenRouter for ${prUrl}: risk=${classification.risk}, area=${classification.area}, type=${classification.type}, instructions=${modelInstructions ? 'model' : 'fallback'}`);
 
 		return { reviewPrompt, classification };
 	} catch (err) {
@@ -218,7 +276,68 @@ async function classifyWithOpenRouter(diff: string, prUrl: string): Promise<PrAn
 	}
 }
 
-// --- Build review instructions from classification ---
+// --- OpenRouter review analysis (step 2) ---
+
+/**
+ * Generate tailored review instructions via OpenRouter, guided by the
+ * Code Review Principles. Uses the classification from step 1 plus the
+ * raw diff to produce specific, actionable guidance for the reviewer.
+ * Returns null on failure — caller falls back to buildReviewInstructions().
+ */
+async function generateReviewInstructions(
+	classification: PrClassification,
+	diff: string,
+): Promise<string | null> {
+	// PI_ANALYSIS_MODEL overrides the matrix; otherwise select by risk level
+	const analysisModel = ANALYSIS_MODEL
+		|| ANALYSIS_MODEL_MATRIX[classification.risk]
+		|| CLASSIFIER_MODEL;
+	const truncatedDiff = truncateDiff(diff);
+	log.info('pr-analysis', `analysis model: ${analysisModel} (risk=${classification.risk})`);
+
+	try {
+		const response = await fetch(`${OPEN_ROUTER_BASE_URL}/chat/completions`, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${OPEN_ROUTER_API_KEY}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				model: analysisModel,
+				messages: [
+					{ role: 'system', content: REVIEW_ANALYSIS_SYSTEM_PROMPT },
+					{
+						role: 'user',
+						content: `Classification:\n${JSON.stringify(classification, null, 2)}\n\n---\n\nDiff:\n${truncatedDiff}`,
+					},
+				],
+				temperature: 0.3,
+			}),
+			signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
+		});
+
+		if (!response.ok) {
+			const body = await response.text().catch(() => '');
+			log.warn('pr-analysis', `OpenRouter analysis returned ${response.status}: ${body.slice(0, 200)}`);
+			return null;
+		}
+
+		const data = await response.json() as any;
+		const content = data?.choices?.[0]?.message?.content;
+		if (!content?.trim()) {
+			log.warn('pr-analysis', 'OpenRouter analysis returned empty content');
+			return null;
+		}
+
+		log.info('pr-analysis', `review instructions generated (${content.trim().length} chars)`);
+		return content.trim();
+	} catch (err) {
+		log.warn('pr-analysis', `OpenRouter analysis failed: ${err}`);
+		return null;
+	}
+}
+
+// --- Build review instructions from classification (fallback) ---
 
 /**
  * Convert a structured PrClassification into tailored review instructions

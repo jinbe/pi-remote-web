@@ -22,6 +22,7 @@
 	let model = $state('');
 	let harness = $state<'pi' | 'claude-code'>('pi');
 	let maxLoops = $state(1);
+	let comments = $state('');
 	let creating = $state(false);
 	let errorMsg = $state('');
 
@@ -35,6 +36,7 @@
 			targetBranch = '';
 			model = '';
 			maxLoops = 1;
+			comments = '';
 			errorMsg = '';
 		}
 	});
@@ -58,6 +60,7 @@
 					max_loops: maxLoops,
 					model: model.trim() || undefined,
 					harness,
+					description: comments.trim() || undefined,
 				}),
 			});
 
@@ -185,6 +188,20 @@
 					placeholder="e.g. anthropic/claude-sonnet-4"
 					bind:value={model}
 				/>
+			</div>
+
+			<!-- Comments for reviewer -->
+			<div class="form-control mt-3">
+				<label class="label" for="review-comments">
+					<span class="label-text">Comments (optional)</span>
+				</label>
+				<textarea
+					id="review-comments"
+					class="textarea w-full"
+					placeholder="Additional context or instructions for the reviewing agent…"
+					rows="3"
+					bind:value={comments}
+				></textarea>
 			</div>
 
 			{#if errorMsg}
