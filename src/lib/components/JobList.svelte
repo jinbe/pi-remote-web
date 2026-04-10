@@ -65,6 +65,11 @@
 	const filteredJobs = $derived(showAll ? repoJobs : activeJobs);
 	const hiddenCount = $derived(repoJobs.length - activeJobs.length);
 
+	function formatJson(raw: string): string {
+		try { return JSON.stringify(JSON.parse(raw), null, 2); }
+		catch { return raw; }
+	}
+
 	async function toggleChain(jobId: string) {
 		hapticLight();
 		if (expandedJob === jobId) {
@@ -271,7 +276,7 @@
 						<div class="px-3 pb-2">
 							<details class="text-xs">
 								<summary class="text-base-content/50 cursor-pointer select-none hover:text-base-content/70">PR Analysis</summary>
-								<pre class="bg-base-200/50 rounded p-2 mt-1 overflow-x-auto font-mono whitespace-pre-wrap">{JSON.stringify(JSON.parse(job.analysis_json), null, 2)}</pre>
+								<pre class="bg-base-200/50 rounded p-2 mt-1 overflow-x-auto font-mono whitespace-pre-wrap">{formatJson(job.analysis_json)}</pre>
 							</details>
 						</div>
 					{/if}

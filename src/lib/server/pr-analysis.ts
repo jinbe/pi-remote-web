@@ -499,7 +499,7 @@ async function classifyWithCli(diff: string, harness: HarnessType): Promise<stri
 			})(),
 			new Promise<never>((_, reject) => {
 				setTimeout(() => {
-					proc.kill();
+					try { proc.kill(); } catch {}
 					reject(new Error(`analysis timed out after ${ANALYSIS_TIMEOUT_MS}ms`));
 				}, ANALYSIS_TIMEOUT_MS);
 			}),

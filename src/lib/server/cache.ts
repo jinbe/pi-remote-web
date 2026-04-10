@@ -161,13 +161,16 @@ export function getDb(): Database {
 				callback_token TEXT NOT NULL DEFAULT (lower(hex(randomblob(16)))),
 				review_skill TEXT,
 				model TEXT,
-				harness TEXT DEFAULT 'pi'
+				harness TEXT DEFAULT 'pi',
+				analysis_json TEXT,
+				review_prompt TEXT
 			)`);
-			// Copy existing columns — model may not exist in old schema
-			const oldCols = db.query("PRAGMA table_info(jobs)").all() as { name: string }[];
-			const colNames = oldCols.map(c => c.name);
-			const selectCols = colNames.join(', ') + (colNames.includes('model') ? '' : ', NULL AS model');
-			db.run(`INSERT INTO jobs_new SELECT ${selectCols} FROM jobs`);
+			// Copy data — match only columns present in both old and new tables
+			const oldCols = (db.query("PRAGMA table_info(jobs)").all() as { name: string }[]).map(c => c.name);
+			const newCols = (db.query("PRAGMA table_info(jobs_new)").all() as { name: string }[]).map(c => c.name);
+			const shared = newCols.filter(c => oldCols.includes(c));
+			const cols = shared.join(', ');
+			db.run(`INSERT INTO jobs_new (${cols}) SELECT ${cols} FROM jobs`);
 			db.run('DROP TABLE jobs');
 			db.run('ALTER TABLE jobs_new RENAME TO jobs');
 			// Recreate indexes

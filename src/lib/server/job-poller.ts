@@ -382,7 +382,9 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 					const harness = (job.harness as HarnessType) || getHarness();
 					let loopAnalysis: Awaited<ReturnType<typeof analyzePr>> = null;
 					if (job.pr_url) {
-						try { loopAnalysis = await analyzePr(job.pr_url, harness); } catch {}
+						try { loopAnalysis = await analyzePr(job.pr_url, harness); } catch (err) {
+						log.warn('job-poller', `loop analysis failed for job ${jobId} (${job.pr_url}): ${err}`);
+					}
 					}
 					const reviewPrompt = buildReviewPrompt(job, harness, loopAnalysis ?? undefined);
 					await sendMessage(job.session_id, reviewPrompt);

@@ -143,6 +143,11 @@
 	const failedCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'failed').length);
 	const totalCount = $derived((data.jobs as Job[]).length);
 
+	function formatJson(raw: string): string {
+		try { return JSON.stringify(JSON.parse(raw), null, 2); }
+		catch { return raw; }
+	}
+
 	function countForFilter(value: string): number {
 		switch (value) {
 			case 'active': return activeCount;
@@ -478,7 +483,7 @@
 				{#if job.analysis_json}
 					<details class="text-sm">
 						<summary class="text-xs font-semibold text-base-content/50 cursor-pointer select-none hover:text-base-content/70">PR Analysis</summary>
-						<pre class="bg-base-100/50 rounded-lg p-3 mt-1 overflow-x-auto text-xs font-mono whitespace-pre-wrap">{JSON.stringify(JSON.parse(job.analysis_json), null, 2)}</pre>
+						<pre class="bg-base-100/50 rounded-lg p-3 mt-1 overflow-x-auto text-xs font-mono whitespace-pre-wrap">{formatJson(job.analysis_json)}</pre>
 					</details>
 				{/if}
 
