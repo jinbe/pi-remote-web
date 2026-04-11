@@ -155,18 +155,43 @@ pre {
 
 /* ── Touch target fixes ───────────────────────────────────────────── */
 
+/* Enhanced focus visibility for accessibility - applies to all devices */
+:focus-visible {
+	outline: 2px solid var(--color-primary);
+	outline-offset: 2px;
+}
+
 /* Increase touch target sizes for mobile - WCAG 2.5.5 Target Size (AAA) */
 @media (hover: none) and (pointer: coarse) {
 	/* btn-xs: 24px → 44px minimum */
 	.btn-xs:not(.btn-square, .btn-circle) {
 		--size: calc(var(--size-field, 0.25rem) * 11);
+		
 		min-height: 2.75rem;
 	}
 	
 	/* btn-sm: 32px → 44px minimum */
 	.btn-sm:not(.btn-square, .btn-circle) {
 		--size: calc(var(--size-field, 0.25rem) * 11);
+		
 		min-height: 2.75rem;
+	}
+	
+	/* Small circular/square buttons also need minimum touch targets */
+	.btn-xs.btn-circle,
+	.btn-sm.btn-circle,
+	.btn-xs.btn-square,
+	.btn-sm.btn-square,
+	[role="button"].btn-xs.btn-circle,
+	[role="button"].btn-sm.btn-circle,
+	[role="button"].btn-xs.btn-square,
+	[role="button"].btn-sm.btn-square,
+	a[role="button"].btn-xs.btn-circle,
+	a[role="button"].btn-sm.btn-circle,
+	a[role="button"].btn-xs.btn-square,
+	a[role="button"].btn-sm.btn-square {
+		min-height: 2.75rem;
+		min-width: 2.75rem;
 	}
 	
 	/* Ensure all interactive elements have minimum touch targets */
@@ -176,12 +201,6 @@ pre {
 		min-width: 2.75rem;
 		min-height: 2.75rem;
 		padding: 0.5rem;
-	}
-	
-	/* Enhanced focus visibility for accessibility */
-	:focus-visible {
-		outline: 2px solid var(--color-primary);
-		outline-offset: 2px;
 	}
 	
 	/* Remove outline from non-interactive elements */
