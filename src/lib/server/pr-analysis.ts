@@ -516,7 +516,7 @@ async function classifyWithCli(diff: string, harness: HarnessType): Promise<stri
 			stderr: 'pipe',
 		});
 
-		let timeoutId: number | undefined;
+		let timeoutId: NodeJS.Timeout | undefined;
 		const result = await Promise.race([
 			(async () => {
 				try {
