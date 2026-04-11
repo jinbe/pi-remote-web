@@ -501,9 +501,23 @@
 	/* Blockquotes */
 	:global(.markdown-body blockquote) {
 		margin: 0.5em 0;
-		padding: 0.25em 0.75em;
-		border-left: 3px solid oklch(50% 0 0 / 0.3);
+		padding: 0.5em 0.75em;
+		background-color: oklch(0% 0 0 / 0.08);
+		border-radius: 0.25rem;
 		opacity: 0.85;
+		position: relative;
+	}
+	
+	:global(.markdown-body blockquote::before) {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		width: 2px;
+		background-color: var(--color-primary);
+		border-radius: 0.25rem 0 0 0.25rem;
+		opacity: 0.3;
 	}
 
 	:global(.markdown-body blockquote p) {
