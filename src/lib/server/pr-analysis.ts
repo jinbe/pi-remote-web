@@ -516,17 +516,24 @@ async function classifyWithCli(diff: string, harness: HarnessType): Promise<stri
 			stderr: 'pipe',
 		});
 
+		let timeoutId: number | undefined;
 		const result = await Promise.race([
 			(async () => {
-				const [stdout, stderr, exitCode] = await Promise.all([
-					new Response(proc.stdout).text(),
-					new Response(proc.stderr).text(),
-					proc.exited,
-				]);
-				return { stdout, stderr, exitCode };
+				try {
+					const [stdout, stderr, exitCode] = await Promise.all([
+						new Response(proc.stdout).text(),
+						new Response(proc.stderr).text(),
+						proc.exited,
+					]);
+					return { stdout, stderr, exitCode };
+				} finally {
+					if (timeoutId !== undefined) {
+						clearTimeout(timeoutId);
+					}
+				}
 			})(),
 			new Promise<never>((_, reject) => {
-				setTimeout(() => {
+				timeoutId = setTimeout(() => {
 					try { proc.kill(); } catch {}
 					reject(new Error(`analysis timed out after ${ANALYSIS_TIMEOUT_MS}ms`));
 				}, ANALYSIS_TIMEOUT_MS);
