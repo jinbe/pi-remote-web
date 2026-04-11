@@ -24,7 +24,6 @@
 		pr_url: string | null;
 		pr_number: number | null;
 		review_verdict: string | null;
-		review_skill: string | null;
 		loop_count: number;
 		max_loops: number;
 		parent_job_id: string | null;
@@ -41,6 +40,8 @@
 		max_no_verdict_retries: number;
 		model: string | null;
 		harness: 'pi' | 'claude-code' | null;
+		analysis_json: string | null;
+		review_prompt: string | null;
 	}
 
 	let { data } = $props();
@@ -141,6 +142,11 @@
 	const doneCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'done').length);
 	const failedCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'failed').length);
 	const totalCount = $derived((data.jobs as Job[]).length);
+
+	function formatJson(raw: string): string {
+		try { return JSON.stringify(JSON.parse(raw), null, 2); }
+		catch { return raw; }
+	}
 
 	function countForFilter(value: string): number {
 		switch (value) {
@@ -356,13 +362,6 @@
 				<span class="badge badge-xs badge-outline" title="Claude Code">◆</span>
 			{/if}
 
-			<!-- Review skill badge -->
-			{#if job.review_skill}
-				<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-0.5" title="Review skill: {job.review_skill}">
-					<Icon name="target" class="w-3 h-3" /> {job.review_skill}
-				</span>
-			{/if}
-
 			<!-- Verdict badge -->
 			{#if job.review_verdict === 'approved'}
 				<span class="badge badge-xs badge-success">approved</span>
@@ -478,6 +477,22 @@
 						<div class="text-xs font-semibold text-error/70 mb-1">Error</div>
 						<div class="bg-error/10 rounded-lg p-3 text-error whitespace-pre-wrap">{job.error}</div>
 					</div>
+				{/if}
+
+				<!-- PR Analysis -->
+				{#if job.analysis_json}
+					<details class="text-sm">
+						<summary class="text-xs font-semibold text-base-content/50 cursor-pointer select-none hover:text-base-content/70">PR Analysis</summary>
+						<pre class="bg-base-100/50 rounded-lg p-3 mt-1 overflow-x-auto text-xs font-mono whitespace-pre-wrap">{formatJson(job.analysis_json)}</pre>
+					</details>
+				{/if}
+
+				<!-- Review Prompt -->
+				{#if job.review_prompt}
+					<details class="text-sm">
+						<summary class="text-xs font-semibold text-base-content/50 cursor-pointer select-none hover:text-base-content/70">Review Prompt</summary>
+						<div class="bg-base-100/50 rounded-lg p-3 mt-1 whitespace-pre-wrap text-xs">{job.review_prompt}</div>
+					</details>
 				{/if}
 
 				<!-- PR link -->

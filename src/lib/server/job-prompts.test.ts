@@ -33,9 +33,10 @@ function makeJob(overrides?: Partial<Job>): Job {
 		no_verdict_retries: 0,
 		max_no_verdict_retries: 3,
 		callback_token: 'test-token',
-		review_skill: null,
 		model: null,
 		harness: 'pi',
+		analysis_json: null,
+		review_prompt: null,
 		...overrides,
 	};
 }

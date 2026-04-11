@@ -22,7 +22,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 };
 
 /** Fields that can be updated via PATCH. Rejects internal-only fields like session_id. */
-const ALLOWED_PATCH_FIELDS = ['status', 'pr_url', 'pr_number', 'review_verdict', 'result_summary', 'branch', 'review_skill'] as const;
+const ALLOWED_PATCH_FIELDS = ['status', 'pr_url', 'pr_number', 'review_verdict', 'result_summary', 'branch'] as const;
 
 export const GET: RequestHandler = async ({ params }) => {
 	const job = getJob(params.id);

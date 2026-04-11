@@ -14,7 +14,6 @@
 		branch: string | null;
 		pr_url: string | null;
 		review_verdict: string | null;
-		review_skill: string | null;
 		loop_count: number;
 		max_loops: number;
 		parent_job_id: string | null;
@@ -22,6 +21,8 @@
 		created_at: string;
 		updated_at: string;
 		error: string | null;
+		analysis_json?: string | null;
+		review_prompt?: string | null;
 	}
 
 	/** Statuses considered active (in-progress). */
@@ -63,6 +64,11 @@
 	const activeJobs = $derived(repoJobs.filter((j) => ACTIVE_STATUSES.has(j.status)));
 	const filteredJobs = $derived(showAll ? repoJobs : activeJobs);
 	const hiddenCount = $derived(repoJobs.length - activeJobs.length);
+
+	function formatJson(raw: string): string {
+		try { return JSON.stringify(JSON.parse(raw), null, 2); }
+		catch { return raw; }
+	}
 
 	async function toggleChain(jobId: string) {
 		hapticLight();
@@ -198,13 +204,6 @@
 						</span>
 					{/if}
 
-					<!-- Review skill badge -->
-					{#if job.review_skill}
-						<span class="badge badge-xs badge-secondary hidden sm:inline-flex items-center gap-1" title="Review skill: {job.review_skill}">
-							<Icon name="target" class="w-3 h-3" /> {job.review_skill}
-						</span>
-					{/if}
-
 					<!-- Verdict badge for reviews -->
 					{#if job.review_verdict === 'approved'}
 						<span class="badge badge-xs badge-success">approved</span>
@@ -269,6 +268,26 @@
 							{job.pr_url}
 						</a>
 					</div>
+				{/if}
+
+				<!-- PR Analysis & Review Prompt -->
+				{#if expandedJob === job.id}
+					{#if job.analysis_json}
+						<div class="px-3 pb-2">
+							<details class="text-xs">
+								<summary class="text-base-content/50 cursor-pointer select-none hover:text-base-content/70">PR Analysis</summary>
+								<pre class="bg-base-200/50 rounded p-2 mt-1 overflow-x-auto font-mono whitespace-pre-wrap">{formatJson(job.analysis_json)}</pre>
+							</details>
+						</div>
+					{/if}
+					{#if job.review_prompt}
+						<div class="px-3 pb-2">
+							<details class="text-xs">
+								<summary class="text-base-content/50 cursor-pointer select-none hover:text-base-content/70">Review Prompt</summary>
+								<div class="bg-base-200/50 rounded p-2 mt-1 whitespace-pre-wrap">{job.review_prompt}</div>
+							</details>
+						</div>
+					{/if}
 				{/if}
 
 				<!-- Go to session link + action buttons for active jobs -->

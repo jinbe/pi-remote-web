@@ -140,6 +140,25 @@ Edit `.env` and set values as needed. All variables are optional and have sensib
 | `PI_PR_POLL_INTERVAL_SECONDS` | `600` | Polling interval in seconds (10 minutes) |
 | `PI_PR_POLL_CONCURRENCY` | `5` | Max concurrent running jobs |
 
+**PR Analysis:**
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `OPEN_ROUTER_API_KEY` | _(unset)_ | OpenRouter API key for PR classification and review analysis |
+| `PI_CLASSIFIER_MODEL` | `mistralai/mistral-small-2603` | OpenRouter model for structured PR classification |
+| `PI_ANALYSIS_MODEL` | _(tiered, see below)_ | Override to force a specific model for review instruction generation |
+
+When `OPEN_ROUTER_API_KEY` is set, each review job runs a two-step analysis before dispatching the reviewer agent: (1) a fast classification of the PR's risk, area, and stack, then (2) generation of tailored review instructions guided by the [Code Review Principles](https://levelup.gitconnected.com/the-ultimate-guideline-for-a-good-code-review-1588bc2979fc) — covering SOLID, DRY, naming, error handling, scale, and more. If the analysis model call fails, a rules-based fallback produces instructions from the classification alone.
+
+The analysis model is selected by PR risk level (override with `PI_ANALYSIS_MODEL`):
+
+| Risk | Model |
+| --- | --- |
+| low | classifier model (default `mistral-small`) |
+| medium | `mistralai/devstral-2512` |
+| high | `google/gemini-3-flash-preview` |
+| critical | `google/gemini-3.1-pro-preview` |
+
 ### 4. Extension Setup
 
 Symlink the job-callback extension into Pi's extensions directory:

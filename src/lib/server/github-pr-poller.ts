@@ -19,7 +19,7 @@
  */
 import { getDb } from './cache';
 import { createJob, findActiveJobByPrUrl } from './job-queue';
-import { REVIEW_SKILL } from './job-prompts';
+
 import { getHarness } from './rpc-manager';
 import { log } from './logger';
 import { execGh } from './gh-utils';
@@ -411,7 +411,7 @@ async function processPrs(
 				branch: pr.headRefName,
 				target_branch: pr.baseRefName,
 				pr_url: prUrl,
-				review_skill: REVIEW_SKILL || undefined,
+	
 				harness: getHarness(),
 			});
 			// Record that we kicked off a review so we don't re-trigger on the

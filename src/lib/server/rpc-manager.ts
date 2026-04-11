@@ -530,13 +530,14 @@ export async function resumeSession(
 	}
 }
 
-export async function createSession(cwd: string, model?: string, harness?: HarnessType): Promise<string> {
+export async function createSession(cwd: string, model?: string, harness?: HarnessType, extraArgs?: string[]): Promise<string> {
 	const effectiveHarness = harness || getHarness();
 	const tempId = crypto.randomUUID();
 	const socketPath = socketPathFor(tempId);
 
 	const piArgs: string[] = [];
 	if (model) piArgs.push('--model', model);
+	if (extraArgs) piArgs.push(...extraArgs);
 
 	const relayPid = await spawnRelay(socketPath, cwd, piArgs, effectiveHarness);
 
