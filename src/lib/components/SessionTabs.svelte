@@ -107,7 +107,6 @@
 	open={showNewSession}
 	defaultCwd={currentCwd}
 	{recentCwds}
-	{recentModels}
 	onclose={() => (showNewSession = false)}
 />
 

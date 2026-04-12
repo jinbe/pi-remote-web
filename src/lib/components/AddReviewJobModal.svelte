@@ -2,6 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { hapticLight, hapticMedium } from '$lib/haptics';
 	import PathInput from '$lib/components/PathInput.svelte';
+	import ModelSelect from '$lib/components/ModelSelect.svelte';
 
 	let {
 		open = false,
@@ -177,16 +178,16 @@
 				</div>
 			</div>
 
-			<!-- Model (optional) -->
+			<!-- Model -->
 			<div class="form-control mt-3">
 				<label class="label" for="review-model">
-					<span class="label-text">Model (optional)</span>
+					<span class="label-text">Model</span>
 				</label>
-				<input
+				<ModelSelect
 					id="review-model"
-					class="input w-full"
-					placeholder="e.g. anthropic/claude-sonnet-4"
 					bind:value={model}
+					harness={harness}
+					placeholder="Select or type a model..."
 				/>
 			</div>
 

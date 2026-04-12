@@ -729,7 +729,6 @@
 	open={showNewSession}
 	defaultCwd={newSessionCwd}
 	{recentCwds}
-	{recentModels}
 	defaultHarness={newSessionHarness}
 	onclose={() => (showNewSession = false)}
 />

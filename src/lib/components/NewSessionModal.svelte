@@ -2,19 +2,18 @@
 	import { goto } from '$app/navigation';
 	import { hapticLight, hapticMedium } from '$lib/haptics';
 	import PathInput from '$lib/components/PathInput.svelte';
+	import ModelSelect from '$lib/components/ModelSelect.svelte';
 
 	let {
 		open = false,
 		defaultCwd = '',
 		recentCwds = [],
-		recentModels = [],
 		defaultHarness = 'pi' as 'pi' | 'claude-code',
 		onclose
 	}: {
 		open: boolean;
 		defaultCwd?: string;
 		recentCwds?: string[];
-		recentModels?: string[];
 		defaultHarness?: 'pi' | 'claude-code';
 		onclose: () => void;
 	} = $props();
@@ -96,23 +95,14 @@
 
 			<div class="form-control mt-4">
 				<label class="label" for="model-input">
-					<span class="label-text">Model (optional)</span>
+					<span class="label-text">Model</span>
 				</label>
-				<input
+				<ModelSelect
 					id="model-input"
-					class="input w-full"
-					placeholder="e.g. anthropic/claude-sonnet-4"
 					bind:value={model}
+					harness={harness}
+					placeholder="Select or type a model..."
 				/>
-				{#if recentModels.length > 0}
-					<div class="mt-2 flex flex-wrap gap-1">
-						{#each recentModels.slice(0, 5) as rm}
-							<button class="badge badge-outline badge-sm cursor-pointer" onclick={() => { hapticLight(); model = rm; }}>
-								{rm}
-							</button>
-						{/each}
-					</div>
-				{/if}
 			</div>
 
 			<div class="form-control mt-4">
