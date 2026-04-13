@@ -163,7 +163,8 @@ export function getDb(): Database {
 				model TEXT,
 				harness TEXT DEFAULT 'pi',
 				analysis_json TEXT,
-				review_prompt TEXT
+				review_prompt TEXT,
+				skip_ci_checks INTEGER NOT NULL DEFAULT 0
 			)`);
 			// Copy data — match only columns present in both old and new tables
 			const oldCols = (db.query("PRAGMA table_info(jobs)").all() as { name: string }[]).map(c => c.name);

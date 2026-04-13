@@ -149,7 +149,7 @@ export async function pollOnce(): Promise<void> {
 			if (!job) break; // No more queued jobs
 
 			// Gate: jobs with a PR must wait for all CI checks to pass before dispatch
-			if (job.pr_url) {
+			if (job.pr_url && !job.skip_ci_checks) {
 				const ciStatus = await arePrChecksReady(job.pr_url);
 				if (!ciStatus.ready) {
 					// Re-queue the job so it gets picked up in a later poll cycle

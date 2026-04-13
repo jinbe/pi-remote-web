@@ -41,6 +41,7 @@ export interface Job {
 	harness: string | null;
 	analysis_json: string | null;
 	review_prompt: string | null;
+	skip_ci_checks: number;
 }
 
 export interface CreateJobInput {
@@ -58,6 +59,7 @@ export interface CreateJobInput {
 	pr_url?: string;
 	model?: string;
 	harness?: string;
+	skip_ci_checks?: boolean;
 }
 
 export interface UpdateJobInput {
@@ -82,8 +84,8 @@ export interface UpdateJobInput {
 
 function insertJobQuery() {
 	return getDb().query(`
-		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, model, harness)
-		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $model, $harness)
+		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, model, harness, skip_ci_checks)
+		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $model, $harness, $skip_ci_checks)
 		RETURNING *
 	`);
 }
@@ -131,6 +133,7 @@ export function createJob(input: CreateJobInput): Job {
 		$pr_url: input.pr_url ?? null,
 		$model: input.model ?? null,
 		$harness: input.harness ?? 'pi',
+		$skip_ci_checks: input.skip_ci_checks ? 1 : 0,
 	}) as Job;
 
 	log.info('job-queue', `created job ${row.id} (${row.type ?? 'task'}): ${row.title}`);
