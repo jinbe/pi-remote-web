@@ -37,6 +37,7 @@ function makeJob(overrides?: Partial<Job>): Job {
 		harness: 'pi',
 		analysis_json: null,
 		review_prompt: null,
+		skip_ci_checks: 0,
 		...overrides,
 	};
 }
