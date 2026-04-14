@@ -138,6 +138,14 @@ export function buildReviewPrompt(job: Job, _harness: string = 'pi', analysis?: 
 	if (job.pr_url) parts.push(`PR: ${job.pr_url}`);
 
 	parts.push('');
+	parts.push('=== PR CONVERSATION CONTEXT ===');
+	parts.push('Before finalizing your review, read through the existing PR comments and conversation.');
+	parts.push('Pay close attention to messages that directly address or respond to previously raised issues.');
+	parts.push('If an issue from a prior review has been acknowledged, explained, or resolved in the');
+	parts.push('conversation, do NOT re-raise it unless the response is insufficient or the fix is incorrect.');
+	parts.push('Your review should focus on the current state of the code and any unresolved concerns.');
+	parts.push('================================');
+	parts.push('');
 	parts.push('=== CRITICAL: REQUIRED STEPS ===');
 	parts.push('After completing the review, you MUST do BOTH of these steps IN ORDER:');
 	parts.push('');
