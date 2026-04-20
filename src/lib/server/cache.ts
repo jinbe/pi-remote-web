@@ -115,6 +115,7 @@ export function getDb(): Database {
 		try { db.run('ALTER TABLE jobs ADD COLUMN analysis_json TEXT'); } catch {}
 		try { db.run('ALTER TABLE jobs ADD COLUMN review_prompt TEXT'); } catch {}
 		try { db.run('ALTER TABLE jobs ADD COLUMN skip_ci_checks INTEGER NOT NULL DEFAULT 0'); } catch {}
+		try { db.run('ALTER TABLE jobs ADD COLUMN comment_only INTEGER NOT NULL DEFAULT 0'); } catch {}
 
 		// Migration: Test if 'reviewing' status is allowed by trying a test insert
 		// If it fails, we need to migrate the schema to remove CHECK constraints
@@ -197,6 +198,8 @@ export function getDb(): Database {
 		)`);
 
 		db.run('CREATE INDEX IF NOT EXISTS idx_monitored_repos_enabled ON monitored_repos(enabled)');
+		try { db.run('ALTER TABLE monitored_repos ADD COLUMN comment_only INTEGER NOT NULL DEFAULT 0'); } catch {}
+		try { db.run('ALTER TABLE monitored_repos ADD COLUMN skip_ci_checks INTEGER NOT NULL DEFAULT 0'); } catch {}
 
 		db.run(`CREATE TABLE IF NOT EXISTS pr_review_state (
 			pr_url TEXT PRIMARY KEY,

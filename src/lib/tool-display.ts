@@ -9,9 +9,26 @@ export interface DiffLine {
 export function getArgs(tc: { arguments?: string | Record<string, any> }): Record<string, any> {
 	if (!tc.arguments) return {};
 	if (typeof tc.arguments === 'string') {
-		try { return JSON.parse(tc.arguments); } catch { return {}; }
+		try { return normalizeToolArgs(JSON.parse(tc.arguments)); } catch { return {}; }
 	}
-	return tc.arguments;
+	return normalizeToolArgs(tc.arguments);
+}
+
+/**
+ * Normalise Claude's snake_case tool input keys to pi's camelCase so the
+ * pretty renderers and `toolSummary` work uniformly across harnesses.
+ *
+ *   file_path  → path
+ *   old_string → oldText
+ *   new_string → newText
+ */
+function normalizeToolArgs(args: Record<string, any>): Record<string, any> {
+	if (!args || typeof args !== 'object') return args;
+	const out: Record<string, any> = { ...args };
+	if (out.file_path !== undefined && out.path === undefined) out.path = out.file_path;
+	if (out.old_string !== undefined && out.oldText === undefined) out.oldText = out.old_string;
+	if (out.new_string !== undefined && out.newText === undefined) out.newText = out.new_string;
+	return out;
 }
 
 export function shortPath(p: string): string {

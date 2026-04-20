@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import logoSvg from '$lib/assets/logo.svg';
+	import PiWordmark from '$lib/components/PiWordmark.svelte';
 
 	let { data, form } = $props();
 
@@ -18,11 +18,10 @@
 </svelte:head>
 
 <div class="flex items-center justify-center h-full">
-	<div class="card bg-base-200 shadow-xl w-full max-w-sm mx-4">
-		<div class="card-body items-center text-center">
-			<img src={logoSvg} alt="Pi" class="h-12 w-12 rounded-lg mb-2" />
-			<h2 class="card-title">Pi Dashboard</h2>
-			<p class="text-sm text-base-content/60 mb-4">Enter your password to continue</p>
+	<div class="border border-base-300 bg-base-200 w-full max-w-sm mx-4">
+		<div class="p-8 flex flex-col items-center text-center">
+			<div class="mb-5"><PiWordmark height={28} /></div>
+			<p class="text-sm text-base-content-subtle mb-5">Enter your password to continue</p>
 
 			{#if form?.error}
 				<div class="alert alert-error text-sm w-full">

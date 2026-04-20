@@ -16,13 +16,15 @@ export const GET: RequestHandler = async ({ params }) => {
 export const PATCH: RequestHandler = async ({ params, request }) => {
 	try {
 		const body = await request.json();
-		const { local_path, assigned_only, manual_only, enabled } = body;
+		const { local_path, assigned_only, manual_only, enabled, comment_only, skip_ci_checks } = body;
 
 		const repo = updateMonitoredRepo(params.id, {
 			local_path: local_path !== undefined ? (local_path?.trim() || null) : undefined,
 			assigned_only: assigned_only !== undefined ? Boolean(assigned_only) : undefined,
 			manual_only: manual_only !== undefined ? Boolean(manual_only) : undefined,
 			enabled: enabled !== undefined ? Boolean(enabled) : undefined,
+			comment_only: comment_only !== undefined ? Boolean(comment_only) : undefined,
+			skip_ci_checks: skip_ci_checks !== undefined ? Boolean(skip_ci_checks) : undefined,
 		});
 
 		if (!repo) throw error(404, 'Monitored repo not found');

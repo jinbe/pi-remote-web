@@ -38,6 +38,7 @@ function makeJob(overrides?: Partial<Job>): Job {
 		analysis_json: null,
 		review_prompt: null,
 		skip_ci_checks: 0,
+		comment_only: 0,
 		...overrides,
 	};
 }

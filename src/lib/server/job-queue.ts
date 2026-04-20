@@ -42,6 +42,7 @@ export interface Job {
 	analysis_json: string | null;
 	review_prompt: string | null;
 	skip_ci_checks: number;
+	comment_only: number;
 }
 
 export interface CreateJobInput {
@@ -60,6 +61,7 @@ export interface CreateJobInput {
 	model?: string;
 	harness?: string;
 	skip_ci_checks?: boolean;
+	comment_only?: boolean;
 }
 
 export interface UpdateJobInput {
@@ -84,8 +86,8 @@ export interface UpdateJobInput {
 
 function insertJobQuery() {
 	return getDb().query(`
-		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, model, harness, skip_ci_checks)
-		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $model, $harness, $skip_ci_checks)
+		INSERT INTO jobs (type, title, description, repo, branch, issue_url, target_branch, priority, parent_job_id, loop_count, max_loops, pr_url, model, harness, skip_ci_checks, comment_only)
+		VALUES ($type, $title, $description, $repo, $branch, $issue_url, $target_branch, $priority, $parent_job_id, $loop_count, $max_loops, $pr_url, $model, $harness, $skip_ci_checks, $comment_only)
 		RETURNING *
 	`);
 }
@@ -134,6 +136,7 @@ export function createJob(input: CreateJobInput): Job {
 		$model: input.model ?? null,
 		$harness: input.harness ?? 'pi',
 		$skip_ci_checks: input.skip_ci_checks ? 1 : 0,
+		$comment_only: input.comment_only ? 1 : 0,
 	}) as Job;
 
 	log.info('job-queue', `created job ${row.id} (${row.type ?? 'task'}): ${row.title}`);

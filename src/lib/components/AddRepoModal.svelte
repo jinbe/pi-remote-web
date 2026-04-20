@@ -17,6 +17,8 @@
 	let assignedOnly = $state(true);
 	let manualOnly = $state(true);
 	let enabled = $state(true);
+	let commentOnly = $state(false);
+	let skipCiChecks = $state(false);
 	let creating = $state(false);
 	let errorMsg = $state('');
 
@@ -39,6 +41,8 @@
 			assignedOnly = true;
 			manualOnly = true;
 			enabled = true;
+			commentOnly = false;
+			skipCiChecks = false;
 			errorMsg = '';
 		}
 	});
@@ -60,6 +64,8 @@
 					assigned_only: assignedOnly,
 					manual_only: manualOnly,
 					enabled,
+					comment_only: commentOnly,
+					skip_ci_checks: skipCiChecks,
 				}),
 			});
 
@@ -161,6 +167,26 @@
 						<div>
 							<span class="label-text font-medium">Enabled</span>
 							<div class="text-xs text-base-content/50">Master toggle — disabled repos are never scanned</div>
+						</div>
+					</label>
+				</div>
+
+				<div class="form-control">
+					<label class="label cursor-pointer justify-start gap-3">
+						<input type="checkbox" class="toggle toggle-primary toggle-sm" bind:checked={commentOnly} />
+						<div>
+							<span class="label-text font-medium">Comment only</span>
+							<div class="text-xs text-base-content/50">Post reviews as comments without setting a verdict on the PR</div>
+						</div>
+					</label>
+				</div>
+
+				<div class="form-control">
+					<label class="label cursor-pointer justify-start gap-3">
+						<input type="checkbox" class="toggle toggle-primary toggle-sm" bind:checked={skipCiChecks} />
+						<div>
+							<span class="label-text font-medium">Skip CI checks</span>
+							<div class="text-xs text-base-content/50">Dispatch review jobs immediately without waiting for CI to pass</div>
 						</div>
 					</label>
 				</div>

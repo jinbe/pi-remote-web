@@ -5,8 +5,11 @@
 	import ExtensionUIModal from '$lib/components/ExtensionUIModal.svelte';
 	import DiffModal from '$lib/components/DiffModal.svelte';
 	import SessionTabs from '$lib/components/SessionTabs.svelte';
+	import RepoSidebar from '$lib/components/RepoSidebar.svelte';
+	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
+	import { toolSummary } from '$lib/tool-display';
 	import { timeAgo, shortenHome, uniqueId } from '$lib/utils';
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import { getPathToNode, isAncestorOf, findLeafFrom, getBranchPoints } from '$lib/session-tree';
@@ -32,6 +35,7 @@
 	let streaming = $state(false);
 	let currentAssistantText = $state('');
 	let currentThinkingText = $state('');
+	let currentToolStatus = $state<{ name: string; summary: string } | null>(null);
 	let compacting = $state(false);
 	let retryInfo = $state<{ attempt: number; maxAttempts: number; delayMs: number } | null>(null);
 
@@ -44,13 +48,31 @@
 
 	// Session events
 	let sessionEvents = $state<SessionEvent[]>([]);
-	let showEvents = $state(false);
 
 	// Extension UI
 	let extensionUIRequest = $state<ExtensionUIRequest | null>(null);
 
-	// Diff viewer
-	let showDiff = $state(false);
+	// Right-side panel drawer (Changes + Activity tabs)
+	let panelTab = $state<'changes' | 'activity' | null>(null);
+	const showDrawer = $derived(panelTab !== null);
+	function openPanel(tab: 'changes' | 'activity') {
+		panelTab = tab;
+	}
+	function closePanel() {
+		panelTab = null;
+	}
+
+	// Left repo sidebar — persistent on desktop, drawer on mobile
+	let sidebarMobileOpen = $state(false);
+
+	// New-session modal (triggered from sidebar). Optional cwd override —
+	// the sidebar passes the project the user clicked "new in".
+	let showNewSession = $state(false);
+	let newSessionCwd = $state('');
+	function onSidebarNewSession(cwd?: string) {
+		newSessionCwd = cwd ?? data.meta.cwd;
+		showNewSession = true;
+	}
 
 	// Toasts
 	let toasts = $state<{ id: string; message: string; severity: string }[]>([]);
@@ -269,30 +291,75 @@
 					break;
 				case 'agent_end':
 					streaming = false;
-					currentAssistantText = '';
-					currentThinkingText = '';
-					// Surface API errors as a toast for immediate visibility
-					if (event.messages?.length) {
-						for (const msg of event.messages) {
-							if (msg.stopReason === 'error' && msg.errorMessage) {
-								const errorText = msg.errorMessage.length > 200
-									? msg.errorMessage.slice(0, 200) + '…'
-									: msg.errorMessage;
-								addToast(errorText, 'error');
+					currentToolStatus = null;
+					// Capture text BEFORE clearing — we may need to inline it
+					// if the JSONL reload is slow (Claude flushes async, so
+					// reload can return without the final message and the
+					// chat would briefly go blank otherwise).
+					{
+						const finalText = event._lastAssistantText || currentAssistantText;
+						const finalThinking = currentThinkingText;
+						const finalModel = event.messages?.find((m: any) => m.role === 'assistant')?.model
+							|| currentMessages.findLast?.((e: any) => e.message?.role === 'assistant')?.message?.model;
+						currentAssistantText = '';
+						currentThinkingText = '';
+						// Surface API errors as a toast for immediate visibility
+						if (event.messages?.length) {
+							for (const msg of event.messages) {
+								if (msg.stopReason === 'error' && msg.errorMessage) {
+									const errorText = msg.errorMessage.length > 200
+										? msg.errorMessage.slice(0, 200) + '…'
+										: msg.errorMessage;
+									addToast(errorText, 'error');
+								}
 							}
 						}
-					}
-					reloadMessages();
-					// For Claude Code sessions: agent_end carries inline messages
-					// that won't be in the JSONL file. Merge them in.
-					if (event.messages?.length && currentMessages.length === 0) {
-						currentMessages = event.messages.map((m: any, i: number) => ({
-							type: 'message',
-							id: `inline-${i}`,
-							parentId: i > 0 ? `inline-${i - 1}` : null,
-							message: m
-						}));
-						scrollToBottom(true);
+						(async () => {
+							await reloadMessages();
+							// Empty session — full inline of agent_end's messages (existing behaviour)
+							if (event.messages?.length && currentMessages.length === 0) {
+								currentMessages = event.messages.map((m: any, i: number) => ({
+									type: 'message',
+									id: `inline-${i}`,
+									parentId: i > 0 ? `inline-${i - 1}` : null,
+									message: m
+								}));
+								scrollToBottom(true);
+								return;
+							}
+							// Non-empty session: confirm the JSONL reload picked up the final
+							// assistant text. If not (Claude flush lag), inline a synthetic
+							// trailing message so it doesn't disappear.
+							if (!finalText) return;
+							const lastAssistant = [...currentMessages].reverse().find(
+								(e: any) => e.message?.role === 'assistant'
+							);
+							const lastTextBlock = lastAssistant?.message?.content?.find?.(
+								(c: any) => c.type === 'text'
+							);
+							const lastText: string = lastTextBlock?.text ?? '';
+							// Match on the tail (last 80 chars) to tolerate trim/whitespace differences
+							const tail = finalText.slice(-80);
+							if (tail && !lastText.includes(tail)) {
+								const lastId = currentMessages[currentMessages.length - 1]?.id ?? null;
+								const synthetic: any = {
+									type: 'message',
+									id: `inline-final-${Date.now()}`,
+									parentId: lastId,
+									timestamp: new Date().toISOString(),
+									message: {
+										role: 'assistant',
+										content: [
+											...(finalThinking ? [{ type: 'thinking', thinking: finalThinking }] : []),
+											{ type: 'text', text: finalText },
+										],
+										...(finalModel ? { model: finalModel } : {}),
+									}
+								};
+								currentMessages = [...currentMessages, synthetic];
+								scrollToBottom(true);
+							}
+						})();
 					}
 					// Add to session events
 					sessionEvents = [...sessionEvents, {
@@ -343,9 +410,17 @@
 				}
 				case 'message_end':
 					break;
-				case 'tool_execution_start':
+				case 'tool_execution_start': {
+					const summary = toolSummary({ name: event.toolName, arguments: event.args ?? {} });
+					currentToolStatus = { name: event.toolName, summary };
+					scrollToBottom();
+					break;
+				}
 				case 'tool_execution_update':
+					scrollToBottom();
+					break;
 				case 'tool_execution_end':
+					currentToolStatus = null;
 					scrollToBottom();
 					break;
 				case 'auto_compaction_start':
@@ -684,64 +759,76 @@
 	</div>
 {/if}
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-	class="flex h-full flex-col"
-	class:swipe-transition={!edgeSwiping}
-	style="transform: translateX({edgeSwipeOffset}px);"
-	bind:this={pageContainer}
-	ontouchstart={onEdgeSwipeStart}
-	ontouchmove={onEdgeSwipeMove}
-	ontouchend={onEdgeSwipeEnd}
->
-	<!-- Header -->
-	<div class="navbar bg-base-200 shrink-0 z-10 border-b border-base-300">
-		<div class="navbar-start">
-			<a href="/" class="btn btn-ghost btn-md" aria-label="Back to dashboard"><Icon name="arrow-left" class="w-5 h-5" /></a>
-		</div>
-		<div class="navbar-center flex flex-col items-center">
-			<span class="text-sm font-semibold truncate max-w-[200px] flex items-center gap-1.5">
+<div class="flex h-full">
+	<RepoSidebar
+		projects={data.projects ?? []}
+		currentSessionId={data.sessionId}
+		activeCount={data.activeCount ?? 0}
+		activeJobCount={data.activeJobCount ?? 0}
+		bind:mobileOpen={sidebarMobileOpen}
+		onnewsession={onSidebarNewSession}
+	/>
+
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="flex h-full flex-col flex-1 min-w-0"
+		class:swipe-transition={!edgeSwiping}
+		style="transform: translateX({edgeSwipeOffset}px);"
+		bind:this={pageContainer}
+		ontouchstart={onEdgeSwipeStart}
+		ontouchmove={onEdgeSwipeMove}
+		ontouchend={onEdgeSwipeEnd}
+	>
+		<!-- Header -->
+		<div class="shrink-0 z-10 border-b border-base-300 flex items-center gap-3 px-3 sm:px-5 py-3">
+			<button class="md:hidden btn btn-ghost btn-sm btn-square" aria-label="Open sidebar" onclick={() => { hapticLight(); sidebarMobileOpen = true; }}>
+				<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" /></svg>
+			</button>
+			<a href="/" class="hidden md:inline-flex btn btn-ghost btn-sm btn-square" aria-label="Back to dashboard"><Icon name="arrow-left" class="w-5 h-5" /></a>
+		<div class="flex-1 min-w-0 flex flex-col">
+			<span class="text-[10.5px] font-medium uppercase tracking-[0.12em] text-base-content-faint truncate">
+				{shortenHome(data.meta.cwd)}
+			</span>
+			<span class="text-[15px] font-semibold tracking-[-0.02em] truncate flex items-center gap-2 mt-0.5">
 				{#if restarting}
 					<span class="loading loading-spinner loading-xs flex-shrink-0"></span>
 				{:else}
 					<StatusDot status={sessionActive ? (streaming || !sseConnected ? 'streaming' : 'idle') : 'inactive'} size="md" />
 				{/if}
-				{data.meta.name || data.meta.firstMessage}
-			</span>
-			<span class="text-xs text-base-content-subtle truncate max-w-[200px] flex items-center gap-1">
-				{shortenHome(data.meta.cwd)}
-				{#if data.gitBranch}
-					<button class="badge badge-xs badge-outline gap-0.5 font-mono cursor-pointer hover:badge-primary transition-colors" onclick={(e) => { e.stopPropagation(); hapticLight(); showDiff = true; }}>⎇ {data.gitBranch}</button>
-				{/if}
+				<span class="truncate">{data.meta.name || data.meta.firstMessage}</span>
 			</span>
 		</div>
-		<div class="navbar-end gap-1">
+		<div class="flex items-center gap-2">
+			{#if data.gitBranch}
+				<button class="hidden sm:inline-flex items-center gap-1 font-mono text-[11px] text-base-content-subtle border border-base-300 px-2 py-1 hover:bg-base-200 transition-colors" onclick={() => { hapticLight(); openPanel('changes'); }} title="View changes">
+					⎇ {data.gitBranch}
+				</button>
+			{/if}
+			<span class="hidden sm:block w-px h-4 bg-base-300"></span>
 			{#if restarting}
 				<span class="text-xs text-base-content/50">Restarting…</span>
 			{:else if sessionActive}
-				<!-- Desktop: inline buttons -->
 				{#if data.gitBranch}
-					<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={() => { hapticLight(); showDiff = true; }} aria-label="View changes">
+					<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={() => { hapticLight(); openPanel('changes'); }} aria-label="View changes">
 						Changes
 					</button>
 				{/if}
-				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={() => { hapticLight(); showEvents = !showEvents; }} aria-label="Toggle activity log">
+				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={() => { hapticLight(); openPanel('activity'); }} aria-label="Open activity log">
 					Activity
 				</button>
-				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleRestart} aria-label="Restart session">Restart</button>
-				<button class="btn btn-ghost btn-xs hidden md:inline-flex" onclick={handleStop} aria-label="Stop session">Stop</button>
-				<!-- Mobile: dropdown menu -->
-				<div class="dropdown dropdown-end md:hidden">
-					<div tabindex="0" role="button" class="btn btn-ghost btn-md" aria-label="Session actions">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01" /></svg>
+				<!-- Kebab — Restart + mobile-only Changes/Activity. Stop / Refresh / Theme live in the sidebar footer. -->
+				<div class="dropdown dropdown-end">
+					<div tabindex="0" role="button" class="btn btn-ghost btn-sm btn-square" aria-label="Session actions">
+						<Icon name="more-vertical" class="w-4 h-4" />
 					</div>
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-					<ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-40 p-2 shadow-lg border border-base-300">
+					<ul tabindex="0" class="dropdown-content menu bg-base-200 z-50 w-44 p-2 border border-base-300">
 						{#if data.gitBranch}
-							<li><button onclick={() => { showDiff = true; }}>Changes</button></li>
+							<li class="md:hidden"><button onclick={() => openPanel('changes')}>Changes</button></li>
 						{/if}
-						<li><button onclick={handleRestart}>Restart</button></li>
-						<li><button onclick={handleStop}>Stop</button></li>
+						<li class="md:hidden"><button onclick={() => openPanel('activity')}>Activity</button></li>
+						<li><button onclick={handleRestart}><Icon name="refresh" class="w-4 h-4" /> Restart</button></li>
+						<li><button class="text-accent" onclick={handleStop}><Icon name="stop" class="w-4 h-4" /> Stop session</button></li>
 					</ul>
 				</div>
 			{:else}
@@ -844,10 +931,15 @@
 							<div class="whitespace-pre-wrap break-words text-sm">
 								{currentAssistantText}
 							</div>
-							<div class="flex items-center gap-1 mt-1">
-								<span class="loading loading-dots loading-xs"></span>
+							<div class="flex items-center gap-2 mt-1 min-w-0">
+								<span class="loading loading-dots loading-xs flex-shrink-0"></span>
+								{#if currentToolStatus}
+									<span class="text-[11px] text-base-content-subtle truncate min-w-0" title={currentToolStatus.summary}>
+										<span class="font-medium">{currentToolStatus.name}</span>{#if currentToolStatus.summary}<span class="opacity-70">: {currentToolStatus.summary}</span>{/if}
+									</span>
+								{/if}
 								<button
-									class="btn btn-ghost btn-circle btn-xs text-error opacity-70"
+									class="btn btn-ghost btn-circle btn-xs text-error opacity-70 ml-auto flex-shrink-0"
 									aria-label="Abort"
 									onclick={handleAbort}
 								>
@@ -887,30 +979,7 @@
 			{/if}
 		</div>
 
-		<!-- Event log sidebar (desktop only) -->
-		{#if showEvents}
-			<div class="hidden md:flex flex-col w-64 border-l border-base-300 bg-base-200/50 overflow-hidden">
-				<div class="p-3 text-sm font-semibold border-b border-base-300 flex items-center justify-between">
-					<span>Activity Log</span>
-					<button class="btn btn-ghost btn-xs" onclick={() => showEvents = false}><Icon name="close" class="w-3.5 h-3.5" /></button>
-				</div>
-				<div class="flex-1 overflow-y-auto p-2 space-y-1">
-					{#if sessionEvents.length === 0}
-						<div class="text-xs text-base-content-faint p-2">No events yet</div>
-					{:else}
-						{#each sessionEvents as event (event.id)}
-							<div class="text-xs flex items-start gap-2 py-1.5 px-2 rounded hover:bg-base-300/50">
-								<span class="text-base inline-flex items-center">{#if eventIconName(event.event_type)}<Icon name={eventIconName(event.event_type) as IconName} class={eventIconClass(event.event_type)} />{:else}•{/if}</span>
-								<div class="flex-1 min-w-0">
-									<div class="font-medium">{eventLabel(event.event_type)}</div>
-									<div class="text-base-content-faint">{timeAgo(event.timestamp)}</div>
-								</div>
-							</div>
-						{/each}
-					{/if}
-				</div>
-			</div>
-		{/if}
+		<!-- Activity log moved into the right-side drawer (Activity tab) -->
 	</div>
 
 	<!-- Scroll to bottom button -->
@@ -971,9 +1040,12 @@
 
 	<!-- Diff Viewer Modal -->
 	<DiffModal
-		open={showDiff}
+		open={showDrawer}
 		sessionId={data.sessionId}
-		onclose={() => (showDiff = false)}
+		tab={panelTab ?? 'changes'}
+		events={sessionEvents}
+		ontab={(t) => openPanel(t)}
+		onclose={closePanel}
 	/>
 
 	<!-- Toast stack -->
@@ -986,7 +1058,15 @@
 			{/each}
 		</div>
 	{/if}
+	</div>
 </div>
+
+<NewSessionModal
+	open={showNewSession}
+	defaultCwd={newSessionCwd || data.meta.cwd}
+	defaultHarness={((data.projects ?? []).flatMap((p) => p.sessions)[0]?.harness as 'pi' | 'claude-code') || 'pi'}
+	onclose={() => (showNewSession = false)}
+/>
 
 <style>
 	.swipe-transition {

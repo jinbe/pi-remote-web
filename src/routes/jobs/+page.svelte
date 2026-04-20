@@ -10,7 +10,7 @@
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
 	import { getContext } from 'svelte';
-	import logoSvg from '$lib/assets/logo.svg';
+	import PiMark from '$lib/components/PiMark.svelte';
 
 	interface Job {
 		id: string;
@@ -141,6 +141,8 @@
 	const reviewingCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'reviewing').length);
 	const doneCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'done').length);
 	const failedCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'failed').length);
+	const cancelledCount = $derived((data.jobs as Job[]).filter((j) => j.status === 'cancelled').length);
+	const finishedCount = $derived(doneCount + failedCount + cancelledCount);
 	const totalCount = $derived((data.jobs as Job[]).length);
 
 	function formatJson(raw: string): string {
@@ -245,31 +247,17 @@
 		}
 	}
 
-	/** Clear all completed (done) jobs. */
-	async function clearCompletedJobs() {
-		const doneJobs = (data.jobs as Job[]).filter((j) => j.status === 'done');
-		if (doneJobs.length === 0) return;
-		if (!confirm(`Delete ${doneJobs.length} completed job${doneJobs.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+	/** Clear all done, failed, and cancelled jobs. */
+	async function clearFinishedJobs() {
+		const finished = (data.jobs as Job[]).filter((j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled');
+		if (finished.length === 0) return;
+		if (!confirm(`Delete ${finished.length} finished job${finished.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
 		hapticHeavy();
 		try {
-			await Promise.all(doneJobs.map((j) => fetch(`/api/jobs/${j.id}`, { method: 'DELETE' })));
+			await Promise.all(finished.map((j) => fetch(`/api/jobs/${j.id}`, { method: 'DELETE' })));
 			invalidateAll();
 		} catch (e) {
-			console.error('Failed to clear completed jobs:', e);
-		}
-	}
-
-	/** Clear all failed jobs. */
-	async function clearFailedJobs() {
-		const failedJobs = (data.jobs as Job[]).filter((j) => j.status === 'failed');
-		if (failedJobs.length === 0) return;
-		if (!confirm(`Delete ${failedJobs.length} failed job${failedJobs.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
-		hapticHeavy();
-		try {
-			await Promise.all(failedJobs.map((j) => fetch(`/api/jobs/${j.id}`, { method: 'DELETE' })));
-			invalidateAll();
-		} catch (e) {
-			console.error('Failed to clear failed jobs:', e);
+			console.error('Failed to clear finished jobs:', e);
 		}
 	}
 
@@ -573,7 +561,7 @@
 	<div class="mb-6 flex items-center justify-between">
 		<div class="flex items-center gap-3">
 			<a href="/" class="btn btn-ghost btn-sm" aria-label="Back to dashboard">
-				<img src={logoSvg} alt="Pi" class="h-6 w-6 rounded" />
+				<PiMark size={20} />
 			</a>
 			<h1 class="text-lg font-bold">Jobs</h1>
 		</div>
@@ -595,9 +583,39 @@
 					<span class="hidden sm:inline">Poller Off</span>
 				{/if}
 			</button>
-			<!-- Primary actions -->
-			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAddJob = true; }}><Icon name="plus" class="w-4 h-4" /> <span class="hidden sm:inline">New Task</span><span class="sm:hidden">Task</span></button>
-			<button class="btn btn-sm btn-secondary gap-1" onclick={() => { hapticMedium(); showAddReviewJob = true; }}><Icon name="search" class="w-4 h-4" /> <span class="hidden sm:inline">New Review</span><span class="sm:hidden">Review</span></button>
+			<!-- Repos drawer toggle -->
+			<button
+				class="btn btn-sm btn-ghost gap-1"
+				onclick={() => { hapticLight(); prMonitorOpen = true; }}
+				aria-label="Open monitored repos"
+				title="Monitored repos"
+			>
+				<Icon name="target" class="w-4 h-4" />
+				<span class="hidden sm:inline">Repos</span>
+				{#if data.monitoredRepos.length > 0}
+					<span class="text-[10px] font-semibold bg-base-300 px-1.5 py-0.5 leading-none">{data.monitoredRepos.length}</span>
+				{/if}
+			</button>
+			<!-- Primary "New" dropdown -->
+			<div class="dropdown dropdown-end">
+				<div tabindex="0" role="button" class="btn btn-sm btn-primary gap-1">
+					<Icon name="plus" class="w-4 h-4" />
+					<span>New</span>
+				</div>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<ul tabindex="0" class="dropdown-content menu bg-base-200 z-50 w-44 p-2 border border-base-300">
+					<li>
+						<button onclick={() => { hapticMedium(); showAddJob = true; }}>
+							<Icon name="hammer" class="w-4 h-4" /> Task
+						</button>
+					</li>
+					<li>
+						<button onclick={() => { hapticMedium(); showAddReviewJob = true; }}>
+							<Icon name="search" class="w-4 h-4" /> Review
+						</button>
+					</li>
+				</ul>
+			</div>
 			<!-- Kebab menu -->
 			<div class="dropdown dropdown-end">
 				<div tabindex="0" role="button" class="btn btn-sm btn-ghost btn-circle" aria-label="More actions">
@@ -615,18 +633,11 @@
 							{#if theme === 'dark'}<Icon name="sun" class="w-4 h-4" /> Light Mode{:else}<Icon name="moon" class="w-4 h-4" /> Dark Mode{/if}
 						</button>
 					</li>
-					{#if doneCount > 0}
+					{#if finishedCount > 0}
 						<div class="divider my-0"></div>
 						<li>
-							<button onclick={clearCompletedJobs} class="text-error">
-								<Icon name="close" class="w-4 h-4" /> Clear done ({doneCount})
-							</button>
-						</li>
-					{/if}
-					{#if failedCount > 0}
-						<li>
-							<button onclick={clearFailedJobs} class="text-error">
-								<Icon name="close" class="w-4 h-4" /> Clear failed ({failedCount})
+							<button onclick={clearFinishedJobs} class="text-error">
+								<Icon name="close" class="w-4 h-4" /> Clear all ({finishedCount})
 							</button>
 						</li>
 					{/if}
@@ -674,18 +685,7 @@
 		</div>
 	</div>
 
-	<!-- PR Monitor (collapsible) -->
-	<div class="mb-4">
-		<MonitoredRepos
-			repos={data.monitoredRepos}
-			prPollerRunning={data.prPollerRunning}
-			pollIntervalMs={data.prPollIntervalMs}
-			concurrency={data.prPollConcurrency}
-			onaddrepo={() => { showAddRepo = true; }}
-			open={prMonitorOpen}
-			ontoggle={(v) => { prMonitorOpen = v; }}
-		/>
-	</div>
+	<!-- PR Monitor moved into a right-side drawer (toggle in header) -->
 
 	<!-- Jobs list -->
 	{#if filteredJobs.length === 0}
@@ -729,3 +729,70 @@
 	open={showAddRepo}
 	onclose={() => (showAddRepo = false)}
 />
+
+<!-- Monitored Repos drawer (right) -->
+{#if prMonitorOpen}
+	<div
+		class="fixed inset-0 bg-black/40 z-[60]"
+		role="presentation"
+		onclick={() => (prMonitorOpen = false)}
+		onkeydown={(e) => { if (e.key === 'Escape') prMonitorOpen = false; }}
+	></div>
+{/if}
+<aside
+	class="repos-drawer"
+	class:open={prMonitorOpen}
+	aria-hidden={!prMonitorOpen}
+	aria-label="Monitored repos"
+>
+	<div class="flex items-center justify-between px-4 py-3 border-b border-base-300 shrink-0">
+		<h3 class="font-semibold text-[15px] tracking-[-0.02em]">PR Monitor</h3>
+		<button class="btn btn-ghost btn-sm btn-square" onclick={() => (prMonitorOpen = false)} aria-label="Close repos drawer">
+			<Icon name="close" class="w-4 h-4" />
+		</button>
+	</div>
+	<div class="flex-1 overflow-y-auto">
+		<MonitoredRepos
+			repos={data.monitoredRepos}
+			prPollerRunning={data.prPollerRunning}
+			pollIntervalMs={data.prPollIntervalMs}
+			concurrency={data.prPollConcurrency}
+			onaddrepo={() => { showAddRepo = true; }}
+			open={true}
+			headerless={true}
+		/>
+	</div>
+</aside>
+
+<style>
+	.repos-drawer {
+		position: fixed;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		width: min(560px, 100vw);
+		background: var(--color-base-100);
+		border-left: 1px solid var(--color-base-300);
+		display: flex;
+		flex-direction: column;
+		z-index: 61;
+		transform: translateX(100%);
+		transition: transform 240ms cubic-bezier(0.2, 0, 0, 1);
+		padding-top: env(safe-area-inset-top);
+		padding-right: env(safe-area-inset-right);
+		padding-bottom: env(safe-area-inset-bottom);
+	}
+	.repos-drawer.open {
+		transform: translateX(0);
+	}
+	@media (max-width: 640px) {
+		.repos-drawer {
+			width: 100vw;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.repos-drawer {
+			transition: none;
+		}
+	}
+</style>

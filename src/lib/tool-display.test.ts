@@ -10,13 +10,34 @@ describe('getArgs', () => {
 		expect(getArgs({ arguments: null as any })).toEqual({});
 	});
 
-	it('returns object arguments as-is', () => {
+	it('returns object arguments unchanged in shape', () => {
+		// getArgs may copy to normalize Claude-shape keys, but shape stays the same.
 		const args = { command: 'ls', timeout: 10 };
-		expect(getArgs({ arguments: args })).toBe(args);
+		expect(getArgs({ arguments: args })).toEqual(args);
 	});
 
 	it('parses JSON string arguments', () => {
 		expect(getArgs({ arguments: '{"path":"/tmp/foo"}' })).toEqual({ path: '/tmp/foo' });
+	});
+
+	it('normalises Claude snake_case keys to pi camelCase', () => {
+		// Edit tool: file_path/old_string/new_string → path/oldText/newText
+		expect(getArgs({
+			arguments: { file_path: '/foo.ts', old_string: 'a', new_string: 'b' },
+		})).toEqual({
+			file_path: '/foo.ts',
+			old_string: 'a',
+			new_string: 'b',
+			path: '/foo.ts',
+			oldText: 'a',
+			newText: 'b',
+		});
+	});
+
+	it('does not overwrite existing camelCase keys when both shapes present', () => {
+		expect(getArgs({
+			arguments: { file_path: '/a.ts', path: '/keep.ts' },
+		})).toEqual({ file_path: '/a.ts', path: '/keep.ts' });
 	});
 
 	it('returns empty object for invalid JSON string', () => {

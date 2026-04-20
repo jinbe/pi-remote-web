@@ -24,6 +24,7 @@
 	let harness = $state<'pi' | 'claude-code'>('pi');
 	let maxLoops = $state(1);
 	let skipCiChecks = $state(false);
+	let commentOnly = $state(false);
 	let comments = $state('');
 	let creating = $state(false);
 	let errorMsg = $state('');
@@ -39,6 +40,7 @@
 			model = '';
 			maxLoops = 1;
 			skipCiChecks = false;
+			commentOnly = false;
 			comments = '';
 			errorMsg = '';
 		}
@@ -62,6 +64,7 @@
 					target_branch: targetBranch.trim() || undefined,
 					max_loops: maxLoops,
 					skip_ci_checks: skipCiChecks || undefined,
+					comment_only: commentOnly || undefined,
 					model: model.trim() || undefined,
 					harness,
 					description: comments.trim() || undefined,
@@ -195,6 +198,24 @@
 				<div class="label pt-0">
 					<span class="label-text-alt text-base-content/40">
 						Dispatch immediately without waiting for CI to pass
+					</span>
+				</div>
+			</div>
+
+			<!-- Comment only -->
+			<div class="form-control mt-3">
+				<label class="label cursor-pointer justify-start gap-3">
+					<input
+						type="checkbox"
+						class="toggle toggle-sm"
+						bind:checked={commentOnly}
+						onchange={() => hapticLight()}
+					/>
+					<span class="label-text">Comment only</span>
+				</label>
+				<div class="label pt-0">
+					<span class="label-text-alt text-base-content/40">
+						Post review as a comment without setting a verdict on the PR
 					</span>
 				</div>
 			</div>

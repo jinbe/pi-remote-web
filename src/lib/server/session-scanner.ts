@@ -421,6 +421,23 @@ export async function getSessionMessages(
 	return { messages, tree };
 }
 
+/**
+ * Normalise Claude's snake_case tool input keys to pi's camelCase, so the
+ * UI's per-tool pretty renderers (Bash command, Read file, Edit diff, Write)
+ * fire instead of falling through to a raw JSON dump.
+ *
+ *   file_path  → path
+ *   old_string → oldText
+ *   new_string → newText
+ */
+function normalizeClaudeToolInput(input: Record<string, any>): Record<string, any> {
+	const out: Record<string, any> = { ...input };
+	if (out.file_path !== undefined && out.path === undefined) out.path = out.file_path;
+	if (out.old_string !== undefined && out.oldText === undefined) out.oldText = out.old_string;
+	if (out.new_string !== undefined && out.newText === undefined) out.newText = out.new_string;
+	return out;
+}
+
 /** Parse Claude Code JSONL and transpose to pi message format */
 async function getClaudeSessionMessages(
 	filePath: string
@@ -445,21 +462,76 @@ async function getClaudeSessionMessages(
 					msg.content = [{ type: 'text', text: content }];
 				}
 
-				// Skip entries with no renderable content:
-				// - tool_result messages (role=user, content=[{type:'tool_result'}])
-				// - tool_use-only assistant messages (content=[{type:'tool_use'}])
-				if (Array.isArray(msg.content)) {
-					const hasText = msg.content.some((c: any) => c.type === 'text' && c.text?.trim());
-					const hasThinking = msg.content.some((c: any) => c.type === 'thinking');
-					if (!hasText && !hasThinking) continue;
-				}
-
-				entries.push({
-					type: 'message',
+				const baseEntry = {
+					type: 'message' as const,
 					id: entry.uuid || `claude-${entries.length}`,
 					parentId: entry.parentUuid || (entries.length > 0 ? (entries[entries.length - 1] as any).id : null),
 					timestamp: entry.timestamp || new Date().toISOString(),
-					message: msg
+				};
+
+				// Tool results from Claude land as user entries with content=[{type:'tool_result',...}].
+				// Surface them as toolResult bubbles (pi's render path) so the chat shows tool execution.
+				if (entry.type === 'user' && Array.isArray(msg.content)) {
+					for (const block of msg.content) {
+						if (block.type !== 'tool_result') continue;
+						const blockContent = block.content;
+						let resultText = '';
+						if (typeof blockContent === 'string') {
+							resultText = blockContent;
+						} else if (Array.isArray(blockContent)) {
+							resultText = blockContent
+								.filter((c: any) => c.type === 'text')
+								.map((c: any) => c.text || '')
+								.join('\n');
+						}
+						entries.push({
+							...baseEntry,
+							id: `${baseEntry.id}-tr-${block.tool_use_id ?? entries.length}`,
+							message: {
+								role: 'toolResult',
+								toolCallId: block.tool_use_id,
+								toolName: (block as any).tool_name || 'tool',
+								isError: !!block.is_error,
+								content: [{ type: 'text', text: resultText }],
+							},
+						} as any);
+					}
+					continue;
+				}
+
+				// Map assistant tool_use blocks → pi's toolCall shape so ChatBubble renders them.
+				// Also normalise Claude's snake_case tool input keys to pi's camelCase
+				// (file_path → path, old_string → oldText, new_string → newText) so the
+				// pretty diff/file/edit renderers in ChatBubble fire instead of falling
+				// through to the raw JSON dump.
+				if (entry.type === 'assistant' && Array.isArray(msg.content)) {
+					msg.content = msg.content.map((c: any) => {
+						if (c.type === 'tool_use') {
+							return {
+								type: 'toolCall',
+								id: c.id,
+								name: c.name,
+								arguments: normalizeClaudeToolInput(c.input ?? {}),
+							};
+						}
+						return c;
+					});
+				}
+
+				// Skip assistant entries with nothing renderable. Catches both the
+				// "content is null/undefined" case (wrap-up entries between tool turns)
+				// and the "content is array of only-already-rendered-blocks" case.
+				if (entry.type === 'assistant') {
+					if (!Array.isArray(msg.content) || msg.content.length === 0) continue;
+					const hasText = msg.content.some((c: any) => c.type === 'text' && c.text?.trim());
+					const hasThinking = msg.content.some((c: any) => c.type === 'thinking' && c.thinking?.trim());
+					const hasToolCalls = msg.content.some((c: any) => c.type === 'toolCall');
+					if (!hasText && !hasThinking && !hasToolCalls) continue;
+				}
+
+				entries.push({
+					...baseEntry,
+					message: msg,
 				} as any);
 			}
 		} catch {

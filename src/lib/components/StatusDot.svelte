@@ -1,12 +1,15 @@
 <script lang="ts">
 	/**
-	 * Session/service status indicator dot.
+	 * Session/service status indicator.
+	 *
+	 * Moravec brand: solid square, never a circle, never animated.
+	 * Status colour expresses state; motion is reserved for live data deltas.
 	 *
 	 * States:
-	 *   streaming  – pulsing warning (amber) dot
-	 *   idle       – solid success (green) dot
-	 *   inactive   – muted base-content dot
-	 *   info       – solid info (blue) dot (e.g. dev server)
+	 *   streaming  – orange (live)
+	 *   idle       – slate (active but quiet)
+	 *   inactive   – muted (cold)
+	 *   info       – slate (background service e.g. dev server)
 	 */
 
 	type Status = 'streaming' | 'idle' | 'inactive' | 'info';
@@ -27,22 +30,14 @@
 	};
 
 	const colorMap: Record<Status, string> = {
-		streaming: 'bg-warning',
-		idle: 'bg-success',
-		inactive: 'bg-base-content/20',
-		info: 'bg-info'
+		streaming: 'bg-accent',
+		idle: 'bg-secondary',
+		inactive: 'bg-base-content/30',
+		info: 'bg-secondary'
 	};
 
 	const s = $derived(sizeClasses[size]);
 	const color = $derived(colorMap[status]);
-	const pulse = $derived(status === 'streaming');
 </script>
 
-{#if pulse}
-	<span class="relative flex {s} flex-shrink-0">
-		<span class="animate-ping absolute inline-flex h-full w-full rounded-full {color} opacity-75"></span>
-		<span class="relative inline-flex rounded-full {s} {color}"></span>
-	</span>
-{:else}
-	<span class="inline-block {s} rounded-full {color} flex-shrink-0"></span>
-{/if}
+<span class="inline-block flex-shrink-0 {s} {color}"></span>

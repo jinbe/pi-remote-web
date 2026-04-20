@@ -149,19 +149,28 @@ export function buildReviewPrompt(job: Job, _harness: string = 'pi', analysis?: 
 	parts.push('=== CRITICAL: REQUIRED STEPS ===');
 	parts.push('After completing the review, you MUST do BOTH of these steps IN ORDER:');
 	parts.push('');
-	parts.push('1. SUBMIT the review to GitHub using gh pr review:');
-	parts.push('   - Approve: gh pr review <number> --approve --body "your review summary"');
-	parts.push('   - Request changes: gh pr review <number> --request-changes --body "your review summary"');
-	parts.push('   Include your review summary (strengths, issues, suggestions) in the --body.');
+
+	if (job.comment_only) {
+		parts.push('1. SUBMIT the review as a COMMENT to GitHub using gh pr comment:');
+		parts.push('   gh pr comment <number> --body "your review summary"');
+		parts.push('   Include your full review summary (strengths, issues, suggestions) in the --body.');
+		parts.push('   Do NOT use gh pr review. Do NOT set a verdict (approve/request-changes) on the PR.');
+		parts.push('   The review should be posted as a plain comment only.');
+	} else {
+		parts.push('1. SUBMIT the review to GitHub using gh pr review:');
+		parts.push('   - Approve: gh pr review <number> --approve --body "your review summary"');
+		parts.push('   - Request changes: gh pr review <number> --request-changes --body "your review summary"');
+		parts.push('   Include your review summary (strengths, issues, suggestions) in the --body.');
+	}
 	parts.push('   Do NOT skip this step. The review MUST be visible on the GitHub PR.');
 	parts.push('');
-	parts.push('2. Check that the gh pr review command succeeded. ONLY if it succeeded,');
+	parts.push('2. Check that the gh pr command succeeded. ONLY if it succeeded,');
 	parts.push('   output EXACTLY one of these two lines as the VERY LAST thing in your response:');
 	parts.push('');
 	parts.push('VERDICT: approved');
 	parts.push('VERDICT: changes_requested');
 	parts.push('');
-	parts.push('If the gh pr review command FAILED (non-zero exit, error output, permission denied),');
+	parts.push('If the gh pr command FAILED (non-zero exit, error output, permission denied),');
 	parts.push('do NOT output a VERDICT line. Instead output:');
 	parts.push('');
 	parts.push('REVIEW_SUBMIT_FAILED: <reason>');

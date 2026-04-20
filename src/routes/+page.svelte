@@ -11,7 +11,7 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import { getContext } from 'svelte';
 	import { browser } from '$app/environment';
-	import logoSvg from '$lib/assets/logo.svg';
+	import PiWordmark from '$lib/components/PiWordmark.svelte';
 
 	let { data } = $props();
 
@@ -359,7 +359,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="mx-auto max-w-3xl px-4 py-6 h-full overflow-y-auto"
+	class="mx-auto max-w-5xl px-4 sm:px-6 py-5 h-full overflow-y-auto"
 	bind:this={scrollContainer}
 	ontouchstart={onPullTouchStart}
 	ontouchmove={onPullTouchMove}
@@ -382,15 +382,17 @@
 		{/if}
 	</div>
 
-	<div class="mb-6 flex items-center justify-between">
-		<div class="flex items-center gap-3">
-			<img src={logoSvg} alt="Pi" class="h-8 w-8 rounded-lg" />
+	<!-- Top bar — generous, structural -->
+	<header class="mb-4 flex items-center justify-between gap-4">
+		<div class="flex items-center gap-4">
+			<PiWordmark height={22} />
 			{#if data.jobs.length > 0 || data.pollerRunning}
+				<span class="hidden sm:inline-block w-px h-4 bg-base-300"></span>
 				<a href="/jobs" class="btn btn-sm btn-ghost gap-1" title="View all jobs">
 					<span class="opacity-60 inline-flex"><Icon name="hammer" class="w-4 h-4" /></span>
 					<span>Jobs</span>
 					{#if data.jobs.filter((j: any) => ['queued', 'claimed', 'running'].includes(j.status)).length > 0}
-						<span class="badge badge-xs badge-warning">{data.jobs.filter((j: any) => ['queued', 'claimed', 'running'].includes(j.status)).length}</span>
+						<span class="bg-accent text-accent-content text-[10px] font-semibold px-1.5 py-0.5 leading-none">{data.jobs.filter((j: any) => ['queued', 'claimed', 'running'].includes(j.status)).length}</span>
 					{/if}
 				</a>
 			{/if}
@@ -398,25 +400,25 @@
 		<div class="flex gap-2 items-center">
 			{#if hasAnythingRunning}
 				<button
-					class="btn btn-sm btn-error"
+					class="btn btn-sm btn-outline border-accent text-accent hover:bg-accent hover:text-accent-content"
 					onclick={stopAllSessions}
 					disabled={stoppingAll}
 				>
 					{#if stoppingAll}
 						<span class="loading loading-spinner loading-xs"></span>
 					{/if}
-					<span class="hidden sm:inline">Stop All ({activeSet.size + runningDevSet.size})</span>
+					<span class="hidden sm:inline">Stop all · {activeSet.size + runningDevSet.size}</span>
 					<span class="sm:hidden">Stop</span>
 				</button>
 			{/if}
-			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); newSessionCwd = ''; newSessionHarness = data.sessions[0]?.harness || 'pi'; showNewSession = true; }}><Icon name="plus" class="w-4 h-4" /> New</button>
+			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); newSessionCwd = ''; newSessionHarness = data.sessions[0]?.harness || 'pi'; showNewSession = true; }}><Icon name="plus" class="w-4 h-4" /> New session</button>
 			<!-- Kebab menu -->
 			<div class="dropdown dropdown-end">
-				<div tabindex="0" role="button" class="btn btn-sm btn-ghost btn-circle" aria-label="More actions">
+				<div tabindex="0" role="button" class="btn btn-sm btn-ghost btn-square" aria-label="More actions">
 					<Icon name="more-vertical" class="w-5 h-5" />
 				</div>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-				<ul tabindex="0" class="dropdown-content menu bg-base-200 rounded-box z-50 w-44 p-2 shadow-lg border border-base-300">
+				<ul tabindex="0" class="dropdown-content menu bg-base-200 z-50 w-44 p-2 border border-base-300">
 					<li>
 						<button onclick={() => { hapticLight(); invalidateAll(); }}>
 							<Icon name="refresh" class="w-4 h-4" /> Refresh
@@ -430,29 +432,42 @@
 				</ul>
 			</div>
 		</div>
-	</div>
+	</header>
 
-	<!-- Search + harness filter -->
-	<div class="mb-4 flex gap-2 items-center">
-		<input
-			type="text"
-			placeholder="Search sessions..."
-			class="input input-sm flex-1"
-			bind:value={search}
-		/>
-		<div class="join">
-			<button
-				class="join-item btn btn-xs {harnessFilter === 'all' ? 'btn-active' : ''}"
-				onclick={() => { hapticLight(); harnessFilter = 'all'; }}
-			>All</button>
-			<button
-				class="join-item btn btn-xs {harnessFilter === 'pi' ? 'btn-active' : ''}"
-				onclick={() => { hapticLight(); harnessFilter = 'pi'; }}
-			>π</button>
-			<button
-				class="join-item btn btn-xs {harnessFilter === 'claude-code' ? 'btn-active' : ''}"
-				onclick={() => { hapticLight(); harnessFilter = 'claude-code'; }}
-			>◆</button>
+	<!-- Sub-toolbar — workspace context + harness filter -->
+	<div class="mb-3 flex items-center justify-between gap-3 border-y border-base-300 py-2.5">
+		<div class="flex items-baseline gap-3 min-w-0">
+			<span class="text-[10.5px] font-medium uppercase tracking-[0.12em] text-base-content-faint">Workspace</span>
+			<span class="text-xs text-base-content-subtle">
+				{projectGroups.length} {projectGroups.length === 1 ? 'repo' : 'repos'} · {filtered.length} sessions
+				{#if streamingSet.size > 0}
+					· <span class="text-accent font-medium">{streamingSet.size} streaming</span>
+				{/if}
+			</span>
+		</div>
+		<div class="flex gap-2 items-center">
+			<input
+				type="text"
+				placeholder="Search…"
+				class="input input-sm w-32 sm:w-48"
+				bind:value={search}
+			/>
+			<div class="flex border border-base-300">
+				<button
+					class="px-2.5 py-0.5 text-xs {harnessFilter === 'all' ? 'bg-base-content text-base-100 font-medium' : 'text-base-content-subtle'}"
+					onclick={() => { hapticLight(); harnessFilter = 'all'; }}
+				>All</button>
+				<span class="w-px bg-base-300"></span>
+				<button
+					class="px-2.5 py-0.5 text-xs {harnessFilter === 'pi' ? 'bg-base-content text-base-100 font-medium' : 'text-base-content-subtle'}"
+					onclick={() => { hapticLight(); harnessFilter = 'pi'; }}
+				>π</button>
+				<span class="w-px bg-base-300"></span>
+				<button
+					class="px-2.5 py-0.5 text-xs {harnessFilter === 'claude-code' ? 'bg-base-content text-base-100 font-medium' : 'text-base-content-subtle'}"
+					onclick={() => { hapticLight(); harnessFilter = 'claude-code'; }}
+				>◆</button>
+			</div>
 		</div>
 	</div>
 
@@ -467,29 +482,41 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="flex flex-col gap-4">
+		<div class="flex flex-col">
 			{#each projectGroups as group (group.cwd)}
-				<div class="project-card rounded-lg border border-base-300 bg-base-200/50">
+				<article class="project-card border-b border-base-300 {expandedProjects.has(group.cwd) ? 'bg-base-200' : ''}">
 					<!-- Project header -->
 					<div
-						class="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-base-300/50 transition-colors cursor-pointer"
+						class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-base-300/30 transition-colors cursor-pointer"
 						role="button"
 						tabindex="0"
 						onclick={() => toggleCollapse(group.cwd)}
 						aria-label="Toggle project {group.shortName}"
 						onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') toggleCollapse(group.cwd); }}
 					>
-						<span class="inline-flex text-sm opacity-50 transition-transform {expandedProjects.has(group.cwd) ? 'rotate-90' : ''}"><Icon name="chevron-right" class="w-3.5 h-3.5" /></span>
-						<span class="font-semibold flex-1 truncate">{group.shortName}</span>
+						<span class="inline-flex text-sm text-base-content-faint transition-transform {expandedProjects.has(group.cwd) ? 'rotate-90' : ''}"><Icon name="chevron-right" class="w-3.5 h-3.5" /></span>
+						<div class="flex items-baseline gap-3 min-w-0 flex-1">
+							<span class="font-medium text-[15px] truncate">{group.shortName}</span>
+							<span class="hidden md:inline font-mono text-xs text-base-content-faint truncate">{shortenHome(group.cwd)}</span>
+						</div>
 						{#if group.hasStreaming}
-							<span class="hidden sm:inline badge badge-warning badge-xs">streaming</span>
+							<span class="hidden sm:inline-flex items-center gap-1.5 text-[11.5px] font-medium text-accent">
+								<StatusDot status="streaming" />
+								Streaming
+							</span>
 							<span class="sm:hidden"><StatusDot status="streaming" size="md" /></span>
 						{:else if group.hasActive}
-							<span class="hidden sm:inline badge badge-success badge-xs">idle</span>
+							<span class="hidden sm:inline-flex items-center gap-1.5 text-[11.5px] font-medium text-secondary">
+								<StatusDot status="idle" />
+								Idle
+							</span>
 							<span class="sm:hidden"><StatusDot status="idle" size="md" /></span>
 						{/if}
 						{#if group.devServerRunning}
-							<span class="hidden sm:inline badge badge-info badge-xs">dev</span>
+							<span class="hidden sm:inline-flex items-center gap-1.5 text-[11.5px] text-base-content-subtle">
+								<StatusDot status="info" />
+								Dev
+							</span>
 							<span class="sm:hidden"><StatusDot status="info" size="md" /></span>
 						{/if}
 						<!-- Dev server toggle -->
@@ -602,13 +629,15 @@
 						</button>
 					</div>
 
-					<!-- Project path subtitle -->
-					<div class="px-4 -mt-1 pb-2 text-xs text-base-content-faint truncate">
-						{shortenHome(group.cwd)}
-						{#if group.devCommand && !editingDevCommand}
-							<span class="ml-2 text-base-content-faint">· {group.devCommand}</span>
-						{/if}
-					</div>
+					<!-- Project path subtitle (mobile only — desktop shows it inline) -->
+					{#if group.devCommand || true}
+						<div class="md:hidden px-4 -mt-1 pb-2 text-xs text-base-content-faint truncate font-mono">
+							{shortenHome(group.cwd)}
+							{#if group.devCommand && !editingDevCommand}
+								<span class="ml-2 text-base-content-faint">· {group.devCommand}</span>
+							{/if}
+						</div>
+					{/if}
 
 					<!-- Dev command editor (inline) -->
 					{#if editingDevCommand === group.cwd}
@@ -638,60 +667,12 @@
 						{@const inactiveSessions = group.sessions.filter((s) => !activeSet.has(s.id))}
 						{@const showingAll = showAllSessionsFor.has(group.cwd)}
 						{@const visibleSessions = showingAll ? group.sessions : activeSessions}
-						<div class="session-list border-t border-base-300">
-							{#if visibleSessions.length === 0 && inactiveSessions.length > 0}
-								<div class="px-4 py-3 text-sm text-base-content/40">
-									No active sessions
-								</div>
-							{/if}
-							{#each visibleSessions as session, i (session.id)}
-								<SwipeToDelete
-									ondelete={() => deleteSession(session.id)}
-									disabled={activeSet.has(session.id)}
-								>
-									<a
-										href="/session/{session.id}"
-										class="group flex items-start gap-3 px-4 py-3 hover:bg-base-300/50 transition-colors {i > 0 ? 'border-t border-base-300/50' : ''}"
-									>
-										<div class="mt-1.5">
-											<StatusDot
-												status={streamingSet.has(session.id) ? 'streaming' : activeSet.has(session.id) ? 'idle' : 'inactive'}
-												size="md"
-											/>
-										</div>
-										<div class="min-w-0 flex-1">
-											<div class="truncate text-sm font-medium">
-												{session.name || session.firstMessage || 'Empty session'}
-											</div>
-											<div class="mt-0.5 flex items-center gap-2 text-xs text-base-content-faint">
-												<span>{timeAgo(session.lastModified)}</span>
-												<span>· {session.messageCount} msgs</span>
-												{#if session.harness === 'claude-code'}
-													<span class="badge badge-xs badge-outline" title="Claude Code">◆</span>
-												{:else}
-													<span class="badge badge-xs badge-outline" title="pi">π</span>
-												{/if}
-												{#if session.model}
-													<span class="badge badge-xs badge-ghost">{session.model}</span>
-												{/if}
-											</div>
-										</div>
-										<button
-											class="hidden lg:flex btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 transition-opacity self-center flex-shrink-0 text-error opacity-70"
-											onclick={(e: MouseEvent) => deleteSession(session.id, e)}
-											title="Delete session"
-										>
-											<Icon name="close" class="w-3.5 h-3.5" />
-										</button>
-									</a>
-								</SwipeToDelete>
-							{/each}
-
-							<!-- Show/hide inactive sessions toggle -->
-							{#if inactiveSessions.length > 0}
-								<div class="px-4 py-2 text-center border-t border-base-300/50">
+						<div class="px-4 pb-4">
+							<div class="flex items-center justify-between py-2">
+								<span class="text-[10.5px] font-medium uppercase tracking-[0.12em] text-base-content-faint">Sessions · {visibleSessions.length}</span>
+								{#if inactiveSessions.length > 0}
 									<button
-										class="link text-xs text-base-content/40 hover:text-base-content/60"
+										class="text-[11px] text-base-content-faint hover:text-base-content-subtle"
 										onclick={(e) => {
 											e.stopPropagation();
 											hapticLight();
@@ -701,25 +682,62 @@
 											showAllSessionsFor = next;
 										}}
 									>
-										{#if showingAll}
-											Hide {inactiveSessions.length} inactive session{inactiveSessions.length === 1 ? '' : 's'}
-										{:else}
-											Show {inactiveSessions.length} inactive session{inactiveSessions.length === 1 ? '' : 's'}
-										{/if}
+										{showingAll ? `Hide ${inactiveSessions.length} inactive` : `Show ${inactiveSessions.length} inactive`}
 									</button>
-								</div>
-							{/if}
+								{/if}
+							</div>
+							<div class="border border-base-300 bg-base-100">
+								{#if visibleSessions.length === 0 && inactiveSessions.length > 0}
+									<div class="px-4 py-3 text-sm text-base-content-faint">
+										No active sessions
+									</div>
+								{/if}
+								{#each visibleSessions as session, i (session.id)}
+									<SwipeToDelete
+										ondelete={() => deleteSession(session.id)}
+										disabled={activeSet.has(session.id)}
+									>
+										<a
+											href="/session/{session.id}"
+											class="group grid grid-cols-[14px_1fr_auto_auto_auto] gap-3.5 items-center px-4 py-3 hover:bg-base-200 transition-colors {i > 0 ? 'border-t border-base-300' : ''}"
+										>
+											<StatusDot
+												status={streamingSet.has(session.id) ? 'streaming' : activeSet.has(session.id) ? 'idle' : 'inactive'}
+											/>
+											<div class="min-w-0">
+												<div class="truncate text-[13.5px] font-medium">
+													{session.name || session.firstMessage || 'Empty session'}
+												</div>
+												<div class="mt-0.5 text-[11.5px] text-base-content-subtle">
+													{timeAgo(session.lastModified)} · {session.messageCount} msgs
+												</div>
+											</div>
+											{#if session.model}
+												<span class="hidden sm:inline-flex font-mono text-[10.5px] text-base-content-subtle border border-base-300 px-1.5 py-0.5 leading-none">{session.model}</span>
+											{:else}
+												<span></span>
+											{/if}
+											<span class="text-[11px] font-semibold text-base-content-subtle font-mono w-4 text-center" title={session.harness === 'claude-code' ? 'Claude Code' : 'pi'}>
+												{session.harness === 'claude-code' ? '◆' : 'π'}
+											</span>
+											<span class="text-base-content-faint inline-flex"><Icon name="chevron-right" class="w-3.5 h-3.5" /></span>
+										</a>
+									</SwipeToDelete>
+								{/each}
+							</div>
 						</div>
 
 						<!-- Jobs for this project -->
 						{#if data.jobs.filter((j: any) => j.repo === group.cwd).length > 0}
-							<div class="border-t border-base-300 px-4 py-3">
-								<div class="text-xs font-semibold text-base-content/50 mb-2">Jobs</div>
-								<JobList jobs={data.jobs} repo={group.cwd} />
+							<div class="px-4 pb-4">
+								<div class="text-[10.5px] font-medium uppercase tracking-[0.12em] text-base-content-faint py-2">Jobs · {data.jobs.filter((j: any) => j.repo === group.cwd).length}</div>
+								<div class="border border-base-300 bg-base-100">
+									<JobList jobs={data.jobs} repo={group.cwd} />
+								</div>
 							</div>
 						{/if}
 					{/if}
-				</div>
+				</article>
 			{/each}
 		</div>
 	{/if}
@@ -747,12 +765,3 @@
 	onclose={() => (showAddReviewJob = false)}
 />
 
-<style>
-	.project-card {
-		overflow: visible;
-	}
-	/* Clip session list inside the card but not the header */
-	.project-card .session-list {
-		overflow: hidden;
-	}
-</style>

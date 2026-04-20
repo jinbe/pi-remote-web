@@ -6,6 +6,18 @@
  */
 
 /**
+ * Per-content-block streaming state for `stream_event` partial messages.
+ * Indexed by Claude's content_block index within the current assistant message.
+ */
+export interface StreamBlock {
+	type: 'text' | 'thinking' | 'tool_use';
+	/** Tool call ID — only set for tool_use blocks. */
+	toolCallId?: string;
+	/** Accumulated input_json_delta partials — only used for tool_use blocks. */
+	inputJson?: string;
+}
+
+/**
  * Tracks the translator's running state across a session.
  * The relay daemon owns a single instance; tests create fresh ones per case.
  */
@@ -28,6 +40,12 @@ export interface SyntheticState {
 	prevThinkingText: string;
 	/** Whether onSessionId has already been invoked for this translator instance */
 	sessionIdCaptured: boolean;
+	/** Per-content-block state for partial `stream_event` deltas */
+	streamBlocks: Map<number, StreamBlock>;
+	/** Token usage from in-flight message_start.usage; finalized on result */
+	pendingInputTokens: number;
+	pendingCacheReadTokens: number;
+	pendingCacheWriteTokens: number;
 }
 
 /** Create a fresh default state — useful for tests. */
@@ -49,8 +67,32 @@ export function createSyntheticState(overrides?: Partial<SyntheticState>): Synth
 		prevAssistantText: '',
 		prevThinkingText: '',
 		sessionIdCaptured: false,
+		streamBlocks: new Map(),
+		pendingInputTokens: 0,
+		pendingCacheReadTokens: 0,
+		pendingCacheWriteTokens: 0,
 		...overrides,
 	};
+}
+
+/**
+ * Reset all per-turn streaming bookkeeping. Called when a turn begins
+ * (first stream_event or first cumulative assistant message).
+ */
+function beginStreamingTurn(state: SyntheticState, output: any[]): void {
+	state.isStreaming = true;
+	state.currentAssistantText = '';
+	state.currentThinkingText = '';
+	state.prevAssistantText = '';
+	state.prevThinkingText = '';
+	state.currentToolCalls.clear();
+	state.streamBlocks.clear();
+	output.push({ type: 'agent_start' });
+	output.push({ type: 'turn_start' });
+	output.push({
+		type: 'message_start',
+		message: { role: 'assistant' },
+	});
 }
 
 /**
@@ -90,25 +132,143 @@ export function translateClaudeEvent(
 			break;
 		}
 
+		case 'stream_event': {
+			const inner = event.event;
+			if (!inner) break;
+
+			switch (inner.type) {
+				case 'message_start': {
+					if (!state.isStreaming) beginStreamingTurn(state, output);
+					const usage = inner.message?.usage;
+					if (usage) {
+						state.pendingInputTokens = usage.input_tokens ?? 0;
+						state.pendingCacheReadTokens = usage.cache_read_input_tokens ?? 0;
+						state.pendingCacheWriteTokens = usage.cache_creation_input_tokens ?? 0;
+					}
+					if (inner.message?.model && !state.model) state.model = inner.message.model;
+					break;
+				}
+
+				case 'content_block_start': {
+					const idx = inner.index;
+					const block = inner.content_block;
+					if (block == null || typeof idx !== 'number') break;
+
+					if (block.type === 'tool_use') {
+						const toolCallId = block.id;
+						const toolName = block.name;
+						state.streamBlocks.set(idx, {
+							type: 'tool_use',
+							toolCallId,
+							inputJson: '',
+						});
+						if (!state.currentToolCalls.has(toolCallId)) {
+							state.currentToolCalls.set(toolCallId, {
+								name: toolName,
+								args: block.input || {},
+								text: '',
+							});
+							output.push({
+								type: 'tool_execution_start',
+								toolCallId,
+								toolName,
+								args: block.input || {},
+							});
+						}
+					} else if (block.type === 'text') {
+						state.streamBlocks.set(idx, { type: 'text' });
+					} else if (block.type === 'thinking') {
+						state.streamBlocks.set(idx, { type: 'thinking' });
+					}
+					break;
+				}
+
+				case 'content_block_delta': {
+					const idx = inner.index;
+					const delta = inner.delta;
+					const blockState = typeof idx === 'number' ? state.streamBlocks.get(idx) : undefined;
+					if (!delta || !blockState) break;
+
+					if (delta.type === 'text_delta' && blockState.type === 'text') {
+						const text = delta.text || '';
+						if (text) {
+							state.currentAssistantText += text;
+							state.prevAssistantText += text;
+							output.push({
+								type: 'message_update',
+								message: { role: 'assistant' },
+								assistantMessageEvent: {
+									type: 'text_delta',
+									contentIndex: 0,
+									delta: text,
+								},
+							});
+						}
+					} else if (delta.type === 'thinking_delta' && blockState.type === 'thinking') {
+						const text = delta.thinking || '';
+						if (text) {
+							state.currentThinkingText += text;
+							state.prevThinkingText += text;
+							output.push({
+								type: 'message_update',
+								message: { role: 'assistant' },
+								assistantMessageEvent: {
+									type: 'thinking_delta',
+									contentIndex: 0,
+									delta: text,
+								},
+							});
+						}
+					} else if (delta.type === 'input_json_delta' && blockState.type === 'tool_use') {
+						blockState.inputJson = (blockState.inputJson || '') + (delta.partial_json || '');
+					}
+					break;
+				}
+
+				case 'content_block_stop': {
+					const idx = inner.index;
+					const blockState = typeof idx === 'number' ? state.streamBlocks.get(idx) : undefined;
+					if (!blockState) break;
+
+					// Finalize tool_use args from accumulated JSON partials
+					if (blockState.type === 'tool_use' && blockState.toolCallId && blockState.inputJson) {
+						try {
+							const parsed = JSON.parse(blockState.inputJson);
+							const toolInfo = state.currentToolCalls.get(blockState.toolCallId);
+							if (toolInfo) toolInfo.args = parsed;
+						} catch {
+							// partial_json never closed cleanly — ignore, cumulative `assistant`
+							// snapshot will fix it up if/when it arrives
+						}
+					}
+					state.streamBlocks.delete(idx);
+					break;
+				}
+
+				case 'message_delta': {
+					// Per-turn output token count + stop reason. Accumulate output now;
+					// the outer `result` event will add input/cache totals.
+					const usage = inner.usage;
+					if (usage?.output_tokens != null) {
+						state.totalOutputTokens += usage.output_tokens;
+					}
+					break;
+				}
+
+				case 'message_stop': {
+					// Outer `result` event handles agent_end — no-op here.
+					break;
+				}
+			}
+			break;
+		}
+
 		case 'assistant': {
 			const msg = event.message;
 			if (!msg || !msg.content) break;
 
 			// If we're not streaming yet, emit agent_start + turn_start
-			if (!state.isStreaming) {
-				state.isStreaming = true;
-				state.currentAssistantText = '';
-				state.currentThinkingText = '';
-				state.prevAssistantText = '';
-				state.prevThinkingText = '';
-				state.currentToolCalls.clear();
-				output.push({ type: 'agent_start' });
-				output.push({ type: 'turn_start' });
-				output.push({
-					type: 'message_start',
-					message: { role: 'assistant' },
-				});
-			}
+			if (!state.isStreaming) beginStreamingTurn(state, output);
 
 			// Extract model if not set
 			if (!state.model && msg.model) {
@@ -235,27 +395,37 @@ export function translateClaudeEvent(
 				});
 			}
 
-			// After tool results, a new turn may start — reset text tracking for next assistant message
+			// Reset text tracking for the next assistant message. Do NOT eagerly
+			// emit turn_start / message_start here — the next stream_event
+			// (or cumulative `assistant` event) will open a new turn when
+			// real content is about to be produced. Emitting unconditionally
+			// creates empty assistant bubbles between consecutive tool calls.
 			state.prevAssistantText = '';
 			state.prevThinkingText = '';
 			state.currentAssistantText = '';
 			state.currentThinkingText = '';
-			output.push({ type: 'turn_start' });
-			output.push({
-				type: 'message_start',
-				message: { role: 'assistant' },
-			});
+			state.streamBlocks.clear();
 			break;
 		}
 
 		case 'result': {
-			// Final result — agent is done
+			// Final result — agent is done. Prefer stream_event-supplied totals
+			// when available (we already accumulated output via message_delta);
+			// the result event still carries authoritative input/cache totals.
 			const usage = event.usage || {};
-			state.totalInputTokens += usage.input_tokens || 0;
-			state.totalOutputTokens += usage.output_tokens || 0;
-			state.totalCacheReadTokens += usage.cache_read_input_tokens || 0;
-			state.totalCacheWriteTokens += usage.cache_creation_input_tokens || 0;
+			state.totalInputTokens += usage.input_tokens || state.pendingInputTokens || 0;
+			// Output tokens are already accumulated incrementally via message_delta
+			// when stream_event is present — only fall back to result.usage when
+			// stream_event isn't being emitted.
+			if (state.pendingInputTokens === 0 && usage.output_tokens) {
+				state.totalOutputTokens += usage.output_tokens;
+			}
+			state.totalCacheReadTokens += usage.cache_read_input_tokens || state.pendingCacheReadTokens || 0;
+			state.totalCacheWriteTokens += usage.cache_creation_input_tokens || state.pendingCacheWriteTokens || 0;
 			state.totalCost += event.total_cost_usd || 0;
+			state.pendingInputTokens = 0;
+			state.pendingCacheReadTokens = 0;
+			state.pendingCacheWriteTokens = 0;
 
 			if (event.session_id) state.sessionId = event.session_id;
 
@@ -293,7 +463,14 @@ export function translateClaudeEvent(
 			state.currentThinkingText = '';
 			state.prevAssistantText = '';
 			state.prevThinkingText = '';
-			state.currentToolCalls.clear();
+			// Do NOT clear currentToolCalls here. Anything still in the map
+			// at agent_end is a tool the assistant invoked but never received
+			// a tool_result for — typically AskUserQuestion / ExitPlanMode /
+			// any "ask the user" tool. The relay needs this so the next user
+			// message can be sent back as a tool_result instead of a plain
+			// user turn (which the agent would otherwise interpret as a new
+			// request, losing the question context).
+			state.streamBlocks.clear();
 			break;
 		}
 

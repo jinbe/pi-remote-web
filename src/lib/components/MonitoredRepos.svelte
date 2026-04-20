@@ -12,6 +12,8 @@
 		assigned_only: number;
 		manual_only: number;
 		enabled: number;
+		comment_only: number;
+		skip_ci_checks: number;
 		created_at: string;
 		updated_at: string;
 	}
@@ -24,6 +26,7 @@
 		onaddrepo,
 		open = false,
 		ontoggle,
+		headerless = false,
 	}: {
 		repos: MonitoredRepo[];
 		prPollerRunning: boolean;
@@ -32,6 +35,8 @@
 		onaddrepo?: () => void;
 		open?: boolean;
 		ontoggle?: (open: boolean) => void;
+		/** When true, hide the accordion header — caller is in charge of layout (e.g. drawer). */
+		headerless?: boolean;
 	} = $props();
 
 	let scanningRepo = $state<string | null>(null);
@@ -42,7 +47,7 @@
 		ontoggle?.(!open);
 	}
 
-	async function toggleRepo(repoId: string, field: 'assigned_only' | 'manual_only' | 'enabled', currentValue: number) {
+	async function toggleRepo(repoId: string, field: 'assigned_only' | 'manual_only' | 'enabled' | 'comment_only' | 'skip_ci_checks', currentValue: number) {
 		hapticLight();
 		try {
 			await fetch(`/api/monitored-repos/${repoId}`, {
@@ -115,35 +120,37 @@
 	}
 </script>
 
-<!-- Collapsible header -->
-<div
-	class="flex items-center gap-2 px-1 py-1.5 cursor-pointer select-none"
-	role="button"
-	tabindex="0"
-	onclick={toggle}
-	onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(); }}
->
-	<span class="inline-flex text-sm opacity-50 transition-transform {open ? 'rotate-90' : ''}">
-		<Icon name="chevron-right" class="w-3.5 h-3.5" />
-	</span>
-	<span class="text-sm font-semibold">PR Monitor</span>
-	{#if repos.length > 0}
-		<span class="badge badge-xs badge-ghost">{repos.length}</span>
-	{/if}
-	<!-- Poller status dot (visible when collapsed) -->
-	{#if !open}
-		{#if prPollerRunning}
-			<span class="relative flex h-1.5 w-1.5">
-				<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
-				<span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-success"></span>
-			</span>
+<!-- Collapsible header (skipped in headerless / drawer mode) -->
+{#if !headerless}
+	<div
+		class="flex items-center gap-2 px-1 py-1.5 cursor-pointer select-none"
+		role="button"
+		tabindex="0"
+		onclick={toggle}
+		onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(); }}
+	>
+		<span class="inline-flex text-sm opacity-50 transition-transform {open ? 'rotate-90' : ''}">
+			<Icon name="chevron-right" class="w-3.5 h-3.5" />
+		</span>
+		<span class="text-sm font-semibold">PR Monitor</span>
+		{#if repos.length > 0}
+			<span class="badge badge-xs badge-ghost">{repos.length}</span>
 		{/if}
-	{/if}
-</div>
+		<!-- Poller status dot (visible when collapsed) -->
+		{#if !open}
+			{#if prPollerRunning}
+				<span class="relative flex h-1.5 w-1.5">
+					<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
+					<span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-success"></span>
+				</span>
+			{/if}
+		{/if}
+	</div>
+{/if}
 
 <!-- Expanded panel -->
-{#if open}
-	<div class="rounded-lg border border-base-300 bg-base-200/30 p-3 mt-1">
+{#if open || headerless}
+	<div class="{headerless ? 'p-3' : 'rounded-lg border border-base-300 bg-base-200/30 p-3 mt-1'}">
 		<!-- Controls row -->
 		<div class="flex items-center justify-between mb-3">
 			<div class="flex items-center gap-1">
@@ -241,6 +248,22 @@
 								title={repo.manual_only ? 'Manual scan only — click to enable auto-poll' : 'Auto-polling — click to set manual only'}
 							>
 								{repo.manual_only ? 'Manual' : 'Auto'}
+							</button>
+
+							<button
+								class="badge badge-xs cursor-pointer {repo.skip_ci_checks ? 'badge-warning' : 'badge-ghost'}"
+								onclick={() => toggleRepo(repo.id, 'skip_ci_checks', repo.skip_ci_checks)}
+								title={repo.skip_ci_checks ? 'Skipping CI checks — click to wait for CI' : 'Waiting for CI — click to skip CI checks'}
+							>
+								{repo.skip_ci_checks ? 'Skip CI' : 'CI'}
+							</button>
+
+							<button
+								class="badge badge-xs cursor-pointer {repo.comment_only ? 'badge-info' : 'badge-ghost'}"
+								onclick={() => toggleRepo(repo.id, 'comment_only', repo.comment_only)}
+								title={repo.comment_only ? 'Comment only — click to enable verdicts' : 'Sets verdict — click for comment only'}
+							>
+								{repo.comment_only ? 'Comment' : 'Verdict'}
 							</button>
 
 							<button

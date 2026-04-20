@@ -1,3 +1,5 @@
+/* ── Public Sans (brand sans) — must precede all other CSS statements ── */
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400;1,500&display=swap');
 @import "tailwindcss";
 @plugin "daisyui" {
 	themes: dark --default, light;
@@ -5,106 +7,110 @@
 @plugin "@tailwindcss/typography";
 
 /*
- * Pi Dark — Tokyo Night-inspired, optimised for code readability
- * Deep blue-grey background, warm off-white text, vibrant semantic accents
+ * Moravec brand palette
+ *   ink      #000  paper    #fff
+ *   slate    #1F5B65   (idle / quiet info)
+ *   orange   #FE491A   (live / accent / primary action)
+ *   greys    #F4F4F4 (g1) / #CCCCCC (g2) / #999999 (g3) / #333333 (g4)
+ *
+ * Visual rules: square corners, hairline borders, no shadows, no gradients.
  */
 [data-theme="pi-dark"] {
 	color-scheme: dark;
-	--color-base-100: oklch(22% 0.02 264);
-	--color-base-200: oklch(19% 0.018 264);
-	--color-base-300: oklch(27% 0.022 264);
-	--color-base-content: oklch(88% 0.02 250);
+	--color-base-100: #000000;
+	--color-base-200: #0a0a0a;
+	--color-base-300: #1a1a1a;
+	--color-base-content: #ffffff;
 
-	--color-primary: oklch(72% 0.14 250);
-	--color-primary-content: oklch(18% 0.02 264);
-	--color-secondary: oklch(68% 0.16 300);
-	--color-secondary-content: oklch(18% 0.02 264);
-	--color-accent: oklch(76% 0.12 210);
-	--color-accent-content: oklch(18% 0.02 264);
-	--color-neutral: oklch(30% 0.02 264);
-	--color-neutral-content: oklch(88% 0.02 250);
+	--color-primary: #ffffff;
+	--color-primary-content: #000000;
+	--color-secondary: #1F5B65;
+	--color-secondary-content: #ffffff;
+	--color-accent: #FE491A;
+	--color-accent-content: #ffffff;
+	--color-neutral: #1a1a1a;
+	--color-neutral-content: #ffffff;
 
-	--color-info: oklch(76% 0.12 210);
-	--color-info-content: oklch(18% 0.02 264);
-	--color-success: oklch(78% 0.14 145);
-	--color-success-content: oklch(18% 0.02 264);
-	--color-warning: oklch(82% 0.14 80);
-	--color-warning-content: oklch(18% 0.02 264);
-	--color-error: oklch(72% 0.18 15);
-	--color-error-content: oklch(18% 0.02 264);
+	--color-info: #1F5B65;
+	--color-info-content: #ffffff;
+	--color-success: #1F5B65;
+	--color-success-content: #ffffff;
+	--color-warning: #FE491A;
+	--color-warning-content: #ffffff;
+	--color-error: #FE491A;
+	--color-error-content: #ffffff;
 
-	/* WCAG AA compliant muted text — use instead of opacity-based variants */
-	--color-base-content-muted: oklch(70% 0.015 250);   /* ≥6:1 — replaces /60 */
-	--color-base-content-subtle: oklch(62% 0.012 250);  /* ≥4.5:1 — replaces /50 */
-	--color-base-content-faint: oklch(56% 0.01 250);    /* ≥3:1 large text — replaces /40 */
+	/* Muted text — derived from white at fixed opacities; AA-compliant against #000 */
+	--color-base-content-muted: rgba(255, 255, 255, 0.78);
+	--color-base-content-subtle: rgba(255, 255, 255, 0.55);
+	--color-base-content-faint: rgba(255, 255, 255, 0.35);
 
-	--radius-selector: 0.5rem;
-	--radius-field: 0.25rem;
-	--radius-box: 0.5rem;
+	/* Square everywhere */
+	--radius-selector: 0;
+	--radius-field: 0;
+	--radius-box: 0;
 	--size-selector: 0.25rem;
 	--size-field: 0.25rem;
 	--border: 1px;
-	--depth: 1;
+	/* No shadows */
+	--depth: 0;
 	--noise: 0;
 }
 
-/*
- * Pi Light — Soft paper-white, optimised for daylight code readability
- * Warm off-white background, deep slate text, muted saturated accents
- */
 [data-theme="pi-light"] {
 	color-scheme: light;
-	--color-base-100: oklch(97% 0.005 80);
-	--color-base-200: oklch(94% 0.008 80);
-	--color-base-300: oklch(89% 0.012 260);
-	--color-base-content: oklch(28% 0.025 260);
+	--color-base-100: #ffffff;
+	--color-base-200: #F4F4F4;
+	--color-base-300: #CCCCCC;
+	--color-base-content: #000000;
 
-	--color-primary: oklch(48% 0.18 260);
-	--color-primary-content: oklch(97% 0.005 80);
-	--color-secondary: oklch(48% 0.16 310);
-	--color-secondary-content: oklch(97% 0.005 80);
-	--color-accent: oklch(45% 0.1 200);
-	--color-accent-content: oklch(97% 0.005 80);
-	--color-neutral: oklch(68% 0.01 260);
-	--color-neutral-content: oklch(28% 0.025 260);
+	--color-primary: #000000;
+	--color-primary-content: #ffffff;
+	--color-secondary: #1F5B65;
+	--color-secondary-content: #ffffff;
+	--color-accent: #FE491A;
+	--color-accent-content: #ffffff;
+	--color-neutral: #333333;
+	--color-neutral-content: #ffffff;
 
-	--color-info: oklch(45% 0.1 200);
-	--color-info-content: oklch(97% 0.005 80);
-	--color-success: oklch(45% 0.1 155);
-	--color-success-content: oklch(97% 0.005 80);
-	--color-warning: oklch(55% 0.14 65);
-	--color-warning-content: oklch(97% 0.005 80);
-	--color-error: oklch(55% 0.18 20);
-	--color-error-content: oklch(97% 0.005 80);
+	--color-info: #1F5B65;
+	--color-info-content: #ffffff;
+	--color-success: #1F5B65;
+	--color-success-content: #ffffff;
+	--color-warning: #FE491A;
+	--color-warning-content: #ffffff;
+	--color-error: #FE491A;
+	--color-error-content: #ffffff;
 
-	/* WCAG AA compliant muted text — use instead of opacity-based variants */
-	--color-base-content-muted: oklch(43% 0.02 260);    /* ≥6:1 — replaces /60 */
-	--color-base-content-subtle: oklch(48% 0.018 260);  /* ≥4.5:1 — replaces /50 */
-	--color-base-content-faint: oklch(55% 0.015 260);   /* ≥3:1 large text — replaces /40 */
+	--color-base-content-muted: #333333;
+	--color-base-content-subtle: #666666;
+	--color-base-content-faint: #999999;
 
-	--radius-selector: 0.5rem;
-	--radius-field: 0.25rem;
-	--radius-box: 0.5rem;
+	--radius-selector: 0;
+	--radius-field: 0;
+	--radius-box: 0;
 	--size-selector: 0.25rem;
 	--size-field: 0.25rem;
 	--border: 1px;
-	--depth: 1;
+	--depth: 0;
 	--noise: 0;
 }
 
-/* ── Typography — JetBrains Mono everywhere ───────────────────────── */
+/* ── Typography — Public Sans for UI, JetBrains Mono for code ──── */
 
 html {
-	font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono',
-		Menlo, Consolas, 'Liberation Mono', monospace;
+	font-family: 'Public Sans', system-ui, -apple-system, BlinkMacSystemFont,
+		'Segoe UI', Roboto, sans-serif;
 	font-feature-settings: 'liga' 1, 'calt' 1;
+	letter-spacing: -0.01em;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 }
 
 pre, code, .font-mono, kbd, samp {
-	font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono',
+	font-family: ui-monospace, 'JetBrains Mono', SFMono-Regular, 'SF Mono',
 		Menlo, Consolas, 'Liberation Mono', monospace;
+	letter-spacing: 0;
 }
 
 /* Code readability: comfortable line-height & tab size */
@@ -113,31 +119,51 @@ pre {
 	line-height: 1.65;
 }
 
-/* ── Chat typography — system sans-serif for readability ──────────── */
+/* ── Chat typography — keep brand sans for prose, mono for code ──── */
 
 .chat-bubble {
-	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto,
-		'Helvetica Neue', Arial, sans-serif;
+	font-family: 'Public Sans', system-ui, -apple-system, BlinkMacSystemFont,
+		'Segoe UI', Roboto, sans-serif;
 }
 
 .chat-bubble pre,
 .chat-bubble code,
 .chat-bubble .font-mono {
-	font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono',
+	font-family: ui-monospace, 'JetBrains Mono', SFMono-Regular, 'SF Mono',
 		Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+/* ── Strip residual roundness from DaisyUI surfaces ──────────────── */
+/* Tokens above zero out radius vars, but a few DaisyUI utilities use
+ * direct rounded utilities. Keep this list small and surgical. */
+.modal-box,
+.dropdown-content,
+.menu li > *,
+.alert,
+.badge,
+.btn,
+.card,
+.input,
+.select,
+.textarea,
+.checkbox,
+.toggle,
+.tab {
+	border-radius: 0 !important;
+	box-shadow: none !important;
 }
 
 /* ── Scrollbar styling ────────────────────────────────────────────── */
 
 [data-theme="pi-dark"] ::-webkit-scrollbar { width: 6px; height: 6px; }
 [data-theme="pi-dark"] ::-webkit-scrollbar-track { background: transparent; }
-[data-theme="pi-dark"] ::-webkit-scrollbar-thumb { background: oklch(30% 0.02 264); border-radius: 3px; }
-[data-theme="pi-dark"] ::-webkit-scrollbar-thumb:hover { background: oklch(38% 0.02 264); }
+[data-theme="pi-dark"] ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-radius: 0; }
+[data-theme="pi-dark"] ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.32); }
 
 [data-theme="pi-light"] ::-webkit-scrollbar { width: 6px; height: 6px; }
 [data-theme="pi-light"] ::-webkit-scrollbar-track { background: transparent; }
-[data-theme="pi-light"] ::-webkit-scrollbar-thumb { background: oklch(80% 0.01 260); border-radius: 3px; }
-[data-theme="pi-light"] ::-webkit-scrollbar-thumb:hover { background: oklch(68% 0.01 260); }
+[data-theme="pi-light"] ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.18); border-radius: 0; }
+[data-theme="pi-light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.32); }
 
 /* ── Reduced motion ───────────────────────────────────────────────── */
 
@@ -157,7 +183,7 @@ pre {
 
 /* Enhanced focus visibility for accessibility - applies to all devices */
 :focus-visible {
-	outline: 2px solid var(--color-primary);
+	outline: 2px solid var(--color-accent);
 	outline-offset: 2px;
 }
 
@@ -166,17 +192,17 @@ pre {
 	/* btn-xs: 24px → 44px minimum */
 	.btn-xs:not(.btn-square, .btn-circle) {
 		--size: calc(var(--size-field, 0.25rem) * 11);
-		
+
 		min-height: 2.75rem;
 	}
-	
+
 	/* btn-sm: 32px → 44px minimum */
 	.btn-sm:not(.btn-square, .btn-circle) {
 		--size: calc(var(--size-field, 0.25rem) * 11);
-		
+
 		min-height: 2.75rem;
 	}
-	
+
 	/* Small circular/square buttons also need minimum touch targets */
 	.btn-xs.btn-circle,
 	.btn-sm.btn-circle,
@@ -193,7 +219,7 @@ pre {
 		min-height: 2.75rem;
 		min-width: 2.75rem;
 	}
-	
+
 	/* Ensure all interactive elements have minimum touch targets */
 	button:not(.btn-xs, .btn-sm, .btn-md, .btn-lg, .btn-xl),
 	[role="button"]:not(.btn-xs, .btn-sm, .btn-md, .btn-lg, .btn-xl),
@@ -202,24 +228,24 @@ pre {
 		min-height: 2.75rem;
 		padding: 0.5rem;
 	}
-	
+
 	/* Remove outline from non-interactive elements */
 	[role="presentation"],
 	[tabindex="-1"] {
 		outline: none !important;
 	}
-	
+
 	/* Spacing consistency - ensure consistent gaps */
 	.gap-1.5 {
 		gap: 0.375rem;
 	}
-	
+
 	.gap-2.5 {
 		gap: 0.625rem;
 	}
-	
-	/* Ensure consistent border radius */
+
+	/* Square corners (Moravec brand) */
 	.rounded-field {
-		border-radius: var(--radius-field);
+		border-radius: 0;
 	}
 }

@@ -47,6 +47,8 @@ export interface MonitoredRepo {
 	assigned_only: number;
 	manual_only: number;
 	enabled: number;
+	comment_only: number;
+	skip_ci_checks: number;
 	created_at: string;
 	updated_at: string;
 }
@@ -58,6 +60,8 @@ export interface CreateMonitoredRepoInput {
 	assigned_only?: boolean;
 	manual_only?: boolean;
 	enabled?: boolean;
+	comment_only?: boolean;
+	skip_ci_checks?: boolean;
 }
 
 export interface UpdateMonitoredRepoInput {
@@ -65,6 +69,8 @@ export interface UpdateMonitoredRepoInput {
 	assigned_only?: boolean;
 	manual_only?: boolean;
 	enabled?: boolean;
+	comment_only?: boolean;
+	skip_ci_checks?: boolean;
 }
 
 interface GitHubPr {
@@ -137,8 +143,8 @@ export function getMonitoredRepo(id: string): MonitoredRepo | null {
 
 export function createMonitoredRepo(input: CreateMonitoredRepoInput): MonitoredRepo {
 	const row = getDb().query(`
-		INSERT INTO monitored_repos (owner, name, local_path, assigned_only, manual_only, enabled)
-		VALUES ($owner, $name, $local_path, $assigned_only, $manual_only, $enabled)
+		INSERT INTO monitored_repos (owner, name, local_path, assigned_only, manual_only, enabled, comment_only, skip_ci_checks)
+		VALUES ($owner, $name, $local_path, $assigned_only, $manual_only, $enabled, $comment_only, $skip_ci_checks)
 		RETURNING *
 	`).get({
 		$owner: input.owner,
@@ -147,6 +153,8 @@ export function createMonitoredRepo(input: CreateMonitoredRepoInput): MonitoredR
 		$assigned_only: input.assigned_only === false ? 0 : 1,
 		$manual_only: input.manual_only === false ? 0 : 1,
 		$enabled: input.enabled === false ? 0 : 1,
+		$comment_only: input.comment_only ? 1 : 0,
+		$skip_ci_checks: input.skip_ci_checks ? 1 : 0,
 	}) as MonitoredRepo;
 
 	log.info('github-pr-poller', `added repo ${input.owner}/${input.name}`);
@@ -172,6 +180,14 @@ export function updateMonitoredRepo(id: string, updates: UpdateMonitoredRepoInpu
 	if (updates.enabled !== undefined) {
 		setClauses.push('enabled = $enabled');
 		params.$enabled = updates.enabled ? 1 : 0;
+	}
+	if (updates.comment_only !== undefined) {
+		setClauses.push('comment_only = $comment_only');
+		params.$comment_only = updates.comment_only ? 1 : 0;
+	}
+	if (updates.skip_ci_checks !== undefined) {
+		setClauses.push('skip_ci_checks = $skip_ci_checks');
+		params.$skip_ci_checks = updates.skip_ci_checks ? 1 : 0;
 	}
 
 	const sql = `UPDATE monitored_repos SET ${setClauses.join(', ')} WHERE id = $id RETURNING *`;
@@ -411,7 +427,8 @@ async function processPrs(
 				branch: pr.headRefName,
 				target_branch: pr.baseRefName,
 				pr_url: prUrl,
-	
+				comment_only: !!repo.comment_only,
+				skip_ci_checks: !!repo.skip_ci_checks,
 				harness: getHarness(),
 			});
 			// Record that we kicked off a review so we don't re-trigger on the

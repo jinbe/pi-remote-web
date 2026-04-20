@@ -552,6 +552,220 @@ describe('Claude Code → pi RPC translation', () => {
 	});
 });
 
+describe('stream_event partial-message handling', () => {
+
+	test('stream_event message_start emits agent_start + turn_start + message_start', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+		const events = translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: {
+				type: 'message_start',
+				message: {
+					model: 'claude-sonnet-4-6',
+					usage: { input_tokens: 1234, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 },
+				},
+			},
+		});
+
+		expect(events.map(e => e.type)).toEqual(['agent_start', 'turn_start', 'message_start']);
+		expect(state.isStreaming).toBe(true);
+		expect(state.model).toBe('claude-sonnet-4-6');
+		expect(state.pendingInputTokens).toBe(1234);
+		expect(state.pendingCacheReadTokens).toBe(100);
+		expect(state.pendingCacheWriteTokens).toBe(50);
+	});
+
+	test('stream_event content_block_delta text emits incremental text_delta', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		// message_start + content_block_start for a text block
+		translateClaudeEvent(state, { type: 'stream_event', event: { type: 'message_start', message: {} } });
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+		});
+
+		const e1 = translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello' } },
+		});
+		const e2 = translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: ' world' } },
+		});
+
+		expect(e1[0].type).toBe('message_update');
+		expect(e1[0].assistantMessageEvent).toEqual({ type: 'text_delta', contentIndex: 0, delta: 'Hello' });
+		expect(e2[0].assistantMessageEvent.delta).toBe(' world');
+		expect(state.currentAssistantText).toBe('Hello world');
+	});
+
+	test('stream_event content_block_delta thinking emits thinking_delta', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		translateClaudeEvent(state, { type: 'stream_event', event: { type: 'message_start', message: {} } });
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
+		});
+
+		const events = translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Thinking deeply' } },
+		});
+
+		expect(events[0].assistantMessageEvent).toEqual({
+			type: 'thinking_delta',
+			contentIndex: 0,
+			delta: 'Thinking deeply',
+		});
+		expect(state.currentThinkingText).toBe('Thinking deeply');
+	});
+
+	test('stream_event tool_use content_block_start emits tool_execution_start', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		translateClaudeEvent(state, { type: 'stream_event', event: { type: 'message_start', message: {} } });
+		const events = translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: {
+				type: 'content_block_start',
+				index: 1,
+				content_block: { type: 'tool_use', id: 'toolu_stream_1', name: 'Bash', input: {} },
+			},
+		});
+
+		const start = events.find(e => e.type === 'tool_execution_start');
+		expect(start).toBeDefined();
+		expect(start!.toolCallId).toBe('toolu_stream_1');
+		expect(start!.toolName).toBe('Bash');
+	});
+
+	test('input_json_delta accumulates and content_block_stop parses tool args', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		translateClaudeEvent(state, { type: 'stream_event', event: { type: 'message_start', message: {} } });
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: {
+				type: 'content_block_start',
+				index: 0,
+				content_block: { type: 'tool_use', id: 'toolu_args', name: 'Bash', input: {} },
+			},
+		});
+
+		// Stream the input JSON in two partial chunks
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"command":' } },
+		});
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '"ls -la"}' } },
+		});
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_stop', index: 0 },
+		});
+
+		const tool = state.currentToolCalls.get('toolu_args');
+		expect(tool).toBeDefined();
+		expect(tool!.args).toEqual({ command: 'ls -la' });
+	});
+
+	test('stream_event message_delta accumulates output tokens incrementally', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		translateClaudeEvent(state, { type: 'stream_event', event: { type: 'message_start', message: {} } });
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'message_delta', usage: { output_tokens: 25 } },
+		});
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'message_delta', usage: { output_tokens: 60 } },
+		});
+
+		expect(state.totalOutputTokens).toBe(85);
+	});
+
+	test('cumulative assistant snapshot after stream_event does NOT double-emit', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		// Stream the text in via stream_event
+		translateClaudeEvent(state, { type: 'stream_event', event: { type: 'message_start', message: {} } });
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+		});
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello world' } },
+		});
+
+		// Now the cumulative `assistant` snapshot arrives (Claude emits both)
+		const events = translateClaudeEvent(state, {
+			type: 'assistant',
+			message: { content: [{ type: 'text', text: 'Hello world' }] },
+		});
+
+		// No new text_delta — prevAssistantText already equals the full text
+		const updates = events.filter(e => e.type === 'message_update');
+		expect(updates).toHaveLength(0);
+	});
+
+	test('cumulative tool_use snapshot does NOT re-emit tool_execution_start after stream_event', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		translateClaudeEvent(state, { type: 'stream_event', event: { type: 'message_start', message: {} } });
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: {
+				type: 'content_block_start',
+				index: 0,
+				content_block: { type: 'tool_use', id: 'toolu_dedupe', name: 'Bash', input: {} },
+			},
+		});
+
+		// Cumulative assistant snapshot containing the same tool_use
+		const events = translateClaudeEvent(state, {
+			type: 'assistant',
+			message: {
+				content: [{ type: 'tool_use', id: 'toolu_dedupe', name: 'Bash', input: { command: 'ls' } }],
+			},
+		});
+
+		const starts = events.filter(e => e.type === 'tool_execution_start');
+		expect(starts).toHaveLength(0);
+	});
+
+	test('result event combines stream_event-accumulated output with result-supplied input', () => {
+		const state = createSyntheticState({ sessionId: 'test-session-id' });
+
+		// Stream supplies input via message_start.usage and output via message_delta
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'message_start', message: { usage: { input_tokens: 500, cache_read_input_tokens: 200 } } },
+		});
+		translateClaudeEvent(state, {
+			type: 'stream_event',
+			event: { type: 'message_delta', usage: { output_tokens: 75 } },
+		});
+
+		// Result event arrives — supplies authoritative input/cache totals
+		translateClaudeEvent(state, {
+			type: 'result',
+			subtype: 'success',
+			total_cost_usd: 0.05,
+			usage: { input_tokens: 500, cache_read_input_tokens: 200 },
+		});
+
+		expect(state.totalInputTokens).toBe(500);
+		expect(state.totalOutputTokens).toBe(75); // accumulated via message_delta only — no double count
+		expect(state.totalCacheReadTokens).toBe(200);
+	});
+});
+
 describe('Synthetic state (get_state / get_session_stats)', () => {
 
 	test('get_state response shape matches pi RPC format', () => {
