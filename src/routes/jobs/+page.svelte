@@ -556,7 +556,7 @@
 	</div>
 {/snippet}
 
-<div class="mx-auto max-w-4xl px-4 py-6 h-full overflow-y-auto">
+<div class="mx-auto max-w-4xl px-4 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] h-full overflow-y-auto">
 	<!-- Header -->
 	<div class="mb-6 flex items-center justify-between">
 		<div class="flex items-center gap-3">

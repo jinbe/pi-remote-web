@@ -105,6 +105,14 @@ html {
 	letter-spacing: -0.01em;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
+	/* Default to dark — iOS PWA reads this for the home-indicator safe area
+	 * before JS runs. Overridden below once data-theme resolves. */
+	background-color: #000;
+	color-scheme: dark;
+}
+
+html[data-theme], body {
+	background-color: var(--color-base-100);
 }
 
 pre, code, .font-mono, kbd, samp {

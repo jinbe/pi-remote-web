@@ -17,6 +17,16 @@
 	}
 
 	setContext('theme', { get theme() { return theme; }, toggleTheme });
+
+	// Mirror the theme onto <html> so html/body inherit theme CSS vars.
+	// iOS PWA paints the home-indicator safe area from the body background,
+	// not from inner fixed elements — without this, the system's default
+	// dark-grey leaks through as a bar at the bottom.
+	$effect(() => {
+		if (browser) {
+			document.documentElement.setAttribute('data-theme', daisyTheme);
+		}
+	});
 </script>
 
 <svelte:head>

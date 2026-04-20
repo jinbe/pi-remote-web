@@ -359,7 +359,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="mx-auto max-w-5xl px-4 sm:px-6 py-5 h-full overflow-y-auto"
+	class="mx-auto max-w-5xl px-4 sm:px-6 pt-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] h-full overflow-y-auto"
 	bind:this={scrollContainer}
 	ontouchstart={onPullTouchStart}
 	ontouchmove={onPullTouchMove}
@@ -411,7 +411,11 @@
 					<span class="sm:hidden">Stop</span>
 				</button>
 			{/if}
-			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); newSessionCwd = ''; newSessionHarness = data.sessions[0]?.harness || 'pi'; showNewSession = true; }}><Icon name="plus" class="w-4 h-4" /> New session</button>
+			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); newSessionCwd = ''; newSessionHarness = data.sessions[0]?.harness || 'pi'; showNewSession = true; }}>
+				<Icon name="plus" class="w-4 h-4" />
+				<span class="hidden sm:inline">New session</span>
+				<span class="sm:hidden">New</span>
+			</button>
 			<!-- Kebab menu -->
 			<div class="dropdown dropdown-end">
 				<div tabindex="0" role="button" class="btn btn-sm btn-ghost btn-square" aria-label="More actions">
@@ -435,10 +439,10 @@
 	</header>
 
 	<!-- Sub-toolbar — workspace context + harness filter -->
-	<div class="mb-3 flex items-center justify-between gap-3 border-y border-base-300 py-2.5">
+	<div class="mb-3 flex flex-col gap-2.5 border-y border-base-300 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
 		<div class="flex items-baseline gap-3 min-w-0">
 			<span class="text-[10.5px] font-medium uppercase tracking-[0.12em] text-base-content-faint">Workspace</span>
-			<span class="text-xs text-base-content-subtle">
+			<span class="text-xs text-base-content-subtle truncate">
 				{projectGroups.length} {projectGroups.length === 1 ? 'repo' : 'repos'} · {filtered.length} sessions
 				{#if streamingSet.size > 0}
 					· <span class="text-accent font-medium">{streamingSet.size} streaming</span>
@@ -449,10 +453,10 @@
 			<input
 				type="text"
 				placeholder="Search…"
-				class="input input-sm w-32 sm:w-48"
+				class="input input-sm flex-1 sm:w-48 sm:flex-none"
 				bind:value={search}
 			/>
-			<div class="flex border border-base-300">
+			<div class="flex border border-base-300 flex-shrink-0">
 				<button
 					class="px-2.5 py-0.5 text-xs {harnessFilter === 'all' ? 'bg-base-content text-base-100 font-medium' : 'text-base-content-subtle'}"
 					onclick={() => { hapticLight(); harnessFilter = 'all'; }}

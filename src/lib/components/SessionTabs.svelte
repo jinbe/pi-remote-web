@@ -67,7 +67,7 @@
 </script>
 
 {#if !loading}
-	<div class="border-t border-base-300 bg-base-200 shrink-0 overflow-x-auto pb-[env(safe-area-inset-bottom)]">
+	<div class="border-t border-base-300 bg-base-200 shrink-0 overflow-x-auto">
 		<div class="flex min-w-0">
 			{#each sessions as session (session.id)}
 				<a

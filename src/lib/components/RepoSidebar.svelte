@@ -153,7 +153,7 @@
 {#snippet content()}
 	<div class="flex flex-col h-full">
 		<!-- Brand + Jobs link + close (mobile) -->
-		<div class="px-4 pt-5 pb-3 flex items-center justify-between border-b border-base-300 gap-2">
+		<div class="px-4 pt-4 pb-3 md:pt-5 flex items-center justify-between border-b border-base-300 gap-2">
 			<a href="/" class="inline-flex items-center min-w-0" aria-label="All projects">
 				<PiWordmark height={20} />
 			</a>
@@ -180,7 +180,7 @@
 		</div>
 
 		<!-- Workspace meta + harness filter -->
-		<div class="px-4 py-2.5 flex items-center justify-between gap-2 border-b border-base-300">
+		<div class="px-4 py-3 md:py-2.5 flex items-center justify-between gap-2 border-b border-base-300">
 			<div class="text-[10.5px] font-medium uppercase tracking-[0.12em] text-base-content-faint flex items-center gap-1.5 min-w-0">
 				<span>{projects.length} {projects.length === 1 ? 'repo' : 'repos'}</span>
 				{#if activeCount > 0}
@@ -222,7 +222,7 @@
 					<div class="border-b border-base-300/60">
 						<!-- Project header -->
 						<button
-							class="w-full text-left flex items-center gap-2 px-4 py-2.5 hover:bg-base-200 transition-colors"
+							class="w-full text-left flex items-center gap-2 px-4 py-3 md:py-2.5 hover:bg-base-200 transition-colors"
 							onclick={() => toggleProject(project.cwd)}
 							aria-expanded={isExpanded}
 						>
@@ -253,7 +253,7 @@
 							<div class="pb-1.5">
 								{#each project.sessions as s (s.id)}
 									<button
-										class="w-full text-left grid grid-cols-[8px_1fr_auto] gap-2.5 items-center pl-7 pr-4 py-2 transition-colors border-l-2 {s.isCurrent ? 'border-accent bg-base-200' : 'border-transparent hover:bg-base-200/60'}"
+										class="w-full text-left grid grid-cols-[8px_1fr_auto] gap-2.5 items-center pl-7 pr-4 py-2.5 md:py-2 transition-colors border-l-2 {s.isCurrent ? 'border-accent bg-base-200' : 'border-transparent hover:bg-base-200/60'}"
 										onclick={() => go(s.id)}
 										aria-current={s.isCurrent ? 'page' : undefined}
 									>
@@ -339,7 +339,7 @@
 	></div>
 {/if}
 <aside
-	class="md:hidden fixed top-0 left-0 bottom-0 w-[300px] max-w-[85vw] bg-base-100 border-r border-base-300 z-[61] mobile-drawer"
+	class="md:hidden fixed top-0 left-0 bottom-0 w-[320px] max-w-[88vw] bg-base-100 border-r border-base-300 z-[61] mobile-drawer"
 	class:open={mobileOpen}
 	aria-hidden={!mobileOpen}
 	aria-label="Project navigator"

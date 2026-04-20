@@ -218,24 +218,15 @@
 		}
 	});
 
-	// iOS keyboard handling
+	// Keep view pinned to bottom when the visible viewport changes (keyboard
+	// open/close, iOS URL bar retract). Height itself is handled in CSS via
+	// `100dvh` — the viewport unit already accounts for the keyboard, so we
+	// don't need to compute it in JS (the previous approach mis-subtracted
+	// `safe-area-inset-top` and cut the input off on iOS PWA).
 	$effect(() => {
 		const vv = window.visualViewport;
 		if (!vv) return;
-
-		function onResize() {
-			if (!vv || !pageContainer) return;
-			// The root layout applies padding-top: env(safe-area-inset-top),
-			// so the available height inside the layout is less than vv.height.
-			// Read the parent's padding to account for it.
-			const parent = pageContainer.parentElement;
-			const safeTop = parent ? parseInt(getComputedStyle(parent).paddingTop || '0', 10) : 0;
-			pageContainer.style.height = `${vv.height - safeTop}px`;
-			pageContainer.style.transform = `translateY(${vv.offsetTop}px)`;
-			scrollToBottom();
-		}
-
-		onResize();
+		const onResize = () => scrollToBottom();
 		vv.addEventListener('resize', onResize);
 		vv.addEventListener('scroll', onResize);
 		return () => {
@@ -773,7 +764,7 @@
 	<div
 		class="flex h-full flex-col flex-1 min-w-0"
 		class:swipe-transition={!edgeSwiping}
-		style="transform: translateX({edgeSwipeOffset}px);"
+		style="height: calc(100dvh - env(safe-area-inset-top)); transform: translateX({edgeSwipeOffset}px);"
 		bind:this={pageContainer}
 		ontouchstart={onEdgeSwipeStart}
 		ontouchmove={onEdgeSwipeMove}
