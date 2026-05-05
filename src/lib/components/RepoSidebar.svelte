@@ -200,13 +200,25 @@
 					</button>
 				{/if}
 			</div>
-			<div class="flex border border-base-300 text-[11px] flex-shrink-0">
-				{#each (['all', 'pi', 'claude-code'] as const) as v, i}
-					<button
-						class="px-2 py-0.5 {harnessFilter === v ? 'bg-base-content text-base-100 font-medium' : 'text-base-content-subtle'} {i > 0 ? 'border-l border-base-300' : ''}"
-						onclick={() => { hapticLight(); harnessFilter = v; }}
-					>{v === 'all' ? 'All' : v === 'pi' ? 'π' : '◆'}</button>
-				{/each}
+			<div class="dropdown dropdown-end flex-shrink-0">
+				<div tabindex="0" role="button" class="inline-flex items-center gap-1 border border-base-300 px-2 py-0.5 text-[11px] text-base-content-subtle normal-case tracking-normal">
+					<span class="font-medium text-base-content">{harnessFilter === 'all' ? 'All' : harnessFilter === 'pi' ? 'π' : '◆'}</span>
+					<svg class="w-2.5 h-2.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" /></svg>
+				</div>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<ul tabindex="0" class="dropdown-content menu menu-sm bg-base-100 z-50 w-36 p-1 border border-base-300 text-xs normal-case tracking-normal">
+					{#each (['all', 'pi', 'claude-code'] as const) as v}
+						<li>
+							<button
+								class="flex items-center gap-2 {harnessFilter === v ? 'bg-base-200 font-medium' : ''}"
+								onclick={() => { hapticLight(); harnessFilter = v; (document.activeElement as HTMLElement | null)?.blur(); }}
+							>
+								<span class="font-mono w-3 text-center">{v === 'all' ? '✱' : v === 'pi' ? 'π' : '◆'}</span>
+								<span>{v === 'all' ? 'All harnesses' : v === 'pi' ? 'pi' : 'Claude Code'}</span>
+							</button>
+						</li>
+					{/each}
+				</ul>
 			</div>
 		</div>
 
@@ -329,17 +341,9 @@
 	{@render content()}
 </aside>
 
-<!-- Mobile: backdrop + overlay drawer -->
-{#if mobileOpen}
-	<div
-		class="md:hidden fixed inset-0 bg-black/40 z-[60]"
-		role="presentation"
-		onclick={() => (mobileOpen = false)}
-		onkeydown={(e) => { if (e.key === 'Escape') mobileOpen = false; }}
-	></div>
-{/if}
+<!-- Mobile: full-screen overlay drawer -->
 <aside
-	class="md:hidden fixed top-0 left-0 bottom-0 w-[320px] max-w-[88vw] bg-base-100 border-r border-base-300 z-[61] mobile-drawer"
+	class="md:hidden fixed inset-0 bg-base-100 z-[61] mobile-drawer"
 	class:open={mobileOpen}
 	aria-hidden={!mobileOpen}
 	aria-label="Project navigator"
@@ -353,6 +357,7 @@
 		transition: transform 240ms cubic-bezier(0.2, 0, 0, 1);
 		padding-top: env(safe-area-inset-top);
 		padding-left: env(safe-area-inset-left);
+		padding-right: env(safe-area-inset-right);
 		padding-bottom: env(safe-area-inset-bottom);
 	}
 	.mobile-drawer.open {
