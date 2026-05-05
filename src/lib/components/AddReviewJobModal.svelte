@@ -25,7 +25,6 @@
 	let maxLoops = $state(1);
 	let skipCiChecks = $state(false);
 	let commentOnly = $state(false);
-	let comments = $state('');
 	let creating = $state(false);
 	let errorMsg = $state('');
 
@@ -41,7 +40,6 @@
 			maxLoops = 1;
 			skipCiChecks = false;
 			commentOnly = false;
-			comments = '';
 			errorMsg = '';
 		}
 	});
@@ -67,7 +65,6 @@
 					comment_only: commentOnly || undefined,
 					model: model.trim() || undefined,
 					harness,
-					description: comments.trim() || undefined,
 				}),
 			});
 
@@ -231,20 +228,6 @@
 					harness={harness}
 					placeholder="Select or type a model..."
 				/>
-			</div>
-
-			<!-- Comments for reviewer -->
-			<div class="form-control mt-3">
-				<label class="label" for="review-comments">
-					<span class="label-text">Comments (optional)</span>
-				</label>
-				<textarea
-					id="review-comments"
-					class="textarea w-full"
-					placeholder="Additional context or instructions for the reviewing agent…"
-					rows="3"
-					bind:value={comments}
-				></textarea>
 			</div>
 
 			{#if errorMsg}

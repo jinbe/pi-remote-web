@@ -207,6 +207,11 @@ export function getDb(): Database {
 			last_reviewed_at TEXT NOT NULL
 		)`);
 
+		db.run(`CREATE TABLE IF NOT EXISTS app_settings (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`);
+
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_parent ON jobs(parent_job_id)');

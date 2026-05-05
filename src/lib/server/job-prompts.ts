@@ -13,6 +13,7 @@
  */
 import type { Job } from './job-queue';
 import type { PrAnalysis } from './pr-analysis';
+import { getSetting } from './app-settings';
 
 // --- Skill configuration from environment ---
 
@@ -138,6 +139,15 @@ export function buildReviewPrompt(job: Job, _harness: string = 'pi', analysis?: 
 	if (job.pr_url) parts.push(`PR: ${job.pr_url}`);
 
 	parts.push('');
+	parts.push('=== REVIEW GROUND RULES ===');
+	parts.push('Focus on the code itself. Do NOT treat the following as blocking issues:');
+	parts.push('- Wording, tone, or completeness of the PR title or description');
+	parts.push('- Inconsistencies between code comments and the code (the code is the source of truth)');
+	parts.push('- Missing or stale documentation outside the diff');
+	parts.push('You may mention these as nits if useful, but they must not drive a changes_requested verdict.');
+	parts.push('===========================');
+
+	parts.push('');
 	parts.push('=== PR CONVERSATION CONTEXT ===');
 	parts.push('Before finalizing your review, read through the existing PR comments and conversation.');
 	parts.push('Pay close attention to messages that directly address or respond to previously raised issues.');
@@ -177,6 +187,12 @@ export function buildReviewPrompt(job: Job, _harness: string = 'pi', analysis?: 
 	parts.push('');
 	parts.push('These are machine-parsed markers. Do NOT paraphrase, reword, or wrap in a code block.');
 	parts.push('=================================');
+
+	const personal = getSetting('personal_review_prompt');
+	if (personal) {
+		parts.push('');
+		parts.push(personal);
+	}
 
 	return parts.join('\n');
 }

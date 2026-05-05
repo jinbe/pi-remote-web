@@ -5,6 +5,7 @@
 	import AddJobModal from '$lib/components/AddJobModal.svelte';
 	import AddReviewJobModal from '$lib/components/AddReviewJobModal.svelte';
 	import AddRepoModal from '$lib/components/AddRepoModal.svelte';
+	import SettingsModal from '$lib/components/SettingsModal.svelte';
 	import MonitoredRepos from '$lib/components/MonitoredRepos.svelte';
 	import JobChain from '$lib/components/JobChain.svelte';
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
@@ -57,6 +58,7 @@
 	let showAddJob = $state(false);
 	let showAddReviewJob = $state(false);
 	let showAddRepo = $state(false);
+	let showSettings = $state(false);
 	let prMonitorOpen = $state(false);
 
 	// Expanded job for detail view
@@ -633,6 +635,11 @@
 							{#if theme === 'dark'}<Icon name="sun" class="w-4 h-4" /> Light Mode{:else}<Icon name="moon" class="w-4 h-4" /> Dark Mode{/if}
 						</button>
 					</li>
+					<li>
+						<button onclick={() => { hapticLight(); showSettings = true; }}>
+							<Icon name="cog" class="w-4 h-4" /> Settings
+						</button>
+					</li>
 					{#if finishedCount > 0}
 						<div class="divider my-0"></div>
 						<li>
@@ -728,6 +735,11 @@
 <AddRepoModal
 	open={showAddRepo}
 	onclose={() => (showAddRepo = false)}
+/>
+
+<SettingsModal
+	open={showSettings}
+	onclose={() => (showSettings = false)}
 />
 
 <!-- Monitored Repos drawer (right) -->
