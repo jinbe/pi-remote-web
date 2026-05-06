@@ -386,6 +386,11 @@
 	<header class="mb-4 flex items-center justify-between gap-4">
 		<div class="flex items-center gap-4">
 			<PiWordmark height={22} />
+			<span class="hidden sm:inline-block w-px h-4 bg-base-300"></span>
+			<a href="/worktrees" class="btn btn-sm btn-ghost gap-1" title="View worktrees and tasks">
+				<span class="opacity-60 inline-flex"><Icon name="folder" class="w-4 h-4" /></span>
+				<span>Worktrees</span>
+			</a>
 			{#if data.jobs.length > 0 || data.pollerRunning}
 				<span class="hidden sm:inline-block w-px h-4 bg-base-300"></span>
 				<a href="/jobs" class="btn btn-sm btn-ghost gap-1" title="View all jobs">
