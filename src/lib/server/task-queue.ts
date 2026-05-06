@@ -43,6 +43,7 @@ export interface Task {
 	external_loop_count: number;
 	triage_plan_json: string | null;
 	error: string | null;
+	last_external_review_id: string | null;
 	created_at: string;
 	completed_at: string | null;
 }
@@ -66,6 +67,7 @@ export interface UpdateTaskInput {
 	external_loop_count?: number;
 	triage_plan_json?: string | null;
 	error?: string | null;
+	last_external_review_id?: string | null;
 }
 
 const ACTIVE_STAGES: TaskStage[] = [

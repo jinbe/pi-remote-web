@@ -4,6 +4,7 @@ import { recoverActiveSessions } from './rpc-manager';
 import { startWatching } from './session-watcher';
 import { start as startJobPoller } from './job-poller';
 import { start as startPrPoller } from './github-pr-poller';
+import { start as startTaskPrPoller } from './task-pr-poller';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -38,6 +39,9 @@ export async function ensureInit() {
 
 	// Start the GitHub PR poller (scans monitored repos for open PRs)
 	startPrPoller();
+
+	// Start the task PR poller (watches bot-authored task PRs for review events)
+	startTaskPrPoller();
 
 	console.log('Pi Dashboard initialized');
 }

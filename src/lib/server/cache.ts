@@ -231,6 +231,11 @@ export function getDb(): Database {
 			completed_at TEXT
 		)`);
 
+		// last_external_review_id tracks the most-recent GitHub review id we have
+		// already acted on for this task. Used by the task-pr-poller to skip reviews
+		// it has previously consumed.
+		try { db.run('ALTER TABLE tasks ADD COLUMN last_external_review_id TEXT'); } catch {}
+
 		db.run('CREATE INDEX IF NOT EXISTS idx_worktrees_status ON worktrees(status)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_worktrees_repo ON worktrees(repo)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_tasks_worktree ON tasks(worktree_id, position)');
