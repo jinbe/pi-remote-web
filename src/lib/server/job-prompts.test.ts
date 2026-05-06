@@ -39,6 +39,8 @@ function makeJob(overrides?: Partial<Job>): Job {
 		review_prompt: null,
 		skip_ci_checks: 0,
 		comment_only: 0,
+		task_id: null,
+		stage_kind: null,
 		...overrides,
 	};
 }

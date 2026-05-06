@@ -12,6 +12,15 @@ import { log } from './logger';
 import { getDb } from './cache';
 import { existsSync } from 'fs';
 import { arePrChecksReady } from './gh-utils';
+import { getTask, transitionStage, updateTask, type Task } from './task-queue';
+import { getWorktree } from './worktree-manager';
+import {
+	buildPromptForStage,
+	resumeDevForInternalFix,
+	spawnInternalReviewJob,
+	type StageKind,
+} from './task-orchestrator';
+import { BRANCH_PUSHED_PATTERN, FIX_PUSHED_PATTERN, ABORT_TASK_PATTERN, TRIAGE_PLAN_PATTERN } from './task-prompts';
 
 // --- Constants ---
 
@@ -180,6 +189,13 @@ export async function pollOnce(): Promise<void> {
  * Create a Pi session in the repo directory and send the prompt.
  */
 async function dispatchJob(job: Job): Promise<void> {
+	// Task-system jobs (stage_kind set) take the task-aware path. Legacy/orphan
+	// jobs (stage_kind NULL) fall through to the original task/review dispatch.
+	if (job.stage_kind) {
+		await dispatchTaskJob(job);
+		return;
+	}
+
 	const isReview = job.type === 'review';
 
 	try {
@@ -235,6 +251,53 @@ async function dispatchJob(job: Job): Promise<void> {
 			status: 'failed',
 			error: `Dispatch failed: ${err.message}`,
 		});
+	}
+}
+
+/**
+ * Dispatch a task-system job (stage_kind set). Reads the linked task + worktree,
+ * builds the stage-specific prompt, opens a session in the worktree dir, and sends.
+ *
+ * For dev jobs the session id is also persisted on the task as current_session_id
+ * so subsequent fix loops can resume the same agent session.
+ */
+async function dispatchTaskJob(job: Job): Promise<void> {
+	try {
+		if (!job.task_id || !job.stage_kind) {
+			throw new Error(`task-job ${job.id} missing task_id or stage_kind`);
+		}
+		const task = getTask(job.task_id);
+		if (!task) throw new Error(`task ${job.task_id} not found for job ${job.id}`);
+		const wt = getWorktree(task.worktree_id);
+		if (!wt) throw new Error(`worktree ${task.worktree_id} not found`);
+		if (!existsSync(wt.dir_path)) throw new Error(`worktree dir missing: ${wt.dir_path}`);
+
+		const harness = (job.harness as HarnessType) || getHarness();
+		const extraArgs = job.stage_kind === 'internal_review' || job.stage_kind === 'triage'
+			? leanFlagsForHarness(harness)
+			: [];
+
+		updateJobStatus(job.id, { status: 'running' });
+
+		const sessionId = await createSession(wt.dir_path, job.model ?? undefined, harness, extraArgs);
+		updateJobStatus(job.id, { session_id: sessionId });
+		// Persist the session on the task so the orchestrator can resume it for fix loops.
+		updateTask(task.id, { current_session_id: sessionId });
+
+		const prompt = buildPromptForStage(job.stage_kind as StageKind, task, wt);
+		await sendMessage(sessionId, prompt);
+
+		log.info('job-poller', `dispatched task-job ${job.id} (${job.stage_kind}) → session ${sessionId}`);
+	} catch (err: any) {
+		log.error('job-poller', `failed to dispatch task-job ${job.id}: ${err.message}`);
+		updateJobStatus(job.id, { status: 'failed', error: `Dispatch failed: ${err.message}` });
+		if (job.task_id) {
+			try {
+				transitionStage(job.task_id, 'failed', { error: `Dispatch failed: ${err.message}` });
+			} catch (e) {
+				log.warn('job-poller', `failed to transition task ${job.task_id} to failed: ${e}`);
+			}
+		}
 	}
 }
 
@@ -296,6 +359,12 @@ async function _handleJobAgentEndInner(jobId: string, assistantText: string): Pr
 		// Terminal states — no transitions
 		if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') {
 			log.info('job-poller', `agent_end for job ${jobId} but status is already '${job.status}' — no action`);
+			return;
+		}
+
+		// Task-system jobs route through the task-aware handler.
+		if (job.stage_kind && job.task_id) {
+			await handleTaskJobAgentEnd(job, assistantText);
 			return;
 		}
 
@@ -554,6 +623,119 @@ async function stopJobSession(job: Job): Promise<void> {
 		log.info('job-poller', `stopped session ${job.session_id} for job ${job.id}`);
 	} catch (err) {
 		log.warn('job-poller', `failed to stop session ${job.session_id}: ${err}`);
+	}
+}
+
+// --- Task-system agent_end handler ---
+
+/**
+ * Handle agent_end for a stage-kind job. Branches on the job's stage_kind and
+ * advances the task per the stage's output marker.
+ *
+ * Stage transitions driven here:
+ *   dev (BRANCH_PUSHED)         → spawn internal_review
+ *   internal_review (VERDICT)   → approved: store PR_URL, transition to external_review
+ *                               → changes_requested: resume dev session with fix prompt
+ *   triage (TRIAGE_PLAN)        → transition to awaiting_merge
+ *   any (ABORT_TASK)            → fail the task (halts worktree)
+ *
+ * Planning jobs do NOT transition on agent_end — completion is user-driven via
+ * the accept-plan API endpoint.
+ */
+async function handleTaskJobAgentEnd(job: Job, assistantText: string): Promise<void> {
+	if (!job.task_id || !job.stage_kind) return;
+	const task = getTask(job.task_id);
+	if (!task) {
+		log.warn('job-poller', `task-job ${job.id} references missing task ${job.task_id}`);
+		return;
+	}
+
+	// ABORT_TASK applies to any stage and immediately fails the task.
+	const abort = assistantText.match(ABORT_TASK_PATTERN);
+	if (abort) {
+		const reason = abort[1].trim();
+		updateJobStatus(job.id, { status: 'failed', error: `agent abort: ${reason}` });
+		await stopJobSession(job);
+		try {
+			transitionStage(task.id, 'failed', { error: `Agent aborted: ${reason}` });
+		} catch (err) {
+			log.warn('job-poller', `failed to transition task ${task.id} to failed: ${err}`);
+		}
+		return;
+	}
+
+	switch (job.stage_kind) {
+		case 'planning':
+			// Planning is user-driven. agent_end here just means the agent paused;
+			// we leave the job running for the user to resume the chat.
+			log.info('job-poller', `planning job ${job.id} agent_end (user will resume or accept)`);
+			return;
+
+		case 'dev': {
+			const branchPushed = assistantText.match(BRANCH_PUSHED_PATTERN);
+			if (!branchPushed) {
+				log.warn('job-poller', `dev job ${job.id} agent_end without BRANCH_PUSHED marker`);
+				return;
+			}
+			const branch = branchPushed[1];
+			updateJobStatus(job.id, { status: 'done', result_summary: `Branch pushed: ${branch}` });
+			updateTask(task.id, { branch, current_job_id: null });
+			transitionStage(task.id, 'internal_review');
+			spawnInternalReviewJob(task.id);
+			return;
+		}
+
+		case 'internal_review': {
+			const verdictMatch = assistantText.match(/VERDICT:\s*(approved|changes_requested)/);
+			if (!verdictMatch) {
+				log.warn('job-poller', `internal_review job ${job.id} agent_end without VERDICT marker`);
+				return;
+			}
+			const verdict = verdictMatch[1] as 'approved' | 'changes_requested';
+			updateJobStatus(job.id, { status: 'done', review_verdict: verdict });
+			await stopJobSession(job);
+
+			if (verdict === 'approved') {
+				const prUrlMatch = assistantText.match(/PR_URL:\s*(\S+)/);
+				if (!prUrlMatch) {
+					log.warn('job-poller', `internal_review approved but no PR_URL marker — failing task ${task.id}`);
+					transitionStage(task.id, 'failed', { error: 'Internal review approved but no PR_URL emitted' });
+					return;
+				}
+				const prUrl = prUrlMatch[1];
+				const prNumMatch = prUrl.match(/\/pull\/(\d+)/);
+				const prNumber = prNumMatch ? parseInt(prNumMatch[1], 10) : undefined;
+				updateTask(task.id, { current_pr_url: prUrl, current_pr_number: prNumber ?? null, current_job_id: null });
+				transitionStage(task.id, 'external_review', { pr_url: prUrl, pr_number: prNumber });
+			} else {
+				// changes_requested: resume dev session with fix prompt
+				try {
+					await resumeDevForInternalFix(task.id, assistantText);
+				} catch (err) {
+					log.warn('job-poller', `failed to resume dev for task ${task.id}: ${err}`);
+					transitionStage(task.id, 'failed', { error: `Failed to resume dev: ${err}` });
+				}
+			}
+			return;
+		}
+
+		case 'triage': {
+			const planMatch = assistantText.match(TRIAGE_PLAN_PATTERN);
+			if (!planMatch) {
+				log.warn('job-poller', `triage job ${job.id} agent_end without TRIAGE_PLAN marker`);
+				return;
+			}
+			updateJobStatus(job.id, { status: 'done', result_summary: 'Triage complete' });
+			await stopJobSession(job);
+			updateTask(task.id, { triage_plan_json: planMatch[1].trim(), current_job_id: null });
+			transitionStage(task.id, 'awaiting_merge');
+			return;
+		}
+
+		default: {
+			const _exhaustive: never = job.stage_kind as never;
+			log.warn('job-poller', `unknown stage_kind ${_exhaustive} on job ${job.id}`);
+		}
 	}
 }
 

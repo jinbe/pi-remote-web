@@ -43,6 +43,8 @@ export interface Job {
 	review_prompt: string | null;
 	skip_ci_checks: number;
 	comment_only: number;
+	task_id: string | null;
+	stage_kind: 'planning' | 'dev' | 'internal_review' | 'triage' | null;
 }
 
 export interface CreateJobInput {
