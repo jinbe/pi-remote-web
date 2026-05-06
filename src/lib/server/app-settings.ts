@@ -4,7 +4,10 @@
  */
 import { getDb } from './cache';
 
-export type SettingKey = 'personal_review_prompt';
+export type SettingKey =
+	| 'personal_review_prompt'
+	| 'vapid_public_key'
+	| 'vapid_private_key';
 
 export function getSetting(key: SettingKey): string {
 	const row = getDb()

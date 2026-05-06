@@ -6,7 +6,8 @@
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import AddTaskModal from '$lib/components/AddTaskModal.svelte';
 	import PiWordmark from '$lib/components/PiWordmark.svelte';
-	import { getContext } from 'svelte';
+	import { enablePush, disablePush, getPushState, type PushState } from '$lib/push-client';
+	import { getContext, onMount } from 'svelte';
 
 	interface Worktree {
 		id: string;
@@ -47,6 +48,8 @@
 	const { theme, toggleTheme } = getContext<{ theme: 'dark' | 'light'; toggleTheme: () => void }>('theme');
 
 	let showAdd = $state(false);
+	let pushState = $state<PushState>('unsupported');
+	let pushBusy = $state(false);
 	let acceptingTaskId = $state<string | null>(null);
 	let acceptDescription = $state('');
 	let acceptBusy = $state(false);
@@ -156,6 +159,25 @@
 		invalidateAll();
 	}
 
+	onMount(async () => {
+		pushState = await getPushState();
+	});
+
+	async function togglePush() {
+		if (pushBusy) return;
+		pushBusy = true;
+		try {
+			if (pushState === 'subscribed') {
+				await disablePush();
+			} else {
+				await enablePush();
+			}
+			pushState = await getPushState();
+		} finally {
+			pushBusy = false;
+		}
+	}
+
 	// Auto-refresh on session/job events.
 	$effect(() => {
 		let timer: ReturnType<typeof setTimeout> | null = null;
@@ -180,6 +202,17 @@
 				<Icon name="hammer" class="w-4 h-4" />
 				<span class="hidden sm:inline">Jobs</span>
 			</a>
+			{#if pushState !== 'unsupported' && pushState !== 'denied'}
+				<button
+					class="btn btn-sm btn-ghost gap-1"
+					onclick={togglePush}
+					disabled={pushBusy}
+					title={pushState === 'subscribed' ? 'Disable notifications' : 'Enable notifications'}
+				>
+					<Icon name={pushState === 'subscribed' ? 'bell' : 'bell-off'} class="w-4 h-4" />
+					<span class="hidden sm:inline">{pushState === 'subscribed' ? 'On' : 'Off'}</span>
+				</button>
+			{/if}
 			<button class="btn btn-sm btn-primary gap-1" onclick={() => { hapticMedium(); showAdd = true; }}>
 				<Icon name="plus" class="w-4 h-4" />
 				<span class="hidden sm:inline">New task</span>

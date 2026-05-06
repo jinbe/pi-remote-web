@@ -21,6 +21,7 @@ import {
 	type StageKind,
 } from './task-orchestrator';
 import { BRANCH_PUSHED_PATTERN, FIX_PUSHED_PATTERN, ABORT_TASK_PATTERN, TRIAGE_PLAN_PATTERN } from './task-prompts';
+import { notify } from './push';
 
 // --- Constants ---
 
@@ -729,6 +730,12 @@ async function handleTaskJobAgentEnd(job: Job, assistantText: string): Promise<v
 			await stopJobSession(job);
 			updateTask(task.id, { triage_plan_json: planMatch[1].trim(), current_job_id: null });
 			transitionStage(task.id, 'awaiting_merge');
+			notify({
+				title: 'Ready to merge',
+				body: `${task.title}${task.current_pr_url ? ` — ${task.current_pr_url}` : ''}`,
+				url: task.current_pr_url ?? '/worktrees',
+				tag: `merge:${task.id}`,
+			}).catch(() => {});
 			return;
 		}
 

@@ -10,6 +10,7 @@ import { join, basename, dirname } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { getDb } from './cache';
 import { log } from './logger';
+import { notify } from './push';
 
 // --- Types ---
 
@@ -227,7 +228,15 @@ export function haltWorktree(id: string, reason: string): Worktree | null {
 		UPDATE worktrees SET status = 'halted', halt_reason = ?, last_activity_at = datetime('now')
 		WHERE id = ? AND status = 'active' RETURNING *
 	`).get(reason, id) as Worktree | null;
-	if (row) log.warn('worktree-manager', `halted worktree ${id}: ${reason}`);
+	if (row) {
+		log.warn('worktree-manager', `halted worktree ${id}: ${reason}`);
+		notify({
+			title: `Worktree halted: ${row.slug}`,
+			body: reason,
+			url: '/worktrees',
+			tag: `halt:${row.id}`,
+		}).catch(() => {});
+	}
 	return row;
 }
 

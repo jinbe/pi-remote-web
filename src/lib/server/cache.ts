@@ -243,6 +243,16 @@ export function getDb(): Database {
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_task ON jobs(task_id)');
 		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_stage_kind ON jobs(stage_kind)');
 
+		// Web Push subscriptions. Keyed by endpoint (unique per browser+device).
+		db.run(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+			endpoint TEXT PRIMARY KEY,
+			p256dh TEXT NOT NULL,
+			auth TEXT NOT NULL,
+			user_agent TEXT,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`);
+
 		db.run(`CREATE TABLE IF NOT EXISTS monitored_repos (
 			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
 			owner TEXT NOT NULL,

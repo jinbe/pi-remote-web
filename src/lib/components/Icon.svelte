@@ -3,7 +3,7 @@
   Usage: <Icon name="cog" class="w-4 h-4" />
 -->
 <script lang="ts">
-	export type IconName = 'clock' | 'lock' | 'bolt' | 'hammer' | 'search' | 'target' | 'paperclip' | 'cog' | 'document' | 'pencil' | 'save' | 'sun' | 'moon' | 'circle-green' | 'circle-red' | 'check-circle' | 'play-pause' | 'stop-circle' | 'play' | 'stop' | 'compress' | 'close' | 'check' | 'chevron-right' | 'plus' | 'arrow-left' | 'arrow-down' | 'refresh' | 'dash' | 'enter' | 'star-filled' | 'star-outline' | 'more-vertical' | 'warning' | 'folder' | 'trash';
+	export type IconName = 'clock' | 'lock' | 'bolt' | 'hammer' | 'search' | 'target' | 'paperclip' | 'cog' | 'document' | 'pencil' | 'save' | 'sun' | 'moon' | 'circle-green' | 'circle-red' | 'check-circle' | 'play-pause' | 'stop-circle' | 'play' | 'stop' | 'compress' | 'close' | 'check' | 'chevron-right' | 'plus' | 'arrow-left' | 'arrow-down' | 'refresh' | 'dash' | 'enter' | 'star-filled' | 'star-outline' | 'more-vertical' | 'warning' | 'folder' | 'trash' | 'bell' | 'bell-off';
 	let { name, class: className = 'w-4 h-4' }: { name: IconName; class?: string } = $props();
 </script>
 
@@ -192,6 +192,16 @@
 	<!-- 🗑 Delete -->
 	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 		<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+	</svg>
+{:else if name === 'bell'}
+	<!-- 🔔 Notifications enabled -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+	</svg>
+{:else if name === 'bell-off'}
+	<!-- 🔕 Notifications disabled -->
+	<svg class={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+		<path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18M13.73 21a2 2 0 01-3.46 0M18.63 13.5A17.89 17.89 0 0118 11a6 6 0 00-9.33-5M6 9c0 2.22-.4 3.62-1 4.5L4 17h13" />
 	</svg>
 {:else}
 	<!-- Fallback for unrecognised icon names -->
