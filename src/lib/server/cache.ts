@@ -184,6 +184,60 @@ export function getDb(): Database {
 			db.run('CREATE INDEX idx_jobs_created ON jobs(created_at)');
 		}
 
+		// Task-system columns on jobs. Added after the rebuild block so they survive
+		// even if the rebuild fires (its column-intersection would otherwise drop them).
+		// Legacy/orphan jobs leave task_id and stage_kind NULL.
+		try { db.run('ALTER TABLE jobs ADD COLUMN task_id TEXT'); } catch {}
+		try { db.run('ALTER TABLE jobs ADD COLUMN stage_kind TEXT'); } catch {}
+
+		// Worktrees: parallelism units. Each worktree owns a serial queue of tasks
+		// and has a real on-disk git worktree. Lifecycle: active → paused | halted | closed.
+		db.run(`CREATE TABLE IF NOT EXISTS worktrees (
+			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+			repo TEXT NOT NULL,
+			dir_path TEXT NOT NULL,
+			base_branch TEXT NOT NULL DEFAULT 'main',
+			slug TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			halt_reason TEXT,
+			external_loop_cap INTEGER NOT NULL DEFAULT 3,
+			internal_loop_cap INTEGER NOT NULL DEFAULT 3,
+			auto_merge INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			closed_at TEXT,
+			last_activity_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`);
+
+		// Tasks: work units inside a worktree. position determines serial queue order.
+		// stage tracks the lifecycle phase; current_*_id columns point at the active job/session.
+		db.run(`CREATE TABLE IF NOT EXISTS tasks (
+			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+			worktree_id TEXT NOT NULL REFERENCES worktrees(id),
+			title TEXT NOT NULL,
+			description TEXT,
+			source_url TEXT,
+			position INTEGER NOT NULL,
+			stage TEXT NOT NULL DEFAULT 'planning',
+			current_pr_url TEXT,
+			current_pr_number INTEGER,
+			branch TEXT,
+			current_session_id TEXT,
+			current_job_id TEXT,
+			internal_loop_count INTEGER NOT NULL DEFAULT 0,
+			external_loop_count INTEGER NOT NULL DEFAULT 0,
+			triage_plan_json TEXT,
+			error TEXT,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			completed_at TEXT
+		)`);
+
+		db.run('CREATE INDEX IF NOT EXISTS idx_worktrees_status ON worktrees(status)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_worktrees_repo ON worktrees(repo)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_tasks_worktree ON tasks(worktree_id, position)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_tasks_stage ON tasks(stage)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_task ON jobs(task_id)');
+		db.run('CREATE INDEX IF NOT EXISTS idx_jobs_stage_kind ON jobs(stage_kind)');
+
 		db.run(`CREATE TABLE IF NOT EXISTS monitored_repos (
 			id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
 			owner TEXT NOT NULL,
