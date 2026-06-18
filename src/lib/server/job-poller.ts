@@ -226,7 +226,9 @@ async function dispatchJob(job: Job): Promise<void> {
 		// Review sessions use lean flags to skip unnecessary startup overhead
 		const extraArgs = isReview ? leanFlagsForHarness(jobHarness) : [];
 
-		const sessionId = await createSession(sessionCwd, job.model ?? undefined, jobHarness, extraArgs);
+		// Explicit per-job model wins; otherwise review jobs may fall back to PI_REVIEW_MODEL.
+		const sessionModel = job.model ?? (isReview ? reviewModelOverride() : undefined);
+		const sessionId = await createSession(sessionCwd, sessionModel, jobHarness, extraArgs);
 
 		// Update job with session ID
 		updateJobStatus(job.id, { session_id: sessionId });
@@ -280,7 +282,9 @@ async function dispatchTaskJob(job: Job): Promise<void> {
 
 		updateJobStatus(job.id, { status: 'running' });
 
-		const sessionId = await createSession(wt.dir_path, job.model ?? undefined, harness, extraArgs);
+		// Explicit per-job model wins; otherwise the main review stage may fall back to PI_REVIEW_MODEL.
+		const sessionModel = job.model ?? (job.stage_kind === 'internal_review' ? reviewModelOverride() : undefined);
+		const sessionId = await createSession(wt.dir_path, sessionModel, harness, extraArgs);
 		updateJobStatus(job.id, { session_id: sessionId });
 		// Persist the session on the task so the orchestrator can resume it for fix loops.
 		updateTask(task.id, { current_session_id: sessionId });
@@ -300,6 +304,16 @@ async function dispatchTaskJob(job: Job): Promise<void> {
 			}
 		}
 	}
+}
+
+/**
+ * Optional model override for the main review step. When PI_REVIEW_MODEL is set,
+ * review jobs that don't already pin an explicit model run on it instead of the
+ * harness default. Lets the review run on e.g. an OpenRouter-hosted model (GLM)
+ * via pi while normal task jobs keep the harness default.
+ */
+function reviewModelOverride(): string | undefined {
+	return process.env.PI_REVIEW_MODEL || undefined;
 }
 
 /**
