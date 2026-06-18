@@ -160,6 +160,47 @@ export function claimNextJob(): Job | null {
 }
 
 /**
+ * Atomically claim a specific queued job by id (queued → claimed). Powers the
+ * "run now" path, which force-dispatches one job outside the normal poll order.
+ * Returns the claimed job, or null if it does not exist or is no longer queued
+ * (e.g. the background poller claimed it first — the atomic WHERE clause makes
+ * this race safe).
+ */
+export function claimJobById(id: string): Job | null {
+	const row = getDb().query(`
+		UPDATE jobs
+		SET status = 'claimed', claimed_at = datetime('now'), updated_at = datetime('now')
+		WHERE id = ? AND status = 'queued'
+		RETURNING *
+	`).get(id) as Job | null;
+	if (row) {
+		log.info('job-queue', `claimed job ${row.id} by id (${row.type}): ${row.title}`);
+		emitJobEvent({ type: 'job_updated', jobId: row.id, status: row.status });
+	}
+	return row;
+}
+
+/**
+ * Re-queue a job stranded in 'claimed' with no session (orphaned mid-dispatch).
+ * Atomic and guarded on status='claimed', so among concurrent callers only one
+ * wins — the status change is the ownership point. Returns the job, or null if
+ * it isn't an orphaned claimed job (already has a session, or status changed).
+ */
+export function requeueClaimedJob(id: string): Job | null {
+	const row = getDb().query(`
+		UPDATE jobs
+		SET status = 'queued', claimed_at = NULL, updated_at = datetime('now')
+		WHERE id = ? AND status = 'claimed' AND session_id IS NULL
+		RETURNING *
+	`).get(id) as Job | null;
+	if (row) {
+		log.info('job-queue', `re-queued orphaned claimed job ${row.id} (${row.type})`);
+		emitJobEvent({ type: 'job_updated', jobId: row.id, status: row.status });
+	}
+	return row;
+}
+
+/**
  * Update a job's status and optional fields.
  */
 export function updateJobStatus(id: string, updates: UpdateJobInput): Job | null {

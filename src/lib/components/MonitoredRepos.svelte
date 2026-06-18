@@ -24,6 +24,7 @@
 		pollIntervalMs,
 		concurrency,
 		onaddrepo,
+		onedit,
 		open = false,
 		ontoggle,
 		headerless = false,
@@ -33,9 +34,10 @@
 		pollIntervalMs: number;
 		concurrency: number;
 		onaddrepo?: () => void;
+		onedit?: (repo: MonitoredRepo) => void;
 		open?: boolean;
 		ontoggle?: (open: boolean) => void;
-		/** When true, hide the accordion header — caller is in charge of layout (e.g. drawer). */
+		/** When true, hide the accordion header, caller is in charge of layout (e.g. drawer). */
 		headerless?: boolean;
 	} = $props();
 
@@ -69,6 +71,11 @@
 		} catch (e) {
 			console.error('Failed to delete repo:', e);
 		}
+	}
+
+	async function confirmDeleteRepo(repo: MonitoredRepo) {
+		if (!confirm(`Delete ${repo.owner}/${repo.name} from monitored repos?`)) return;
+		await deleteRepo(repo.id);
 	}
 
 	async function scanRepo(repoId: string) {
@@ -237,7 +244,7 @@
 							<button
 								class="badge badge-xs cursor-pointer {repo.assigned_only ? 'badge-primary' : 'badge-ghost'}"
 								onclick={() => toggleRepo(repo.id, 'assigned_only', repo.assigned_only)}
-								title={repo.assigned_only ? 'Assigned to me only — click to toggle' : 'All PRs — click to filter by assignment'}
+								title={repo.assigned_only ? 'Review-requested from me only — click to toggle' : 'All PRs — click to filter to review-requested'}
 							>
 								{repo.assigned_only ? 'Mine' : 'All'}
 							</button>
@@ -286,6 +293,28 @@
 								{:else}
 									<Icon name="search" class="w-3 h-3" />
 								{/if}
+							</button>
+
+							{#if onedit}
+								<!-- Edit button -->
+								<button
+									class="btn btn-xs btn-ghost btn-circle"
+									onclick={() => { hapticLight(); onedit?.(repo); }}
+									title="Edit local path"
+									aria-label="Edit repo"
+								>
+									<Icon name="pencil" class="w-3 h-3" />
+								</button>
+							{/if}
+
+							<!-- Delete button -->
+							<button
+								class="btn btn-xs btn-ghost btn-circle text-error/70 hover:text-error"
+								onclick={() => confirmDeleteRepo(repo)}
+								title="Delete this repo"
+								aria-label="Delete repo"
+							>
+								<Icon name="trash" class="w-3 h-3" />
 							</button>
 						</div>
 					</SwipeToDelete>

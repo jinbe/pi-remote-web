@@ -1,9 +1,9 @@
 /**
- * GitHub PR Poller — polls monitored repos for open PRs assigned to the
- * authenticated GitHub user and creates review jobs for them.
+ * GitHub PR Poller — polls monitored repos for open PRs where the
+ * authenticated GitHub user is a requested reviewer and creates review jobs.
  *
  * Repos are stored in the `monitored_repos` table with per-repo toggles:
- *   - assigned_only: only PRs assigned to the GH user (default: on)
+ *   - assigned_only: only PRs where the GH user is a requested reviewer (default: on)
  *   - manual_only: skip during automatic polling, only check on manual trigger (default: on)
  *   - enabled: master toggle (default: on)
  *
@@ -224,13 +224,18 @@ export async function getGitHubUser(): Promise<string | null> {
 }
 
 /**
- * List open PRs for a given repo. Optionally filter by assignee.
+ * List open PRs for a given repo. Optionally filter to PRs where `reviewer`
+ * is a requested reviewer.
  *
- * When `assignee` is not provided, the result is timeboxed to PRs created
+ * Note: this matches GitHub's "review requested" routing, not the "assignee"
+ * field — most teams request reviews rather than assigning PRs, so filtering
+ * by assignee misses them.
+ *
+ * When `reviewer` is not provided, the result is timeboxed to PRs created
  * within the last `PI_PR_MAX_AGE_DAYS` days (default 30) to avoid spinning
  * up reviews on stale PRs in busy repos.
  */
-export async function listOpenPrs(owner: string, name: string, assignee?: string, excludeAuthor?: string): Promise<GitHubPr[]> {
+export async function listOpenPrs(owner: string, name: string, reviewer?: string, excludeAuthor?: string): Promise<GitHubPr[]> {
 	try {
 		const args = [
 			'pr', 'list',
@@ -240,8 +245,8 @@ export async function listOpenPrs(owner: string, name: string, assignee?: string
 			'--limit', '30',
 		];
 
-		if (assignee) {
-			args.push('--assignee', assignee);
+		if (reviewer) {
+			args.push('--search', `review-requested:${reviewer}`);
 		} else {
 			// Timebox unfiltered searches so we don't review stale PRs.
 			const maxAgeDays = getPrMaxAgeDays();
@@ -506,11 +511,11 @@ export async function scanRepos(manualRepoId?: string): Promise<{ created: numbe
 			break;
 		}
 
-		const assignee = repo.assigned_only ? ghUser : undefined;
+		const reviewer = repo.assigned_only ? ghUser : undefined;
 
 		let prs: GitHubPr[];
 		try {
-			prs = await listOpenPrs(repo.owner, repo.name, assignee, ghUser);
+			prs = await listOpenPrs(repo.owner, repo.name, reviewer, ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
@@ -555,10 +560,10 @@ export async function scanAllRepos(): Promise<{ created: number; skipped: number
 			break;
 		}
 
-		const assignee = repo.assigned_only ? ghUser : undefined;
+		const reviewer = repo.assigned_only ? ghUser : undefined;
 		let prs: GitHubPr[];
 		try {
-			prs = await listOpenPrs(repo.owner, repo.name, assignee, ghUser);
+			prs = await listOpenPrs(repo.owner, repo.name, reviewer, ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;

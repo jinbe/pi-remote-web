@@ -5,6 +5,7 @@
 	import AddJobModal from '$lib/components/AddJobModal.svelte';
 	import AddReviewJobModal from '$lib/components/AddReviewJobModal.svelte';
 	import AddRepoModal from '$lib/components/AddRepoModal.svelte';
+	import EditRepoModal from '$lib/components/EditRepoModal.svelte';
 	import SettingsModal from '$lib/components/SettingsModal.svelte';
 	import MonitoredRepos from '$lib/components/MonitoredRepos.svelte';
 	import JobChain from '$lib/components/JobChain.svelte';
@@ -58,6 +59,7 @@
 	let showAddJob = $state(false);
 	let showAddReviewJob = $state(false);
 	let showAddRepo = $state(false);
+	let editingRepo = $state<any | null>(null);
 	let showSettings = $state(false);
 	let prMonitorOpen = $state(false);
 
@@ -195,6 +197,16 @@
 			invalidateAll();
 		} catch (e) {
 			console.error('Failed to retry job:', e);
+		}
+	}
+
+	async function runJobNow(jobId: string) {
+		hapticMedium();
+		try {
+			await fetch(`/api/jobs/${jobId}/run`, { method: 'POST' });
+			invalidateAll();
+		} catch (e) {
+			console.error('Failed to run job:', e);
 		}
 	}
 
@@ -509,6 +521,13 @@
 
 				<!-- Action buttons -->
 				<div class="flex gap-2 pt-1">
+					{#if job.status === 'queued' || (job.status === 'claimed' && !job.session_id)}
+						<button
+							class="btn btn-xs btn-primary btn-outline gap-1"
+							onclick={(e) => { e.stopPropagation(); runJobNow(job.id); }}
+							title={job.status === 'claimed' ? 'Stalled mid-dispatch — re-dispatch now' : 'Dispatch now, bypassing the wait for CI checks'}
+						><Icon name="bolt" class="w-3 h-3" /> Run now</button>
+					{/if}
 					{#if job.status === 'queued' || job.status === 'claimed'}
 						<button
 							class="btn btn-xs btn-error btn-outline"
@@ -737,6 +756,11 @@
 	onclose={() => (showAddRepo = false)}
 />
 
+<EditRepoModal
+	repo={editingRepo}
+	onclose={() => (editingRepo = null)}
+/>
+
 <SettingsModal
 	open={showSettings}
 	onclose={() => (showSettings = false)}
@@ -770,6 +794,7 @@
 			pollIntervalMs={data.prPollIntervalMs}
 			concurrency={data.prPollConcurrency}
 			onaddrepo={() => { showAddRepo = true; }}
+			onedit={(repo) => { editingRepo = repo; }}
 			open={true}
 			headerless={true}
 		/>

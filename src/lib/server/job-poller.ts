@@ -4,7 +4,7 @@
  * Jobs use a single-job review loop model with phase transitions:
  * queued → claimed → running → reviewing → done/failed/cancelled
  */
-import { claimNextJob, updateJobStatus, getJob, type Job } from './job-queue';
+import { claimNextJob, claimJobById, requeueClaimedJob, updateJobStatus, getJob, type Job } from './job-queue';
 import { buildTaskPrompt, buildTaskFixPrompt, buildReviewPrompt, buildNudgeVerdictPrompt } from './job-prompts';
 import { createSession, sendMessage, stopSession, isActive, getHarness, type HarnessType } from './rpc-manager';
 import { analyzePr } from './pr-analysis';
@@ -138,6 +138,39 @@ export function recoverOrphanedJobs(): void {
 	}
 }
 
+/** Re-queue jobs stuck in 'claimed' with no session for longer than this. */
+const STALE_CLAIMED_THRESHOLD_SECONDS = 60;
+
+/**
+ * Re-queue jobs stranded in 'claimed' with no session for longer than
+ * STALE_CLAIMED_THRESHOLD_SECONDS. These were orphaned mid-dispatch (e.g. a
+ * server reload between the claim and the running transition).
+ *
+ * Unlike recoverOrphanedJobs (startup only), this runs at the top of every
+ * poll, so orphans self-heal without a poller restart. The age guard avoids
+ * touching jobs that are legitimately mid-dispatch — the claimed window is
+ * normally milliseconds. A single atomic UPDATE...RETURNING (rather than
+ * SELECT-then-UPDATE) closes the gap with the manual "run now" rescue: once
+ * that bumps claimed_at, the age guard here excludes the job.
+ */
+export function recoverStaleClaimedJobs(): void {
+	const recovered = getDb().query(`
+		UPDATE jobs
+		SET status = 'queued', claimed_at = NULL, updated_at = datetime('now')
+		WHERE status = 'claimed' AND session_id IS NULL
+		  AND claimed_at IS NOT NULL
+		  AND claimed_at <= datetime('now', ?)
+		RETURNING id
+	`).all(`-${STALE_CLAIMED_THRESHOLD_SECONDS} seconds`) as { id: string }[];
+
+	for (const { id } of recovered) {
+		log.info('job-poller', `recovered stale claimed job ${id} (no session) → re-queued`);
+	}
+	if (recovered.length > 0) {
+		log.info('job-poller', `recovered ${recovered.length} stale claimed job(s)`);
+	}
+}
+
 /** Maximum number of jobs to dispatch in a single poll iteration. */
 const MAX_CONCURRENT_CLAIMS = 10;
 
@@ -153,6 +186,9 @@ export async function pollOnce(): Promise<void> {
 
 	isPolling = true;
 	try {
+		// Self-heal jobs orphaned mid-dispatch before claiming new work.
+		recoverStaleClaimedJobs();
+
 		let dispatched = 0;
 		while (dispatched < MAX_CONCURRENT_CLAIMS) {
 			const job = claimNextJob();
@@ -182,6 +218,39 @@ export async function pollOnce(): Promise<void> {
 	} finally {
 		isPolling = false;
 	}
+}
+
+/**
+ * Force-dispatch a single queued job right now, bypassing both the 30s poll
+ * cadence and the CI-ready gate. Powers the "run now" action.
+ *
+ * The job is claimed atomically so it can't race the background poller. Returns
+ * the updated job, or null if it no longer exists. Throws if the job isn't
+ * queued, or if it was already claimed elsewhere between the read and the claim.
+ */
+export async function forceDispatchJob(jobId: string): Promise<Job | null> {
+	const job = getJob(jobId);
+	if (!job) return null;
+
+	// An orphaned claimed job (stranded mid-dispatch, no session) is flipped back
+	// to queued first so the claim path below can re-take it. The atomic re-queue
+	// is the ownership point, so concurrent rescues can't double-dispatch.
+	if (job.status === 'claimed' && !job.session_id) {
+		if (!requeueClaimedJob(jobId)) {
+			throw new Error('Job is already being dispatched');
+		}
+	} else if (job.status !== 'queued') {
+		throw new Error(`Cannot run job in '${job.status}' status — only queued or stalled jobs can be run now`);
+	}
+
+	const claimed = claimJobById(jobId);
+	if (!claimed) {
+		throw new Error('Job is already being dispatched');
+	}
+
+	log.info('job-poller', `force-dispatching job ${jobId} (bypassing CI gate)`);
+	await dispatchJob(claimed);
+	return getJob(jobId);
 }
 
 // --- Job dispatch ---

@@ -30,8 +30,9 @@ mock.module('./rpc-manager', () => ({
 	getHarness: mockGetHarness,
 }));
 
-import { start, stop, isRunning, handleJobAgentEnd, recoverOrphanedJobs, _resetForTesting } from './job-poller';
+import { start, stop, isRunning, handleJobAgentEnd, recoverOrphanedJobs, recoverStaleClaimedJobs, _resetForTesting } from './job-poller';
 import { getJob, updateJobStatus } from './job-queue';
+import { getDb } from './cache';
 import { createTestJob, getTestJobs, cleanupTestJobs } from './test-helpers';
 
 describe('job-poller', () => {
@@ -481,6 +482,46 @@ describe('job-poller', () => {
 
 			expect(getJob(done.id)!.status).toBe('done');
 			expect(getJob(failed.id)!.status).toBe('failed');
+		});
+	});
+
+	describe('recoverStaleClaimedJobs', () => {
+		it('re-queues a claimed job with no session older than the threshold', () => {
+			const job = createTestJob({ title: 'Stale claimed', repo: '/repo' });
+			getDb().run(
+				`UPDATE jobs SET status = 'claimed', session_id = NULL, claimed_at = datetime('now', '-120 seconds') WHERE id = ?`,
+				[job.id]
+			);
+
+			recoverStaleClaimedJobs();
+
+			const updated = getJob(job.id)!;
+			expect(updated.status).toBe('queued');
+			expect(updated.claimed_at).toBeNull();
+		});
+
+		it('leaves a freshly claimed job alone (within threshold)', () => {
+			const job = createTestJob({ title: 'Fresh claimed', repo: '/repo' });
+			getDb().run(
+				`UPDATE jobs SET status = 'claimed', session_id = NULL, claimed_at = datetime('now') WHERE id = ?`,
+				[job.id]
+			);
+
+			recoverStaleClaimedJobs();
+
+			expect(getJob(job.id)!.status).toBe('claimed');
+		});
+
+		it('leaves a stale claimed job that has a session alone', () => {
+			const job = createTestJob({ title: 'Claimed with session', repo: '/repo' });
+			getDb().run(
+				`UPDATE jobs SET status = 'claimed', session_id = 'sess-x', claimed_at = datetime('now', '-120 seconds') WHERE id = ?`,
+				[job.id]
+			);
+
+			recoverStaleClaimedJobs();
+
+			expect(getJob(job.id)!.status).toBe('claimed');
 		});
 	});
 });

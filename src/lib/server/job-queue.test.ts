@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { claimNextJob, updateJobStatus, getJob, getJobChain, deleteJob, retryJob, findActiveJobByPrUrl, findActiveJobByIssueUrl } from './job-queue';
+import { claimNextJob, claimJobById, requeueClaimedJob, updateJobStatus, getJob, getJobChain, deleteJob, retryJob, findActiveJobByPrUrl, findActiveJobByIssueUrl } from './job-queue';
 import { createTestJob, getTestJobs, cleanupTestJobs } from './test-helpers';
 
 describe('job-queue', () => {
@@ -90,6 +90,59 @@ describe('job-queue', () => {
 			if (claimed && getTestJobs().some(j => j.id === claimed!.id)) {
 				expect(claimed!.id).toBe(high.id);
 			}
+		});
+	});
+
+	describe('claimJobById', () => {
+		it('claims a specific queued job (queued → claimed)', () => {
+			const job = createTestJob({ type: 'task', title: 'Run me now' });
+
+			const claimed = claimJobById(job.id);
+
+			expect(claimed).not.toBeNull();
+			expect(claimed!.id).toBe(job.id);
+			expect(claimed!.status).toBe('claimed');
+			expect(getJob(job.id)!.status).toBe('claimed');
+		});
+
+		it('returns null when the job is not queued (no double-claim)', () => {
+			const job = createTestJob({ type: 'task', title: 'Already running' });
+			updateJobStatus(job.id, { status: 'running' });
+
+			expect(claimJobById(job.id)).toBeNull();
+			// Status is left untouched
+			expect(getJob(job.id)!.status).toBe('running');
+		});
+
+		it('returns null for a non-existent id', () => {
+			expect(claimJobById('does-not-exist')).toBeNull();
+		});
+	});
+
+	describe('requeueClaimedJob', () => {
+		it('re-queues an orphaned claimed job (claimed, no session)', () => {
+			const job = createTestJob({ type: 'task', title: 'Orphan' });
+			claimJobById(job.id); // queued → claimed, session stays null
+
+			const requeued = requeueClaimedJob(job.id);
+
+			expect(requeued).not.toBeNull();
+			expect(requeued!.status).toBe('queued');
+			expect(requeued!.claimed_at).toBeNull();
+			expect(getJob(job.id)!.status).toBe('queued');
+		});
+
+		it('returns null when the claimed job already has a session', () => {
+			const job = createTestJob({ type: 'task', title: 'Claimed with session' });
+			updateJobStatus(job.id, { status: 'claimed', session_id: 'sess-1' });
+
+			expect(requeueClaimedJob(job.id)).toBeNull();
+			expect(getJob(job.id)!.status).toBe('claimed');
+		});
+
+		it('returns null when the job is not claimed', () => {
+			const job = createTestJob({ type: 'task', title: 'Still queued' });
+			expect(requeueClaimedJob(job.id)).toBeNull();
 		});
 	});
 
