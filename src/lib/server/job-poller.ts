@@ -386,6 +386,26 @@ function reviewModelOverride(): string | undefined {
 }
 
 /**
+ * Specific pi extensions to load for review sessions, by path. Comma-separated
+ * absolute paths to extension entry files.
+ *
+ * Reviews run with --no-extensions for a lean startup, but that only disables
+ * extension *discovery* — explicit -e paths still load. Use this when the
+ * review model is served by an extension provider (e.g. OpenRouter OAuth, whose
+ * openrouter-oauth provider comes from the pi-openrouter extension): point it at
+ * just that extension so reviews keep the lean startup while still authenticating.
+ */
+function reviewExtensionArgs(): string[] {
+	const raw = process.env.PI_REVIEW_EXTENSIONS;
+	if (!raw) return [];
+	return raw
+		.split(',')
+		.map((p) => p.trim())
+		.filter(Boolean)
+		.flatMap((p) => ['-e', p]);
+}
+
+/**
  * Return harness-specific flags to strip unnecessary startup overhead
  * for review sessions.
  */
@@ -395,8 +415,9 @@ function leanFlagsForHarness(harness: HarnessType): string[] {
 		// Omit it so that normal claude login credentials are used.
 		return [];
 	}
-	// pi: strip extensions, skills, templates, themes (keep tools for gh CLI)
-	return ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes'];
+	// pi: disable discovery of extensions/skills/templates/themes (keep tools for
+	// gh CLI). PI_REVIEW_EXTENSIONS can still load specific extensions by path.
+	return ['--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes', ...reviewExtensionArgs()];
 }
 
 /**
