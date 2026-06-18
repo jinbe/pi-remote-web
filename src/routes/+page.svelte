@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { timeAgo, shortenHome } from '$lib/utils';
+	import { timeAgo, shortenHome, formatCost } from '$lib/utils';
 	import { hapticLight, hapticMedium, hapticHeavy } from '$lib/haptics';
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
 	import SwipeToDelete from '$lib/components/SwipeToDelete.svelte';
@@ -718,7 +718,7 @@
 													{session.name || session.firstMessage || 'Empty session'}
 												</div>
 												<div class="mt-0.5 text-[11.5px] text-base-content-subtle">
-													{timeAgo(session.lastModified)} · {session.messageCount} msgs
+													{timeAgo(session.lastModified)} · {session.messageCount} msgs{#if formatCost(session.totalCost)} · {formatCost(session.totalCost)}{/if}
 												</div>
 											</div>
 											{#if session.model}

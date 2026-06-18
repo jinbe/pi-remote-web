@@ -40,6 +40,8 @@ export interface SessionMeta {
 	lastModified: Date;
 	messageCount: number;
 	model: string | null;
+	/** Summed USD cost across all messages. null when the harness doesn't record cost (e.g. Claude Code). */
+	totalCost: number | null;
 	harness?: HarnessType;
 }
 

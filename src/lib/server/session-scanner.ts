@@ -99,6 +99,7 @@ export async function parseSessionMetadata(filePath: string): Promise<ParsedSess
 	let firstMessage = '';
 	let model: string | null = null;
 	let messageCount = 0;
+	let totalCost = 0;
 
 	for (const line of lines) {
 		if (!line.trim()) continue;
@@ -118,6 +119,7 @@ export async function parseSessionMetadata(filePath: string): Promise<ParsedSess
 					break;
 				case 'message':
 					messageCount++;
+					totalCost += entry.message?.usage?.cost?.total ?? 0;
 					if (
 						!firstMessage &&
 						entry.message?.role === 'user' &&
@@ -150,6 +152,7 @@ export async function parseSessionMetadata(filePath: string): Promise<ParsedSess
 		lastModified: new Date(s.mtimeMs),
 		messageCount,
 		model,
+		totalCost,
 		harness: 'pi' as const,
 		mtime: Math.floor(s.mtimeMs),
 		size: s.size,
@@ -211,6 +214,7 @@ async function parseClaudeSessionMetadata(filePath: string, s: import('fs').Stat
 		lastModified: new Date(s.mtimeMs),
 		messageCount,
 		model,
+		totalCost: null,
 		harness: 'claude-code' as const,
 		mtime: Math.floor(s.mtimeMs),
 		size: s.size,
@@ -298,6 +302,7 @@ interface CachedMeta {
 	message_count: number;
 	last_modified: string;
 	created_at: string;
+	total_cost: number | null;
 }
 
 interface CachedMessages {
@@ -318,6 +323,7 @@ function cachedToMeta(row: CachedMeta): SessionMeta {
 		lastModified: new Date(row.last_modified),
 		messageCount: row.message_count,
 		model: row.model,
+		totalCost: row.total_cost ?? null,
 		harness: detectSessionHarness(row.file_path),
 	};
 }
@@ -352,7 +358,8 @@ export async function listSessions(): Promise<SessionMeta[]> {
 					meta.model,
 					meta.messageCount,
 					meta.lastModified.toISOString(),
-					meta.createdAt
+					meta.createdAt,
+					meta.totalCost ?? null
 				);
 				results.push(meta);
 			} catch {
@@ -383,7 +390,8 @@ async function refreshStaleEntries(paths: string[]) {
 				meta.model,
 				meta.messageCount,
 				meta.lastModified.toISOString(),
-				meta.createdAt
+				meta.createdAt,
+				meta.totalCost ?? null
 			);
 		} catch {
 			/* skip */
@@ -588,7 +596,8 @@ export async function warmAllSessions(): Promise<void> {
 					meta.model,
 					meta.messageCount,
 					meta.lastModified.toISOString(),
-					meta.createdAt
+					meta.createdAt,
+					meta.totalCost ?? null
 				);
 			} catch {
 				/* skip */

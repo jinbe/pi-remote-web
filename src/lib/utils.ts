@@ -20,6 +20,13 @@ export function timeAgo(dateStr: string): string {
 	return 'just now';
 }
 
+/** Format a USD cost for compact display. Returns null when there's nothing meaningful to show. */
+export function formatCost(cost: number | null | undefined): string | null {
+	if (cost == null || cost <= 0) return null;
+	if (cost < 0.01) return '<$0.01';
+	return '$' + cost.toFixed(2);
+}
+
 export function truncatePath(path: string, maxLen = 30): string {
 	if (!path) return '';
 	if (path.length <= maxLen) return path;

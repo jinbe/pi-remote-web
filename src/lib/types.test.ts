@@ -60,7 +60,8 @@ describe('type shapes', () => {
 			firstMessage: 'Hello',
 			lastModified: new Date(),
 			messageCount: 5,
-			model: 'anthropic/claude-3.5-sonnet'
+			model: 'anthropic/claude-3.5-sonnet',
+			totalCost: 0.42
 		};
 		expect(meta.id).toBeTruthy();
 		expect(meta.filePath).toBeTruthy();

@@ -25,8 +25,16 @@ export function getDb(): Database {
 			model         TEXT,
 			message_count INTEGER NOT NULL,
 			last_modified TEXT NOT NULL,
-			created_at    TEXT NOT NULL
+			created_at    TEXT NOT NULL,
+			total_cost    REAL
 		)`);
+
+		// Migration: add total_cost column if missing, then force existing rows
+		// stale (mtime 0) so cost backfills on next scan via refreshStaleEntries.
+		try {
+			db.run('ALTER TABLE session_meta ADD COLUMN total_cost REAL');
+			db.run('UPDATE session_meta SET mtime_ms = 0');
+		} catch {}
 
 		db.run(`CREATE TABLE IF NOT EXISTS session_messages (
 			file_path     TEXT PRIMARY KEY,
@@ -344,8 +352,8 @@ export function upsertMetaStmt() {
 	if (!_upsertMetaStmt)
 		_upsertMetaStmt = getDb().query(`
 		INSERT OR REPLACE INTO session_meta
-		(file_path, mtime_ms, size_bytes, cwd, name, first_message, model, message_count, last_modified, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(file_path, mtime_ms, size_bytes, cwd, name, first_message, model, message_count, last_modified, created_at, total_cost)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`);
 	return _upsertMetaStmt;
 }
