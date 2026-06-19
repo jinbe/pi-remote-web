@@ -14,7 +14,7 @@ export const GET: RequestHandler = async () => {
 export const POST: RequestHandler = async ({ request }) => {
 	try {
 		const body = await request.json();
-		const { owner, name, local_path, assigned_only, manual_only, enabled, comment_only, skip_ci_checks } = body;
+		const { owner, name, local_path, assigned_only, manual_only, enabled, comment_only, skip_ci_checks, include_own } = body;
 
 		if (!owner?.trim() || !name?.trim()) {
 			throw error(400, 'Owner and name are required');
@@ -29,6 +29,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			enabled: enabled !== undefined ? Boolean(enabled) : undefined,
 			comment_only: comment_only !== undefined ? Boolean(comment_only) : undefined,
 			skip_ci_checks: skip_ci_checks !== undefined ? Boolean(skip_ci_checks) : undefined,
+			include_own: include_own !== undefined ? Boolean(include_own) : undefined,
 		});
 
 		return json({ repo }, { status: 201 });

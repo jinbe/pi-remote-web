@@ -6,6 +6,9 @@
  *   - assigned_only: only PRs where the GH user is a requested reviewer (default: on)
  *   - manual_only: skip during automatic polling, only check on manual trigger (default: on)
  *   - enabled: master toggle (default: on)
+ *   - include_own: also review the user's own authored PRs (default: off). Only
+ *     meaningful when assigned_only is off, since review-requested searches never
+ *     return your own PRs.
  *
  * Per-PR review state is tracked in the `pr_review_state` table so we can
  * detect whether there are new commits or new author comments since our
@@ -49,6 +52,8 @@ export interface MonitoredRepo {
 	enabled: number;
 	comment_only: number;
 	skip_ci_checks: number;
+	/** When the repo is in "All" mode, also review the user's own PRs. */
+	include_own: number;
 	created_at: string;
 	updated_at: string;
 }
@@ -62,6 +67,7 @@ export interface CreateMonitoredRepoInput {
 	enabled?: boolean;
 	comment_only?: boolean;
 	skip_ci_checks?: boolean;
+	include_own?: boolean;
 }
 
 export interface UpdateMonitoredRepoInput {
@@ -71,6 +77,7 @@ export interface UpdateMonitoredRepoInput {
 	enabled?: boolean;
 	comment_only?: boolean;
 	skip_ci_checks?: boolean;
+	include_own?: boolean;
 }
 
 interface GitHubPr {
@@ -143,8 +150,8 @@ export function getMonitoredRepo(id: string): MonitoredRepo | null {
 
 export function createMonitoredRepo(input: CreateMonitoredRepoInput): MonitoredRepo {
 	const row = getDb().query(`
-		INSERT INTO monitored_repos (owner, name, local_path, assigned_only, manual_only, enabled, comment_only, skip_ci_checks)
-		VALUES ($owner, $name, $local_path, $assigned_only, $manual_only, $enabled, $comment_only, $skip_ci_checks)
+		INSERT INTO monitored_repos (owner, name, local_path, assigned_only, manual_only, enabled, comment_only, skip_ci_checks, include_own)
+		VALUES ($owner, $name, $local_path, $assigned_only, $manual_only, $enabled, $comment_only, $skip_ci_checks, $include_own)
 		RETURNING *
 	`).get({
 		$owner: input.owner,
@@ -155,6 +162,7 @@ export function createMonitoredRepo(input: CreateMonitoredRepoInput): MonitoredR
 		$enabled: input.enabled === false ? 0 : 1,
 		$comment_only: input.comment_only ? 1 : 0,
 		$skip_ci_checks: input.skip_ci_checks ? 1 : 0,
+		$include_own: input.include_own ? 1 : 0,
 	}) as MonitoredRepo;
 
 	log.info('github-pr-poller', `added repo ${input.owner}/${input.name}`);
@@ -188,6 +196,10 @@ export function updateMonitoredRepo(id: string, updates: UpdateMonitoredRepoInpu
 	if (updates.skip_ci_checks !== undefined) {
 		setClauses.push('skip_ci_checks = $skip_ci_checks');
 		params.$skip_ci_checks = updates.skip_ci_checks ? 1 : 0;
+	}
+	if (updates.include_own !== undefined) {
+		setClauses.push('include_own = $include_own');
+		params.$include_own = updates.include_own ? 1 : 0;
 	}
 
 	const sql = `UPDATE monitored_repos SET ${setClauses.join(', ')} WHERE id = $id RETURNING *`;
@@ -325,10 +337,11 @@ export async function shouldReviewPr(
 	prAuthor: string,
 	ghUser: string,
 	headSha: string,
-	priorState: PrReviewState | null
+	priorState: PrReviewState | null,
+	includeOwn = false
 ): Promise<{ shouldReview: boolean; reason: string }> {
-	// Belt-and-suspenders: never review your own PRs
-	if (prAuthor && prAuthor.toLowerCase() === ghUser.toLowerCase()) {
+	// Belt-and-suspenders: never review your own PRs, unless the repo opts in.
+	if (!includeOwn && prAuthor && prAuthor.toLowerCase() === ghUser.toLowerCase()) {
 		return { shouldReview: false, reason: `self-authored by ${prAuthor}` };
 	}
 
@@ -413,7 +426,7 @@ async function processPrs(
 		// Check review state — skip if already handled
 		const priorState = getPrReviewState(prUrl);
 		const { shouldReview, reason } = await shouldReviewPr(
-			repo.owner, repo.name, pr.number, prAuthor, ghUser, pr.headRefOid, priorState
+			repo.owner, repo.name, pr.number, prAuthor, ghUser, pr.headRefOid, priorState, !!repo.include_own
 		);
 		if (!shouldReview) {
 			log.info('github-pr-poller', `skipping ${repo.owner}/${repo.name}#${pr.number} — ${reason}`);
@@ -515,7 +528,7 @@ export async function scanRepos(manualRepoId?: string): Promise<{ created: numbe
 
 		let prs: GitHubPr[];
 		try {
-			prs = await listOpenPrs(repo.owner, repo.name, reviewer, ghUser);
+			prs = await listOpenPrs(repo.owner, repo.name, reviewer, repo.include_own ? undefined : ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;
@@ -563,7 +576,7 @@ export async function scanAllRepos(): Promise<{ created: number; skipped: number
 		const reviewer = repo.assigned_only ? ghUser : undefined;
 		let prs: GitHubPr[];
 		try {
-			prs = await listOpenPrs(repo.owner, repo.name, reviewer, ghUser);
+			prs = await listOpenPrs(repo.owner, repo.name, reviewer, repo.include_own ? undefined : ghUser);
 		} catch (err) {
 			log.error('github-pr-poller', `error listing PRs for ${repo.owner}/${repo.name}: ${err}`);
 			result.errors++;

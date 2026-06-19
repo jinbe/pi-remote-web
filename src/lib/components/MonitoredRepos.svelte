@@ -14,6 +14,7 @@
 		enabled: number;
 		comment_only: number;
 		skip_ci_checks: number;
+		include_own: number;
 		created_at: string;
 		updated_at: string;
 	}
@@ -49,7 +50,7 @@
 		ontoggle?.(!open);
 	}
 
-	async function toggleRepo(repoId: string, field: 'assigned_only' | 'manual_only' | 'enabled' | 'comment_only' | 'skip_ci_checks', currentValue: number) {
+	async function toggleRepo(repoId: string, field: 'assigned_only' | 'manual_only' | 'enabled' | 'comment_only' | 'skip_ci_checks' | 'include_own', currentValue: number) {
 		hapticLight();
 		try {
 			await fetch(`/api/monitored-repos/${repoId}`, {
@@ -248,6 +249,17 @@
 							>
 								{repo.assigned_only ? 'Mine' : 'All'}
 							</button>
+
+							<!-- Own-PR inclusion: only relevant in "All" mode (review-requested never returns your own PRs) -->
+							{#if !repo.assigned_only}
+								<button
+									class="badge badge-xs cursor-pointer {repo.include_own ? 'badge-primary' : 'badge-ghost'}"
+									onclick={() => toggleRepo(repo.id, 'include_own', repo.include_own)}
+									title={repo.include_own ? 'Including my own PRs — click to exclude' : 'Excluding my own PRs — click to include'}
+								>
+									{repo.include_own ? 'Incl Mine' : 'Excl Mine'}
+								</button>
+							{/if}
 
 							<button
 								class="badge badge-xs cursor-pointer {repo.manual_only ? 'badge-warning' : 'badge-success'}"

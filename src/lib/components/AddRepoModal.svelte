@@ -19,6 +19,7 @@
 	let enabled = $state(true);
 	let commentOnly = $state(false);
 	let skipCiChecks = $state(false);
+	let includeOwn = $state(false);
 	let creating = $state(false);
 	let errorMsg = $state('');
 
@@ -43,6 +44,7 @@
 			enabled = true;
 			commentOnly = false;
 			skipCiChecks = false;
+			includeOwn = false;
 			errorMsg = '';
 		}
 	});
@@ -66,6 +68,7 @@
 					enabled,
 					comment_only: commentOnly,
 					skip_ci_checks: skipCiChecks,
+					include_own: includeOwn,
 				}),
 			});
 
@@ -190,6 +193,18 @@
 						</div>
 					</label>
 				</div>
+
+				{#if !assignedOnly}
+					<div class="form-control">
+						<label class="label cursor-pointer justify-start gap-3">
+							<input type="checkbox" class="toggle toggle-primary toggle-sm" bind:checked={includeOwn} />
+							<div>
+								<span class="label-text font-medium">Include my own PRs</span>
+								<div class="text-xs text-base-content/50">Also review PRs you authored (otherwise your own PRs are skipped)</div>
+							</div>
+						</label>
+					</div>
+				{/if}
 			</div>
 
 			{#if errorMsg}

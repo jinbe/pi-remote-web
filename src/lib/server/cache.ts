@@ -277,6 +277,7 @@ export function getDb(): Database {
 		db.run('CREATE INDEX IF NOT EXISTS idx_monitored_repos_enabled ON monitored_repos(enabled)');
 		try { db.run('ALTER TABLE monitored_repos ADD COLUMN comment_only INTEGER NOT NULL DEFAULT 0'); } catch {}
 		try { db.run('ALTER TABLE monitored_repos ADD COLUMN skip_ci_checks INTEGER NOT NULL DEFAULT 0'); } catch {}
+		try { db.run('ALTER TABLE monitored_repos ADD COLUMN include_own INTEGER NOT NULL DEFAULT 0'); } catch {}
 
 		db.run(`CREATE TABLE IF NOT EXISTS pr_review_state (
 			pr_url TEXT PRIMARY KEY,

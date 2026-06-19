@@ -97,6 +97,12 @@ describe('shouldReviewPr', () => {
 		expect(result.reason).toContain('self-authored');
 	});
 
+	it('reviews self-authored PRs when includeOwn is set', async () => {
+		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, GH_USER, GH_USER, SHA_A, null, true);
+		expect(result.shouldReview).toBe(true);
+		expect(result.reason).toContain('new PR');
+	});
+
 	it('triggers review when there is no prior state (new PR)', async () => {
 		const result = await shouldReviewPr(OWNER, REPO, PR_NUM, PR_AUTHOR, GH_USER, SHA_A, null);
 		expect(result.shouldReview).toBe(true);
